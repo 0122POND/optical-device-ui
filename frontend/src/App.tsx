@@ -1,32 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 import "./App.css";
 
-// 立体っぽい「山」を作るためのサンプル関数
-function generateHillData(size = 50) {
-  const zData: number[][] = [];
-
-  for (let i = 0; i < size; i++) {
-    const row: number[] = [];
-    for (let j = 0; j < size; j++) {
-      // x, y を -1 〜 1 の範囲に正規化
-      const x = (i / (size - 1)) * 2 - 1;
-      const y = (j / (size - 1)) * 2 - 1;
-
-      // 真ん中に山が1つあるような形（ガウスっぽい）
-      const r = Math.sqrt(x * x + y * y);
-      const z = Math.exp(-4 * r * r); // r が大きいほど高さが下がる
-
-      row.push(z);
-    }
-    zData.push(row);
-  }
-
-  return zData;
-}
-
-// 新規：10円玉っぽい円盤
-function generateCoinData(size = 120) {
+// 10円玉っぽい円盤
+function generateCoinData(size = 120): (number | null)[][] {
   const zData: (number | null)[][] = [];
 
   for (let i = 0; i < size; i++) {
@@ -37,6 +14,7 @@ function generateCoinData(size = 120) {
 
       const r = Math.sqrt(x * x + y * y);
 
+      // 半径 1 より外側は「データなし」にする
       if (r > 1) {
         row.push(null);
         continue;
@@ -44,12 +22,14 @@ function generateCoinData(size = 120) {
 
       let z = 0;
 
-      z += 0.1 * (1 - r * r); // 中央のふくらみ
+      // 中央のふくらみ
+      z += 0.1 * (1 - r * r);
 
+      // 縁
       const rimInner = 0.8;
       const rimOuter = 0.95;
       if (r > rimInner && r < rimOuter) {
-        z += 0.15; // 縁
+        z += 0.15;
       }
 
       row.push(z);
@@ -60,24 +40,31 @@ function generateCoinData(size = 120) {
   return zData;
 }
 
-// ノイズを加える関数
-function addNoise(zData: number[][], amplitude = 0.05) {
+// ノイズを加える（null はそのまま残す）
+function addNoise(
+  zData: (number | null)[][],
+  amplitude = 0.05
+): (number | null)[][] {
   return zData.map(row =>
-    row.map(z => z + (Math.random() - 0.5) * amplitude)
+    row.map(z =>
+      z === null ? null : z + (Math.random() - 0.5) * amplitude
+    )
   );
 }
 
 function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
 
+  // 軸表示フラグ（true = 表示 / false = 非表示）
+  const [axisVisible, setAxisVisible] = useState(true);
+
   useEffect(() => {
     if (!plotRef.current) return;
 
-    // 簡単なサンプル高さデータ（3x3 のグリッド）
+    // データ生成
     let zData = generateCoinData(80);
-    zData = addNoise(zData as number[][], 0.03); // 0.1 はノイズ量、後で調整できる
+    zData = addNoise(zData, 0.1);
 
-    // 型はいったん "any" 扱いでOK
     const data = [
       {
         z: zData,
@@ -86,16 +73,31 @@ function App() {
     ];
 
     const layout = {
-      title: "Sample 3D Surface",
+      title: "Sample 3D Coin-like Surface",
       autosize: true,
       scene: {
-        xaxis: { title: "X" },
-        yaxis: { title: "Y" },
-        zaxis: { title: "Height" },
+        xaxis: {
+          title: axisVisible ? "X" : "",
+          visible: axisVisible,
+          showgrid: axisVisible,
+          zeroline: axisVisible,
+        },
+        yaxis: {
+          title: axisVisible ? "Y" : "",
+          visible: axisVisible,
+          showgrid: axisVisible,
+          zeroline: axisVisible,
+        },
+        zaxis: {
+          title: axisVisible ? "Height" : "",
+          visible: axisVisible,
+          showgrid: axisVisible,
+          zeroline: axisVisible,
+        },
       },
     };
 
-    // TypeScript に「細かい型は気にしないでOK」と教える
+    // 軸表示フラグが変わるたびに再描画
     Plotly.newPlot(plotRef.current, data as any, layout as any);
 
     return () => {
@@ -103,7 +105,7 @@ function App() {
         Plotly.purge(plotRef.current);
       }
     };
-  }, []);
+  }, [axisVisible]);
 
   return (
     <div
@@ -112,10 +114,33 @@ function App() {
         height: "100vh",
         margin: 0,
         padding: 0,
-        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      <div ref={plotRef} style={{ width: "100%", height: "100%" }} />
+      {/* 上部にボタンエリア */}
+      <div
+        style={{
+          padding: "8px 12px",
+          display: "flex",
+          gap: "8px",
+          alignItems: "center",
+        }}
+      >
+        <button onClick={() => setAxisVisible(v => !v)}>
+          {axisVisible ? "軸を非表示にする" : "軸を表示する"}
+        </button>
+      </div>
+
+      {/* 下にグラフエリア */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "hidden",
+        }}
+      >
+        <div ref={plotRef} style={{ width: "100%", height: "100%" }} />
+      </div>
     </div>
   );
 }
