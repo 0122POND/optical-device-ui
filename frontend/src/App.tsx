@@ -52,38 +52,81 @@ function addNoise(
   );
 }
 
+function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
+  const rows = zData.map(row =>
+    row.map(v => (v == null ? "" : v.toString())).join(",")
+  );
+  const csv = rows.join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  URL.revokeObjectURL(url);
+}
+
+
 function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
 
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
 
-  useEffect(() => {
-    if (!plotRef.current) return;
+  // 確認ダイアログの表示フラグ
+  const [showConfirm, setShowConfirm] = useState(false);
 
-    // データ生成
-    let zData = generateCoinData(80);
-    zData = addNoise(zData, 0.1);
+  // ★ 確認ダイアログの種類（3D開始 or CSV出力）
+  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
 
-    const data = [
-      {
-        z: zData,
-        type: "surface" as const,
-        // ★ カラーバーを少し左に寄せて & 細くする
-        colorbar: {
-          x: 0.9,      // 0〜1 の相対位置（デフォルトより左）
-          thickness: 15,
-        },
+  // ★ 3Dグラフを表示するかどうか
+  const [showPlot, setShowPlot] = useState(false);
+
+   // ★ 掃引関連の入力値 & 単位
+  const [sweepInterval, setSweepInterval] = useState("");
+  const [sweepRange, setSweepRange] = useState("");
+  const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
+  const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
+
+  const [zData, setZData] = useState<(number | null)[][] | null>(null);
+
+  const GRID_SIZE = 80;
+
+useEffect(() => {
+  if (!plotRef.current) return;
+
+  if (!showPlot) {
+    Plotly.purge(plotRef.current);
+    return;
+  }
+
+  // データ生成
+  let z = generateCoinData(GRID_SIZE);
+  z = addNoise(z, 0.1);
+  setZData(z); // ★ state に保存
+
+  const data = [
+    {
+      z,
+      type: "surface" as const,
+      colorbar: {
+        x: 1.02,
+        thickness: 15,
       },
-    ];
+    },
+  ];
 
     const layout = {
       title: "Sample 3D Coin-like Surface",
       autosize: true,
-      // 右も少しだけ余裕を持たせておく（なくてもいいけど一応）
       margin: {
         l: 0,
-        r: 80,
+        r: 20,
         t: 40,
         b: 40,
       },
@@ -106,123 +149,374 @@ function App() {
           showgrid: axisVisible,
           zeroline: axisVisible,
         },
+        aspectratio: { x: 1, y: 1, z: 0.6 },
       },
     };
 
-    Plotly.newPlot(plotRef.current, data as any, layout as any);
+    const config = {
+      responsive: true,
+      displaylogo: false,
+    };
+
+    Plotly.newPlot(plotRef.current, data as any, layout as any, config as any);
 
     return () => {
       if (plotRef.current) {
         Plotly.purge(plotRef.current);
       }
     };
-  }, [axisVisible]);
+  }, [axisVisible, showPlot]); // ★ showPlot も依存に追加
+
+  // 「はい」が押されたときの処理（モードごとに分岐）
+  const handleConfirmOk = () => {
+    if (confirmMode === "plot") {
+      setShowPlot(true);
+      console.log("3次元形状計測を開始します");
+    } else if (confirmMode === "csv") {
+      // zData があればそれを書き出し、なければその場で生成して出力
+      if (zData) {
+        downloadCSV(zData, "surface.csv");
+      } else {
+        const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
+        downloadCSV(fallback, "surface.csv");
+      }
+    }
+  
+    setShowConfirm(false);
+    setConfirmMode(null);
+  };
+  
+
+  // 「いいえ」の処理
+  const handleConfirmCancel = () => {
+    setShowConfirm(false);
+    setConfirmMode(null);
+  };
 
   return (
-    <div
-      style={{
-        width: "100vw",
-        height: "100vh",
-        margin: 0,
-        padding: 0,
-        display: "flex",          // ← 横並びレイアウトに変更！
-        flexDirection: "row",
-        overflow: "hidden",
-        position: "relative",
-      }}
-    >
-    {/* 左上のロゴ */}
-      <img
-        src="/logo.png"
-        alt="Company Logo"
-        style={{
-          position: "absolute",
-          left: "16px",
-          top: "16px",
-          width: "90px",
-          height: "auto",
-          opacity: 0.9,
-          zIndex: 10,
-        }}
-      />
-      {/* 左側：Plotly 描画エリア */}
+    <>
       <div
         style={{
-          width: "75%",           // ← グラフの幅を縮小（お好みで調整OK）
-          height: "75%",
-          position: "relative",
-        }}
-      >
-        <div ref={plotRef} style={{ width: "100%", height: "100%" }} />
-      </div>
-  
-      {/* 右側：UI パネル（縦に並ぶ入力欄 + ボタン） */}
-      <div
-        style={{
-          width: "25%",           // ← UI 用の固定エリア
-          height: "100%",
-          padding: "20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-          backgroundColor: "rgba(0, 0, 0, 0.15)", // ちょい薄い背景
+          width: "100vw",
+          height: "100vh",
+          margin: 0,
+          padding: 0,
+          display: "grid",
+          gridTemplateColumns: "280px 1fr",
+          overflow: "hidden",
+          backgroundColor: "#121212",
+          color: "#fff",
           boxSizing: "border-box",
         }}
       >
-        {/* 入力欄1 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <label style={{ color: "white", fontSize: "14px" }}>掃引間隔</label>
-          <input
-            type="text"
-            placeholder="入力してください"
+        {/* ▼ 左：サイドパネル */}
+        <div
+          style={{
+            height: "100%",
+            padding: "16px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+            backgroundColor: "#232323",
+            boxSizing: "border-box",
+            borderRight: "1px solid #444",
+          }}
+        >
+          {/* ロゴ */}
+          <div
             style={{
-              height: "32px",
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "1px solid #ccc",
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "8px",
+            }}
+          >
+            <img
+              src="/logo.png"
+              alt="Company Logo"
+              style={{ width: "72px", height: "auto", opacity: 0.9 }}
+            />
+          </div>
+
+          {/* セクションタイトル */}
+          <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
+            スキャン設定
+          </div>
+
+          {/* 掃引間隔 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "13px" }}>掃引間隔</label>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                type="text"
+                placeholder="入力してください"
+                value={sweepInterval}
+                onChange={e => setSweepInterval(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: "32px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #555",
+                  backgroundColor: "#181818",
+                  color: "#fff",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: "6px",
+                  overflow: "hidden",
+                  border: "1px solid #555",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSweepIntervalUnit("um")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepIntervalUnit === "um" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  µm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepIntervalUnit("mm")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepIntervalUnit === "mm" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  mm
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 掃引範囲 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "13px" }}>掃引範囲</label>
+            <input
+              type="text"
+              placeholder="入力してください"
+              style={{
+                height: "32px",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                border: "1px solid #555",
+                backgroundColor: "#181818",
+                color: "#fff",
+              }}
+            />
+          </div>
+
+          {/* 次の掃引までの時間間隔 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
+            <input
+              type="text"
+              placeholder="入力してください"
+              style={{
+                height: "32px",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                border: "1px solid #555",
+                backgroundColor: "#181818",
+                color: "#fff",
+              }}
+            />
+          </div>
+
+          {/* 区切り */}
+          <div
+            style={{
+              height: "1px",
+              backgroundColor: "#333",
+              margin: "8px 0",
             }}
           />
-        </div>
-  
-        {/* 入力欄2 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <label style={{ color: "white", fontSize: "14px" }}>掃引範囲</label>
-          <input
-            type="text"
-            placeholder="入力してください"
+
+          {/* 軸トグルボタン */}
+          <button
+            onClick={() => setAxisVisible(v => !v)}
             style={{
-              height: "32px",
-              padding: "4px 8px",
+              height: "36px",
               borderRadius: "6px",
-              border: "1px solid #ccc",
+              border: "none",
+              backgroundColor: axisVisible ? "#444" : "#222",
+              color: "#fff",
+              cursor: "pointer",
             }}
-          />
-        </div>
-  
-        {/* 入力欄3 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <label style={{ color: "white", fontSize: "14px" }}>次の掃引までの時間間隔</label>
-          <input
-            type="text"
-            placeholder="入力してください"
+          >
+            {axisVisible ? "軸を非表示" : "軸を表示"}
+          </button>
+
+          {/* 3D描画ボタン → 押すと確認モーダルを表示 */}
+          <button
             style={{
-              height: "32px",
-              padding: "4px 8px",
+              height: "40px",
               borderRadius: "6px",
-              border: "1px solid #ccc",
+              border: "none",
+              backgroundColor: "#1976d2",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "4px",
             }}
-          />
+            onClick={() => {
+              setConfirmMode("plot");
+              setShowConfirm(true);
+            }}
+          >
+            3Dグラフを表示
+          </button>
+
+          {/* CSV出力ボタン（緑） */}
+          <button
+            style={{
+              height: "40px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#2e7d32",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "8px",
+            }}
+            onClick={() => {
+              setConfirmMode("csv");
+              setShowConfirm(true);
+            }}
+          >
+            csvファイルを出力
+          </button>
+
+          <div style={{ flexGrow: 1 }} />
         </div>
-  
-        {/* 軸ボタン */}
-        <button onClick={() => setAxisVisible(v => !v)}>
-          {axisVisible ? "軸を非表示" : "軸を表示"}
-        </button>
-  
-        {/* 描画ボタン */}
-        <button>3Dグラフを表示</button>
+
+        {/* ▼ 右：3D Plot エリア */}
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            padding: "12px",
+            boxSizing: "border-box",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div
+            ref={plotRef}
+            style={{ width: "100%", height: "100%", position: "relative" }}
+          >
+            {/* まだ showPlot=false のときは案内メッセージを表示 */}
+            {!showPlot && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#777",
+                  fontSize: "15px",
+                }}
+              >
+                左側の「3Dグラフを表示」ボタンから
+                <br />
+                3次元形状計測を開始してください。
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* ▼ 確認モーダル */}
+      {showConfirm && confirmMode && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.45)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: "320px",
+              backgroundColor: "#2b2b2b",
+              borderRadius: "10px",
+              padding: "20px 24px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                marginBottom: "16px",
+                fontWeight: 500,
+              }}
+            >
+              {confirmMode === "csv"
+                ? "csvファイルを出力しますか？"
+                : "3次元形状計測を開始しますか？"}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "8px",
+              }}
+            >
+              <button
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#444",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+                onClick={handleConfirmCancel}
+              >
+                いいえ
+              </button>
+              <button
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#1976d2",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+                onClick={handleConfirmOk}
+              >
+                はい
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
