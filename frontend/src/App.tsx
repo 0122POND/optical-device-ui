@@ -52,32 +52,74 @@ function addNoise(
   );
 }
 
+function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
+  const rows = zData.map(row =>
+    row.map(v => (v == null ? "" : v.toString())).join(",")
+  );
+  const csv = rows.join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  URL.revokeObjectURL(url);
+}
+
+
 function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
 
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
 
-  // ★ 確認ダイアログの表示フラグ
+  // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
 
-  useEffect(() => {
-    if (!plotRef.current) return;
+  // ★ 確認ダイアログの種類（3D開始 or CSV出力）
+  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
 
-    // データ生成
-    let zData = generateCoinData(80);
-    zData = addNoise(zData, 0.1);
+  // ★ 3Dグラフを表示するかどうか
+  const [showPlot, setShowPlot] = useState(false);
 
-    const data = [
-      {
-        z: zData,
-        type: "surface" as const,
-        colorbar: {
-          x: 1.02,
-          thickness: 15,
-        },
+   // ★ 掃引関連の入力値 & 単位
+  const [sweepInterval, setSweepInterval] = useState("");
+  const [sweepRange, setSweepRange] = useState("");
+  const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
+  const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
+
+  const [zData, setZData] = useState<(number | null)[][] | null>(null);
+
+  const GRID_SIZE = 80;
+
+useEffect(() => {
+  if (!plotRef.current) return;
+
+  if (!showPlot) {
+    Plotly.purge(plotRef.current);
+    return;
+  }
+
+  // データ生成
+  let z = generateCoinData(GRID_SIZE);
+  z = addNoise(z, 0.1);
+  setZData(z); // ★ state に保存
+
+  const data = [
+    {
+      z,
+      type: "surface" as const,
+      colorbar: {
+        x: 1.02,
+        thickness: 15,
       },
-    ];
+    },
+  ];
 
     const layout = {
       title: "Sample 3D Coin-like Surface",
@@ -123,13 +165,32 @@ function App() {
         Plotly.purge(plotRef.current);
       }
     };
-  }, [axisVisible]);
+  }, [axisVisible, showPlot]); // ★ showPlot も依存に追加
 
-  // 「はい」が押されたときの処理
-  const handleStartMeasurement = () => {
+  // 「はい」が押されたときの処理（モードごとに分岐）
+  const handleConfirmOk = () => {
+    if (confirmMode === "plot") {
+      setShowPlot(true);
+      console.log("3次元形状計測を開始します");
+    } else if (confirmMode === "csv") {
+      // zData があればそれを書き出し、なければその場で生成して出力
+      if (zData) {
+        downloadCSV(zData, "surface.csv");
+      } else {
+        const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
+        downloadCSV(fallback, "surface.csv");
+      }
+    }
+  
     setShowConfirm(false);
-    // TODO: ここに「3次元形状計測開始」の処理を書く
-    console.log("3次元形状計測を開始します");
+    setConfirmMode(null);
+  };
+  
+
+  // 「いいえ」の処理
+  const handleConfirmCancel = () => {
+    setShowConfirm(false);
+    setConfirmMode(null);
   };
 
   return (
@@ -148,7 +209,7 @@ function App() {
           boxSizing: "border-box",
         }}
       >
-        {/* ▼ 左：サイドパネル（ロゴ + 入力UI） */}
+        {/* ▼ 左：サイドパネル */}
         <div
           style={{
             height: "100%",
@@ -184,18 +245,64 @@ function App() {
           {/* 掃引間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引間隔</label>
-            <input
-              type="text"
-              placeholder="入力してください"
-              style={{
-                height: "32px",
-                padding: "4px 8px",
-                borderRadius: "6px",
-                border: "1px solid #555",
-                backgroundColor: "#181818",
-                color: "#fff",
-              }}
-            />
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                type="text"
+                placeholder="入力してください"
+                value={sweepInterval}
+                onChange={e => setSweepInterval(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: "32px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #555",
+                  backgroundColor: "#181818",
+                  color: "#fff",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: "6px",
+                  overflow: "hidden",
+                  border: "1px solid #555",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSweepIntervalUnit("um")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepIntervalUnit === "um" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  µm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepIntervalUnit("mm")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepIntervalUnit === "mm" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  mm
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* 掃引範囲 */}
@@ -257,43 +364,46 @@ function App() {
           </button>
 
           {/* 3D描画ボタン → 押すと確認モーダルを表示 */}
-        <button
-          style={{
-            height: "40px",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: "#1976d2",
-            color: "#fff",
-            fontWeight: 600,
-            cursor: "pointer",
-            marginTop: "4px",
-          }}
-          onClick={() => setShowConfirm(true)}
-        >
-          3Dグラフを表示
-        </button>
+          <button
+            style={{
+              height: "40px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#1976d2",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "4px",
+            }}
+            onClick={() => {
+              setConfirmMode("plot");
+              setShowConfirm(true);
+            }}
+          >
+            3Dグラフを表示
+          </button>
 
-        {/* ▼ CSV出力ボタン（緑色） */}
-        <button
-          style={{
-            height: "40px",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: "#2e7d32", // 緑っぽい色
-            color: "#fff",
-            fontWeight: 600,
-            cursor: "pointer",
-            marginTop: "8px",
-          }}
-          onClick={() => {
-            // TODO: ここに CSV 出力処理を実装
-            console.log("CSVファイルを出力します");
-          }}
-        >
-          csvファイルを出力
-        </button>
+          {/* CSV出力ボタン（緑） */}
+          <button
+            style={{
+              height: "40px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#2e7d32",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "8px",
+            }}
+            onClick={() => {
+              setConfirmMode("csv");
+              setShowConfirm(true);
+            }}
+          >
+            csvファイルを出力
+          </button>
 
-        <div style={{ flexGrow: 1 }} />
+          <div style={{ flexGrow: 1 }} />
         </div>
 
         {/* ▼ 右：3D Plot エリア */}
@@ -308,12 +418,34 @@ function App() {
             alignItems: "center",
           }}
         >
-          <div ref={plotRef} style={{ width: "100%", height: "100%" }} />
+          <div
+            ref={plotRef}
+            style={{ width: "100%", height: "100%", position: "relative" }}
+          >
+            {/* まだ showPlot=false のときは案内メッセージを表示 */}
+            {!showPlot && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#777",
+                  fontSize: "15px",
+                }}
+              >
+                左側の「3Dグラフを表示」ボタンから
+                <br />
+                3次元形状計測を開始してください。
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ▼ 確認モーダル */}
-      {showConfirm && (
+      {showConfirm && confirmMode && (
         <div
           style={{
             position: "fixed",
@@ -342,7 +474,9 @@ function App() {
                 fontWeight: 500,
               }}
             >
-              3次元形状計測を開始しますか？
+              {confirmMode === "csv"
+                ? "csvファイルを出力しますか？"
+                : "3次元形状計測を開始しますか？"}
             </div>
             <div
               style={{
@@ -360,7 +494,7 @@ function App() {
                   color: "#fff",
                   cursor: "pointer",
                 }}
-                onClick={() => setShowConfirm(false)}
+                onClick={handleConfirmCancel}
               >
                 いいえ
               </button>
@@ -374,7 +508,7 @@ function App() {
                   cursor: "pointer",
                   fontWeight: 600,
                 }}
-                onClick={handleStartMeasurement}
+                onClick={handleConfirmOk}
               >
                 はい
               </button>
