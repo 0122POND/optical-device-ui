@@ -73,7 +73,9 @@ function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
 
 
 function App() {
+  const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
+  const sliceRef = useRef<HTMLDivElement | null>(null);
 
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
@@ -86,6 +88,12 @@ function App() {
 
   // ★ 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
+
+  // 断層グラフを表示するかどうか
+  const [showSlice, setShowSlice] = useState(false);
+
+  // どの行を断層として使うか（ここでは y方向の中央）
+  const [sliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
    // ★ 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
@@ -100,8 +108,6 @@ function App() {
 
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
-
-  const GRID_SIZE = 80;
 
 useEffect(() => {
   if (!plotRef.current) return;
@@ -171,7 +177,56 @@ useEffect(() => {
         Plotly.purge(plotRef.current);
       }
     };
-  }, [axisVisible, showPlot]); // ★ showPlot も依存に追加
+  }, [axisVisible, showPlot]);
+
+// --- 2D 断層グラフ描画 ---
+useEffect(() => {
+  if (!sliceRef.current) return;
+
+  // 非表示またはデータなしなら purge
+  if (!showSlice || !zData) {
+    Plotly.purge(sliceRef.current);
+    return;
+  }
+
+  // 断層として使う 1 行（y = sliceIndex）のデータ
+  const row = zData[sliceIndex];
+  const x = row.map((_, i) => i);
+  const y = row.map(v => (v == null ? 0 : v)); // null は 0 扱いにしておく
+
+  const data = [
+    {
+      x,
+      y,
+      type: "scatter" as const,
+      mode: "lines",
+    },
+  ];
+
+  const layout = {
+    title: `断層（y = ${sliceIndex}）`,
+    margin: { l: 40, r: 10, t: 30, b: 40 },
+    xaxis: { title: "X index" },
+    yaxis: { title: "Height" },
+    height: 250,
+    paper_bgcolor: "#121212",
+    plot_bgcolor: "#121212",
+    font: { color: "#fff" },
+  };
+
+  const config = {
+    responsive: true,
+    displaylogo: false,
+  };
+
+  Plotly.newPlot(sliceRef.current, data as any, layout as any, config as any);
+
+  return () => {
+    if (sliceRef.current) {
+      Plotly.purge(sliceRef.current);
+    }
+  };
+  }, [showSlice, zData, sliceIndex]);
 
   // 「はい」が押されたときの処理（モードごとに分岐）
   const handleConfirmOk = () => {
@@ -502,10 +557,37 @@ useEffect(() => {
             csvファイルを出力
           </button>
 
+          {/* ★ 断層を出力ボタン */}
+          <button
+            style={{
+              height: "40px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#555",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "8px",
+            }}
+            onClick={() => {
+              // まだ 3D を開始していない場合は、その場でデータ生成
+              if (!zData) {
+                const generated = addNoise(
+                  generateCoinData(GRID_SIZE),
+                  0.1
+                );
+                setZData(generated);
+              }
+              setShowSlice(true);
+            }}
+          >
+            断層を出力
+          </button>          
+
           <div style={{ flexGrow: 1 }} />
         </div>
 
-        {/* ▼ 右：3D Plot エリア */}
+        {/* ▼ 右：3D Plot + 2D断層 エリア */}
         <div
           style={{
             width: "100%",
@@ -513,33 +595,46 @@ useEffect(() => {
             padding: "12px",
             boxSizing: "border-box",
             display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
+            flexDirection: "column",
+            gap: "12px",
           }}
         >
-          <div
-            ref={plotRef}
-            style={{ width: "100%", height: "100%", position: "relative" }}
-          >
-            {/* まだ showPlot=false のときは案内メッセージを表示 */}
-            {!showPlot && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#777",
-                  fontSize: "15px",
-                }}
-              >
-                左側の「START」ボタンから
-                <br />
-                3次元形状計測を開始してください。
-              </div>
-            )}
+          {/* 上：3D */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <div
+              ref={plotRef}
+              style={{ width: "100%", height: "100%", position: "relative" }}
+            >
+              {/* まだ showPlot=false のときは案内メッセージを表示 */}
+              {!showPlot && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#777",
+                    fontSize: "15px",
+                  }}
+                >
+                  左側の「START」ボタンから
+                  <br />
+                  3次元形状計測を開始してください。
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* 下：2D 断層グラフ（showSlice のときだけ表示） */}
+          {showSlice && (
+            <div style={{ height: "260px" }}>
+              <div
+                ref={sliceRef}
+                style={{ width: "100%", height: "100%" }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
