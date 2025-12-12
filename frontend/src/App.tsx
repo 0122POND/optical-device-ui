@@ -93,6 +93,12 @@ function App() {
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
   const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
 
+  // 次の掃引までの時間間隔 & 単位 (s / ms)
+  const [sweepTimeInterval, setSweepTimeInterval] = useState("");
+  const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("s");
+
+
+
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
 
   const GRID_SIZE = 80;
@@ -308,36 +314,129 @@ useEffect(() => {
           {/* 掃引範囲 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引範囲</label>
-            <input
-              type="text"
-              placeholder="入力してください"
-              style={{
-                height: "32px",
-                padding: "4px 8px",
-                borderRadius: "6px",
-                border: "1px solid #555",
-                backgroundColor: "#181818",
-                color: "#fff",
-              }}
-            />
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                type="text"
+                placeholder="入力してください"
+                value={sweepRange}
+                onChange={e => setSweepRange(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: "32px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #555",
+                  backgroundColor: "#181818",
+                  color: "#fff",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: "6px",
+                  overflow: "hidden",
+                  border: "1px solid #555",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSweepRangeUnit("um")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepRangeUnit === "um" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  µm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepRangeUnit("mm")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepRangeUnit === "mm" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  mm
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* 次の掃引までの時間間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
-            <input
-              type="text"
-              placeholder="入力してください"
-              style={{
-                height: "32px",
-                padding: "4px 8px",
-                borderRadius: "6px",
-                border: "1px solid #555",
-                backgroundColor: "#181818",
-                color: "#fff",
-              }}
-            />
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input
+                type="text"
+                placeholder="入力してください"
+                value={sweepTimeInterval}
+                onChange={e => setSweepTimeInterval(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: "32px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #555",
+                  backgroundColor: "#181818",
+                  color: "#fff",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: "6px",
+                  overflow: "hidden",
+                  border: "1px solid #555",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSweepTimeUnit("s")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepTimeUnit === "s" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  s
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepTimeUnit("ms")}
+                  style={{
+                    padding: "0 10px",
+                    height: "30px",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    backgroundColor:
+                      sweepTimeUnit === "ms" ? "#1976d2" : "#181818",
+                    color: "#fff",
+                  }}
+                >
+                  ms
+                </button>
+              </div>
+            </div>
           </div>
+
 
           {/* 区切り */}
           <div
@@ -380,7 +479,7 @@ useEffect(() => {
               setShowConfirm(true);
             }}
           >
-            3Dグラフを表示
+            START
           </button>
 
           {/* CSV出力ボタン（緑） */}
@@ -435,7 +534,7 @@ useEffect(() => {
                   fontSize: "15px",
                 }}
               >
-                左側の「3Dグラフを表示」ボタンから
+                左側の「START」ボタンから
                 <br />
                 3次元形状計測を開始してください。
               </div>
