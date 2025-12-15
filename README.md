@@ -23,6 +23,7 @@
 ## ディレクトリ構成（予定）
 
 optical-device-ui/
+├──
 ├── frontend/   # Web UI
 ├── backend/    # API（必要に応じて実装）
 ├── data/       # サンプルデータ
