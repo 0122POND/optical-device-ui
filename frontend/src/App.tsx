@@ -83,10 +83,10 @@ function App() {
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // ★ 確認ダイアログの種類（3D開始 or CSV出力）
+  // 確認ダイアログの種類（3D開始 or CSV出力）
   const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
 
-  // ★ 3Dグラフを表示するかどうか
+  // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
 
   // 断層グラフを表示するかどうか
@@ -95,7 +95,7 @@ function App() {
   // どの行を断層として使うか（ここでは y方向の中央）
   const [sliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
-   // ★ 掃引関連の入力値 & 単位
+   // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
@@ -104,8 +104,6 @@ function App() {
   // 次の掃引までの時間間隔 & 単位 (s / ms)
   const [sweepTimeInterval, setSweepTimeInterval] = useState("");
   const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("s");
-
-
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
 
@@ -228,13 +226,13 @@ useEffect(() => {
   };
   }, [showSlice, zData, sliceIndex]);
 
-  // 「はい」が押されたときの処理（モードごとに分岐）
+// 「はい」が押されたときの処理（モードごとに分岐）
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
       setShowPlot(true);
       console.log("3次元形状計測を開始します");
     } else if (confirmMode === "csv") {
-      // zData があればそれを書き出し、なければその場で生成して出力
+// zData があればそれを書き出し、なければその場で生成して出力
       if (zData) {
         downloadCSV(zData, "surface.csv");
       } else {
@@ -292,7 +290,7 @@ useEffect(() => {
             }}
           >
             <img
-              src="/logo.png"
+              src="/logo.jpg"
               alt="Company Logo"
               style={{ width: "72px", height: "auto", opacity: 0.9 }}
             />
@@ -440,6 +438,7 @@ useEffect(() => {
                 onChange={e => setSweepTimeInterval(e.target.value)}
                 style={{
                   flex: 1,
+                  minWidth: 0,
                   height: "32px",
                   padding: "4px 8px",
                   borderRadius: "6px",
