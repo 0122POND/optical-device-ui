@@ -73,7 +73,9 @@ function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
 
 
 function App() {
+  const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
+  const sliceRef = useRef<HTMLDivElement | null>(null);
 
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
@@ -81,13 +83,19 @@ function App() {
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // ★ 確認ダイアログの種類（3D開始 or CSV出力）
+  // 確認ダイアログの種類（3D開始 or CSV出力）
   const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
 
-  // ★ 3Dグラフを表示するかどうか
+  // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
 
-   // ★ 掃引関連の入力値 & 単位
+  // 断層グラフを表示するかどうか
+  const [showSlice, setShowSlice] = useState(false);
+
+  // どの行を断層として使うか（ここでは y方向の中央）
+  const [sliceIndex] = useState(Math.floor(GRID_SIZE / 2));
+
+   // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
@@ -97,11 +105,20 @@ function App() {
   const [sweepTimeInterval, setSweepTimeInterval] = useState("");
   const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("s");
 
-
-
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
 
-  const GRID_SIZE = 80;
+  const unitSelectStyle: React.CSSProperties = {
+    height: "32px",
+    padding: "0 10px",
+    borderRadius: "6px",
+    border: "1px solid #555",
+    backgroundColor: "#181818",
+    color: "#fff",
+    fontSize: "12px",
+    cursor: "pointer",
+    outline: "none",
+  };
+  
 
 useEffect(() => {
   if (!plotRef.current) return;
@@ -171,15 +188,64 @@ useEffect(() => {
         Plotly.purge(plotRef.current);
       }
     };
-  }, [axisVisible, showPlot]); // ★ showPlot も依存に追加
+  }, [axisVisible, showPlot]);
 
-  // 「はい」が押されたときの処理（モードごとに分岐）
+// --- 2D 断層グラフ描画 ---
+useEffect(() => {
+  if (!sliceRef.current) return;
+
+  // 非表示またはデータなしなら purge
+  if (!showSlice || !zData) {
+    Plotly.purge(sliceRef.current);
+    return;
+  }
+
+  // 断層として使う 1 行（y = sliceIndex）のデータ
+  const row = zData[sliceIndex];
+  const x = row.map((_, i) => i);
+  const y = row.map(v => (v == null ? 0 : v)); // null は 0 扱いにしておく
+
+  const data = [
+    {
+      x,
+      y,
+      type: "scatter" as const,
+      mode: "lines",
+    },
+  ];
+
+  const layout = {
+    title: `断層（y = ${sliceIndex}）`,
+    margin: { l: 40, r: 10, t: 30, b: 40 },
+    xaxis: { title: "X index" },
+    yaxis: { title: "Height" },
+    height: 250,
+    paper_bgcolor: "#121212",
+    plot_bgcolor: "#121212",
+    font: { color: "#fff" },
+  };
+
+  const config = {
+    responsive: true,
+    displaylogo: false,
+  };
+
+  Plotly.newPlot(sliceRef.current, data as any, layout as any, config as any);
+
+  return () => {
+    if (sliceRef.current) {
+      Plotly.purge(sliceRef.current);
+    }
+  };
+  }, [showSlice, zData, sliceIndex]);
+
+// 「はい」が押されたときの処理（モードごとに分岐）
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
       setShowPlot(true);
       console.log("3次元形状計測を開始します");
     } else if (confirmMode === "csv") {
-      // zData があればそれを書き出し、なければその場で生成して出力
+// zData があればそれを書き出し、なければその場で生成して出力
       if (zData) {
         downloadCSV(zData, "surface.csv");
       } else {
@@ -210,7 +276,7 @@ useEffect(() => {
           display: "grid",
           gridTemplateColumns: "280px 1fr",
           overflow: "hidden",
-          backgroundColor: "#121212",
+          backgroundColor: "#2d2d2d",
           color: "#fff",
           boxSizing: "border-box",
         }}
@@ -223,7 +289,7 @@ useEffect(() => {
             display: "flex",
             flexDirection: "column",
             gap: "16px",
-            backgroundColor: "#232323",
+            backgroundColor: "#2d2d2d",
             boxSizing: "border-box",
             borderRight: "1px solid #444",
           }}
@@ -237,7 +303,7 @@ useEffect(() => {
             }}
           >
             <img
-              src="/logo.png"
+              src="/logo.jpg"
               alt="Company Logo"
               style={{ width: "72px", height: "auto", opacity: 0.9 }}
             />
@@ -267,47 +333,15 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSweepIntervalUnit("um")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepIntervalUnit === "um" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
+                <select
+                  value={sweepIntervalUnit}
+                  onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                  style={unitSelectStyle}
                 >
-                  µm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepIntervalUnit("mm")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepIntervalUnit === "mm" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  mm
-                </button>
-              </div>
+                  <option value="um">µm</option>
+                  <option value="mm">mm</option>
+                </select>
+              
             </div>
           </div>
 
@@ -330,47 +364,14 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
+              <select
+                value={sweepIntervalUnit}
+                onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                style={unitSelectStyle}
               >
-                <button
-                  type="button"
-                  onClick={() => setSweepRangeUnit("um")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepRangeUnit === "um" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  µm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepRangeUnit("mm")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepRangeUnit === "mm" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  mm
-                </button>
-              </div>
+                <option value="um">µm</option>
+                <option value="mm">mm</option>
+              </select>
             </div>
           </div>
 
@@ -385,6 +386,7 @@ useEffect(() => {
                 onChange={e => setSweepTimeInterval(e.target.value)}
                 style={{
                   flex: 1,
+                  minWidth: 0,
                   height: "32px",
                   padding: "4px 8px",
                   borderRadius: "6px",
@@ -393,47 +395,15 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
+              <select
+                value={sweepIntervalUnit}
+                onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
+                style={unitSelectStyle}
               >
-                <button
-                  type="button"
-                  onClick={() => setSweepTimeUnit("s")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepTimeUnit === "s" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  s
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepTimeUnit("ms")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepTimeUnit === "ms" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  ms
-                </button>
-              </div>
+                <option value="ms">ms</option>
+                <option value="s">s</option>
+              </select>
+              
             </div>
           </div>
 
@@ -502,10 +472,37 @@ useEffect(() => {
             csvファイルを出力
           </button>
 
+          {/* ★ 断層を出力ボタン */}
+          <button
+            style={{
+              height: "40px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#555",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginTop: "8px",
+            }}
+            onClick={() => {
+              // まだ 3D を開始していない場合は、その場でデータ生成
+              if (!zData) {
+                const generated = addNoise(
+                  generateCoinData(GRID_SIZE),
+                  0.1
+                );
+                setZData(generated);
+              }
+              setShowSlice(true);
+            }}
+          >
+            断層を出力
+          </button>          
+
           <div style={{ flexGrow: 1 }} />
         </div>
 
-        {/* ▼ 右：3D Plot エリア */}
+        {/* ▼ 右：3D Plot + 2D断層 エリア */}
         <div
           style={{
             width: "100%",
@@ -513,33 +510,46 @@ useEffect(() => {
             padding: "12px",
             boxSizing: "border-box",
             display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
+            flexDirection: "column",
+            gap: "12px",
           }}
         >
-          <div
-            ref={plotRef}
-            style={{ width: "100%", height: "100%", position: "relative" }}
-          >
-            {/* まだ showPlot=false のときは案内メッセージを表示 */}
-            {!showPlot && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#777",
-                  fontSize: "15px",
-                }}
-              >
-                左側の「START」ボタンから
-                <br />
-                3次元形状計測を開始してください。
-              </div>
-            )}
+          {/* 上：3D */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <div
+              ref={plotRef}
+              style={{ width: "100%", height: "100%", position: "relative" }}
+            >
+              {/* まだ showPlot=false のときは案内メッセージを表示 */}
+              {!showPlot && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#777",
+                    fontSize: "15px",
+                  }}
+                >
+                  左側の「START」ボタンから
+                  <br />
+                  3次元形状計測を開始してください。
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* 下：2D 断層グラフ（showSlice のときだけ表示） */}
+          {showSlice && (
+            <div style={{ height: "260px" }}>
+              <div
+                ref={sliceRef}
+                style={{ width: "100%", height: "100%" }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
