@@ -107,6 +107,19 @@ function App() {
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
 
+  const unitSelectStyle: React.CSSProperties = {
+    height: "32px",
+    padding: "0 10px",
+    borderRadius: "6px",
+    border: "1px solid #555",
+    backgroundColor: "#181818",
+    color: "#fff",
+    fontSize: "12px",
+    cursor: "pointer",
+    outline: "none",
+  };
+  
+
 useEffect(() => {
   if (!plotRef.current) return;
 
@@ -263,7 +276,7 @@ useEffect(() => {
           display: "grid",
           gridTemplateColumns: "280px 1fr",
           overflow: "hidden",
-          backgroundColor: "#121212",
+          backgroundColor: "#2d2d2d",
           color: "#fff",
           boxSizing: "border-box",
         }}
@@ -276,7 +289,7 @@ useEffect(() => {
             display: "flex",
             flexDirection: "column",
             gap: "16px",
-            backgroundColor: "#232323",
+            backgroundColor: "#2d2d2d",
             boxSizing: "border-box",
             borderRight: "1px solid #444",
           }}
@@ -320,47 +333,15 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSweepIntervalUnit("um")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepIntervalUnit === "um" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
+                <select
+                  value={sweepIntervalUnit}
+                  onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                  style={unitSelectStyle}
                 >
-                  µm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepIntervalUnit("mm")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepIntervalUnit === "mm" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  mm
-                </button>
-              </div>
+                  <option value="um">µm</option>
+                  <option value="mm">mm</option>
+                </select>
+              
             </div>
           </div>
 
@@ -383,47 +364,14 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
+              <select
+                value={sweepIntervalUnit}
+                onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                style={unitSelectStyle}
               >
-                <button
-                  type="button"
-                  onClick={() => setSweepRangeUnit("um")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepRangeUnit === "um" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  µm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepRangeUnit("mm")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepRangeUnit === "mm" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  mm
-                </button>
-              </div>
+                <option value="um">µm</option>
+                <option value="mm">mm</option>
+              </select>
             </div>
           </div>
 
@@ -447,47 +395,15 @@ useEffect(() => {
                   color: "#fff",
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: "6px",
-                  overflow: "hidden",
-                  border: "1px solid #555",
-                }}
+              <select
+                value={sweepIntervalUnit}
+                onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
+                style={unitSelectStyle}
               >
-                <button
-                  type="button"
-                  onClick={() => setSweepTimeUnit("s")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepTimeUnit === "s" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  s
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSweepTimeUnit("ms")}
-                  style={{
-                    padding: "0 10px",
-                    height: "30px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    backgroundColor:
-                      sweepTimeUnit === "ms" ? "#1976d2" : "#181818",
-                    color: "#fff",
-                  }}
-                >
-                  ms
-                </button>
-              </div>
+                <option value="ms">ms</option>
+                <option value="s">s</option>
+              </select>
+              
             </div>
           </div>
 
