@@ -271,16 +271,43 @@ useEffect(() => {
         style={{
           width: "100vw",
           height: "100vh",
-          margin: 0,
-          padding: 0,
           display: "grid",
-          gridTemplateColumns: "280px 1fr",
-          overflow: "hidden",
+          gridTemplateRows: "56px 1fr", // ← ヘッダー + メイン
           backgroundColor: "#2d2d2d",
           color: "#fff",
+        }}
+      >
+      {/* ▼ ヘッダー */}
+      <div
+        style={{
+          height: "56px",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 20px",
+          backgroundColor: "#1f1f1f",
+          borderBottom: "1px solid #444",
           boxSizing: "border-box",
         }}
       >
+        <div style={{ fontWeight: 600, fontSize: "16px" }}>
+          3D Surface Measurement UI
+        </div>
+
+        <div style={{ marginLeft: "auto", fontSize: "13px", color: "#aaa" }}>
+          Ver. 0.1
+        </div>
+      </div>
+      {/* ▼ メインエリア（←ここが “2行目”） */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "280px 1fr",
+          height: "100%",
+          overflow: "hidden",
+        }}
+      >    
+
+
         {/* ▼ 左：サイドパネル */}
         <div
           style={{
@@ -552,6 +579,7 @@ useEffect(() => {
           )}
         </div>
       </div>
+    </div>
 
       {/* ▼ 確認モーダル */}
       {showConfirm && confirmMode && (
