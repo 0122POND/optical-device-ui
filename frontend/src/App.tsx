@@ -313,7 +313,7 @@ useEffect(() => {
           display: "flex",
           alignItems: "center",
           padding: "0 16px",
-          backgroundColor: "#1f1f1f",
+          backgroundColor: "#2d2d2d",
           borderBottom: "1px solid #444",
           boxSizing: "border-box",
           gap: "10px",
