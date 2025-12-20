@@ -118,7 +118,35 @@ function App() {
     cursor: "pointer",
     outline: "none",
   };
-  
+
+  const StatusBadge = ({ running }: { running: boolean }) => {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "4px 10px",
+          borderRadius: "999px",
+          fontSize: "12px",
+          fontWeight: 600,
+          backgroundColor: running ? "#2e1f1f" : "#1f2e1f",
+          color: running ? "#ff6b6b" : "#6bff95",
+          border: `1px solid ${running ? "#ff6b6b55" : "#6bff9555"}`,
+        }}
+      >
+        <span
+          style={{
+            width: "8px",
+            height: "8px",
+            borderRadius: "50%",
+            backgroundColor: running ? "#ff4d4d" : "#3ddc84",
+          }}
+        />
+        {running ? "RUNNING" : "READY"}
+      </div>
+    );
+  };
 
 useEffect(() => {
   if (!plotRef.current) return;
@@ -277,26 +305,52 @@ useEffect(() => {
           color: "#fff",
         }}
       >
+      
       {/* ▼ ヘッダー */}
       <div
         style={{
-          height: "56px",
+          height: "48px",
           display: "flex",
           alignItems: "center",
-          padding: "0 20px",
-          backgroundColor: "#1f1f1f",
+          padding: "0 16px",
+          backgroundColor: "#2d2d2d",
           borderBottom: "1px solid #444",
           boxSizing: "border-box",
+          gap: "10px",
         }}
       >
-        <div style={{ fontWeight: 600, fontSize: "16px" }}>
+        {/* ロゴ */}
+        <img
+          src="/logo.jpg"
+          alt="Company Logo"
+          style={{ height: "28px", width: "auto", opacity: 0.95 }}
+        />
+
+        {/* タイトル */}
+        <div style={{ fontWeight: 600, fontSize: "15px" }}>
           3D Surface Measurement UI
         </div>
 
-        <div style={{ marginLeft: "auto", fontSize: "13px", color: "#aaa" }}>
-          Ver. 0.1
+        {/* 右寄せエリア */}
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          {/* ★ ステータス表示 */}
+          <StatusBadge running={showPlot} />
+
+          {/* バージョン */}
+          <div style={{ fontSize: "12px", color: "#aaa" }}>
+            Ver. 0.1
+          </div>
         </div>
       </div>
+
+
       {/* ▼ メインエリア（←ここが “2行目”） */}
       <div
         style={{
@@ -321,20 +375,6 @@ useEffect(() => {
             borderRight: "1px solid #444",
           }}
         >
-          {/* ロゴ */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "8px",
-            }}
-          >
-            <img
-              src="/logo.jpg"
-              alt="Company Logo"
-              style={{ width: "72px", height: "auto", opacity: 0.9 }}
-            />
-          </div>
 
           {/* セクションタイトル */}
           <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
@@ -393,7 +433,7 @@ useEffect(() => {
               />
               <select
                 value={sweepIntervalUnit}
-                onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
                 style={unitSelectStyle}
               >
                 <option value="um">µm</option>
@@ -499,32 +539,36 @@ useEffect(() => {
             csvファイルを出力
           </button>
 
-          {/* ★ 断層を出力ボタン */}
+          {/* ★ 断層 出力/停止 トグルボタン */}
           <button
             style={{
               height: "40px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: "#555",
+              backgroundColor: showSlice ? "#8a2e2e" : "#555", // 表示中は赤系にして「停止」っぽく
               color: "#fff",
               fontWeight: 600,
               cursor: "pointer",
               marginTop: "8px",
             }}
             onClick={() => {
+              // いま表示中なら「停止（非表示）」にする
+              if (showSlice) {
+                setShowSlice(false);
+                return;
+              }
+
+              // まだ表示していないなら「出力（表示）」にする
               // まだ 3D を開始していない場合は、その場でデータ生成
               if (!zData) {
-                const generated = addNoise(
-                  generateCoinData(GRID_SIZE),
-                  0.1
-                );
+                const generated = addNoise(generateCoinData(GRID_SIZE), 0.1);
                 setZData(generated);
               }
               setShowSlice(true);
             }}
           >
-            断層を出力
-          </button>          
+            {showSlice ? "断層出力を停止" : "断層を出力"}
+          </button>        
 
           <div style={{ flexGrow: 1 }} />
         </div>
