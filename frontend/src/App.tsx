@@ -539,32 +539,36 @@ useEffect(() => {
             csvファイルを出力
           </button>
 
-          {/* ★ 断層を出力ボタン */}
+          {/* ★ 断層 出力/停止 トグルボタン */}
           <button
             style={{
               height: "40px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: "#555",
+              backgroundColor: showSlice ? "#8a2e2e" : "#555", // 表示中は赤系にして「停止」っぽく
               color: "#fff",
               fontWeight: 600,
               cursor: "pointer",
               marginTop: "8px",
             }}
             onClick={() => {
+              // いま表示中なら「停止（非表示）」にする
+              if (showSlice) {
+                setShowSlice(false);
+                return;
+              }
+
+              // まだ表示していないなら「出力（表示）」にする
               // まだ 3D を開始していない場合は、その場でデータ生成
               if (!zData) {
-                const generated = addNoise(
-                  generateCoinData(GRID_SIZE),
-                  0.1
-                );
+                const generated = addNoise(generateCoinData(GRID_SIZE), 0.1);
                 setZData(generated);
               }
               setShowSlice(true);
             }}
           >
-            断層を出力
-          </button>          
+            {showSlice ? "断層出力を停止" : "断層を出力"}
+          </button>        
 
           <div style={{ flexGrow: 1 }} />
         </div>
