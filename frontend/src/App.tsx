@@ -287,12 +287,26 @@ useEffect(() => {
           backgroundColor: "#1f1f1f",
           borderBottom: "1px solid #444",
           boxSizing: "border-box",
+          gap: "12px",
         }}
       >
+        {/* ロゴ */}
+        <img
+          src="/logo.jpg"
+          alt="Company Logo"
+          style={{
+            height: "32px",
+            width: "auto",
+            opacity: 0.95,
+          }}
+        />
+
+        {/* タイトル */}
         <div style={{ fontWeight: 600, fontSize: "16px" }}>
           3D Surface Measurement UI
         </div>
 
+        {/* 右寄せ */}
         <div style={{ marginLeft: "auto", fontSize: "13px", color: "#aaa" }}>
           Ver. 0.1
         </div>
@@ -321,20 +335,6 @@ useEffect(() => {
             borderRight: "1px solid #444",
           }}
         >
-          {/* ロゴ */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "8px",
-            }}
-          >
-            <img
-              src="/logo.jpg"
-              alt="Company Logo"
-              style={{ width: "72px", height: "auto", opacity: 0.9 }}
-            />
-          </div>
 
           {/* セクションタイトル */}
           <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
