@@ -384,7 +384,7 @@ useEffect(() => {
           {/* 掃引間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引間隔</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
               <input
                 type="text"
                 placeholder="入力してください"
@@ -415,7 +415,7 @@ useEffect(() => {
           {/* 掃引範囲 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引範囲</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
               <input
                 type="text"
                 placeholder="入力してください"
@@ -445,7 +445,7 @@ useEffect(() => {
           {/* 次の掃引までの時間間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
               <input
                 type="text"
                 placeholder="入力してください"
