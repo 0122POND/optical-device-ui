@@ -92,8 +92,8 @@ function App() {
   // 断層グラフを表示するかどうか
   const [showSlice, setShowSlice] = useState(false);
 
-  // どの行を断層として使うか（ここでは y方向の中央）
-  const [sliceIndex] = useState(Math.floor(GRID_SIZE / 2));
+  // 断層位置（0~GRID_SIZE-1を動かす)
+  const [sliceIndex, setSliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
    // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
@@ -231,7 +231,7 @@ useEffect(() => {
   // 断層として使う 1 行（y = sliceIndex）のデータ
   const row = zData[sliceIndex];
   const x = row.map((_, i) => i);
-  const y = row.map(v => (v == null ? 0 : v)); // null は 0 扱いにしておく
+  const y = row.map(v => (v == null ? null : v));
 
   const data = [
     {
@@ -384,7 +384,7 @@ useEffect(() => {
           {/* 掃引間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引間隔</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
               <input
                 type="text"
                 placeholder="入力してください"
@@ -415,7 +415,7 @@ useEffect(() => {
           {/* 掃引範囲 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>掃引範囲</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
               <input
                 type="text"
                 placeholder="入力してください"
@@ -445,7 +445,7 @@ useEffect(() => {
           {/* 次の掃引までの時間間隔 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
               <input
                 type="text"
                 placeholder="入力してください"
@@ -568,7 +568,30 @@ useEffect(() => {
             }}
           >
             {showSlice ? "断層出力を停止" : "断層を出力"}
-          </button>        
+          </button>
+          {/* ★ 断層位置スライダー（showSlice のとき有効） */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "13px" }}>
+              断層位置（y）: {sliceIndex}
+            </label>
+
+            <input
+              type="range"
+              min={0}
+              max={GRID_SIZE - 1}
+              step={1}
+              value={sliceIndex}
+              disabled={!showSlice || !zData}
+              onChange={(e) => setSliceIndex(Number(e.target.value))}
+              style={{ width: "100%" }}
+            />
+
+            <div style={{ fontSize: "12px", color: "#aaa" }}>
+              {(!zData && "※先に断層出力 or START でデータ生成してください") || ""}
+            </div>
+          </div>
+
+
 
           <div style={{ flexGrow: 1 }} />
         </div>
