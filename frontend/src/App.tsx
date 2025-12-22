@@ -148,6 +148,11 @@ function App() {
     );
   };
 
+  const toggleSlice = () => {
+    if (!zData) return; // データがないなら何もしない
+    setShowSlice((v) => !v);
+  };
+
 useEffect(() => {
   if (!plotRef.current) return;
 
@@ -541,34 +546,26 @@ useEffect(() => {
 
           {/* ★ 断層 出力/停止 トグルボタン */}
           <button
+            disabled={!zData}
             style={{
               height: "40px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: showSlice ? "#8a2e2e" : "#555", // 表示中は赤系にして「停止」っぽく
+              backgroundColor: showSlice ? "#8a2e2e" : "#555",
               color: "#fff",
               fontWeight: 600,
-              cursor: "pointer",
+              cursor: zData ? "pointer" : "not-allowed",
+              opacity: zData ? 1 : 0.5,
               marginTop: "8px",
             }}
             onClick={() => {
-              // いま表示中なら「停止（非表示）」にする
-              if (showSlice) {
-                setShowSlice(false);
-                return;
-              }
-
-              // まだ表示していないなら「出力（表示）」にする
-              // まだ 3D を開始していない場合は、その場でデータ生成
-              if (!zData) {
-                const generated = addNoise(generateCoinData(GRID_SIZE), 0.1);
-                setZData(generated);
-              }
-              setShowSlice(true);
+              if (!zData) return;        // ★ ガード（保険）
+              setShowSlice((v) => !v);  // ★ 表示/非表示を切り替えるだけ
             }}
           >
             {showSlice ? "断層出力を停止" : "断層を出力"}
           </button>
+          
           {/* ★ 断層位置スライダー（showSlice のとき有効） */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label style={{ fontSize: "13px" }}>
