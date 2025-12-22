@@ -152,6 +152,15 @@ function App() {
     if (!zData) return; // データがないなら何もしない
     setShowSlice((v) => !v);
   };
+  
+  useEffect(() => {
+    if (!showPlot || !plotRef.current) return;
+  
+    // レイアウトが変わった「次の描画フレーム」で resize
+    requestAnimationFrame(() => {
+      Plotly.Plots.resize(plotRef.current as any);
+    });
+  }, [showSlice, showPlot]);
 
 useEffect(() => {
   if (!plotRef.current) return;
@@ -565,7 +574,7 @@ useEffect(() => {
           >
             {showSlice ? "断層出力を停止" : "断層を出力"}
           </button>
-          
+
           {/* ★ 断層位置スライダー（showSlice のとき有効） */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label style={{ fontSize: "13px" }}>
