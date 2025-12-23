@@ -95,7 +95,11 @@ function App() {
   // 断層位置（0~GRID_SIZE-1を動かす)
   const [sliceIndex, setSliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
-   // 掃引関連の入力値 & 単位
+  // 計測ステータス
+  type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
+  const [status, setStatus] = useState<MeasureStatus>("READY");
+
+  // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
