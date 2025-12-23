@@ -103,7 +103,7 @@ function App() {
 
   // 次の掃引までの時間間隔 & 単位 (s / ms)
   const [sweepTimeInterval, setSweepTimeInterval] = useState("");
-  const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("s");
+  const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("ms");
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
 
@@ -446,7 +446,7 @@ useEffect(() => {
                 }}
               />
               <select
-                value={sweepIntervalUnit}
+                value={sweepRangeUnit}
                 onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
                 style={unitSelectStyle}
               >
@@ -477,7 +477,7 @@ useEffect(() => {
                 }}
               />
               <select
-                value={sweepIntervalUnit}
+                value={sweepTimeUnit}
                 onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
                 style={unitSelectStyle}
               >
