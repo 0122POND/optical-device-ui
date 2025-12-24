@@ -504,14 +504,19 @@ useEffect(() => {
 
           {/* 軸トグルボタン */}
           <button
-            onClick={() => setAxisVisible(v => !v)}
+            disabled={!showPlot}
+            onClick={() => {
+              if (!showPlot) return; // ★ ガード（保険）
+              setAxisVisible(v => !v);
+            }}
             style={{
               height: "36px",
               borderRadius: "6px",
               border: "none",
               backgroundColor: axisVisible ? "#444" : "#222",
               color: "#fff",
-              cursor: "pointer",
+              cursor: showPlot ? "pointer" : "not-allowed",
+              opacity: showPlot ? 1 : 0.5,
             }}
           >
             {axisVisible ? "軸を非表示" : "軸を表示"}
