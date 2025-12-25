@@ -166,39 +166,63 @@ function App() {
     });
   }, [showSlice, showPlot]);
 
-useEffect(() => {
-  if (!plotRef.current) return;
-
-  if (!showPlot) {
-    Plotly.purge(plotRef.current);
-    return;
-  }
-
-  // データ生成
-  let z = generateCoinData(GRID_SIZE);
-  z = addNoise(z, 0.1);
-  setZData(z); // ★ state に保存
-
-  const data = [
-    {
-      z,
-      type: "surface" as const,
-      colorbar: {
-        x: 1.02,
-        thickness: 15,
+  useEffect(() => {
+    if (!plotRef.current) return;
+  
+    // showPlot=false のときは何もしない（purgeしてもOK）
+    if (!showPlot) {
+      Plotly.purge(plotRef.current);
+      return;
+    }
+  
+    // ★ zData がなければ生成（毎回生成しない！）
+    const z = zData ?? addNoise(generateCoinData(GRID_SIZE), 0.1);
+    if (!zData) setZData(z);
+  
+    // --- メイン surface ---
+    const data: any[] = [
+      {
+        z,
+        type: "surface",
+        colorbar: { x: 1.02, thickness: 15 },
       },
-    },
-  ];
-
-    const layout = {
+    ];
+  
+    // --- ★ 断層リボン（A案） ---
+    if (showSlice && z) {
+      const y0 = Math.max(0, sliceIndex - 0.5);
+      const y1 = Math.min(GRID_SIZE - 1, sliceIndex + 0.5);
+  
+      const xVals = Array.from({ length: GRID_SIZE }, (_, i) => i);
+      const row = z[sliceIndex]; // y = sliceIndex の1行
+  
+      // 2行にして “細い帯(surface)” を作る
+      const ribbonZ = [row, row];
+      const ribbonX = [xVals, xVals];
+      const ribbonY = [xVals.map(() => y0), xVals.map(() => y1)];
+  
+      data.push({
+        type: "surface",
+        x: ribbonX,
+        y: ribbonY,
+        z: ribbonZ,
+        showscale: false,
+        opacity: 0.6,
+        hoverinfo: "skip",
+        // 単色っぽく見せたい場合（お好みで）
+        colorscale: [
+          [0, "rgba(255, 255, 0, 0.95)"],
+          [1, "rgba(255, 255, 0, 0.95)"],
+        ],
+        cmin: 0,
+        cmax: 1,
+      });
+    }
+  
+    const layout: any = {
       title: "Sample 3D Coin-like Surface",
       autosize: true,
-      margin: {
-        l: 0,
-        r: 20,
-        t: 40,
-        b: 40,
-      },
+      margin: { l: 0, r: 20, t: 40, b: 40 },
       scene: {
         xaxis: {
           title: axisVisible ? "X" : "",
@@ -221,20 +245,16 @@ useEffect(() => {
         aspectratio: { x: 1, y: 1, z: 0.6 },
       },
     };
-
-    const config = {
-      responsive: true,
-      displaylogo: false,
-    };
-
-    Plotly.newPlot(plotRef.current, data as any, layout as any, config as any);
-
+  
+    const config: any = { responsive: true, displaylogo: false };
+  
+    Plotly.newPlot(plotRef.current, data, layout, config);
+  
     return () => {
-      if (plotRef.current) {
-        Plotly.purge(plotRef.current);
-      }
+      if (plotRef.current) Plotly.purge(plotRef.current);
     };
-  }, [axisVisible, showPlot]);
+  }, [showPlot, axisVisible, showSlice, sliceIndex, zData, GRID_SIZE]);
+  
 
 // --- 2D 断層グラフ描画 ---
 useEffect(() => {
