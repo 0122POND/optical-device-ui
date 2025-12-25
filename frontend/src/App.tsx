@@ -95,7 +95,11 @@ function App() {
   // 断層位置（0~GRID_SIZE-1を動かす)
   const [sliceIndex, setSliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
-   // 掃引関連の入力値 & 単位
+  // 計測ステータス
+  type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
+  const [status, setStatus] = useState<MeasureStatus>("READY");
+
+  // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
@@ -498,21 +502,6 @@ useEffect(() => {
             }}
           />
 
-          {/* 軸トグルボタン */}
-          <button
-            onClick={() => setAxisVisible(v => !v)}
-            style={{
-              height: "36px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: axisVisible ? "#444" : "#222",
-              color: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            {axisVisible ? "軸を非表示" : "軸を表示"}
-          </button>
-
           {/* 3D描画ボタン → 押すと確認モーダルを表示 */}
           <button
             style={{
@@ -531,6 +520,26 @@ useEffect(() => {
             }}
           >
             START
+          </button>
+
+          {/* 軸トグルボタン */}
+          <button
+            disabled={!showPlot}
+            onClick={() => {
+              if (!showPlot) return; // ★ ガード（保険）
+              setAxisVisible(v => !v);
+            }}
+            style={{
+              height: "36px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: axisVisible ? "#444" : "#222",
+              color: "#fff",
+              cursor: showPlot ? "pointer" : "not-allowed",
+              opacity: showPlot ? 1 : 0.5,
+            }}
+          >
+            {axisVisible ? "軸を非表示" : "軸を表示"}
           </button>
 
           {/* CSV出力ボタン（緑） */}
