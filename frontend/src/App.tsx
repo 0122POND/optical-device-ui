@@ -40,17 +40,22 @@ function generateCoinData(size = 120): (number | null)[][] {
   return zData;
 }
 
-// ノイズを加える（null はそのまま残す）
 function addNoise(
   zData: (number | null)[][],
   amplitude = 0.05
 ): (number | null)[][] {
   return zData.map(row =>
-    row.map(z =>
-      z === null ? null : z + (Math.random() - 0.5) * amplitude
-    )
+    row.map(z => {
+      if (z === null) return null;
+
+      const noisy = z + (Math.random() - 0.5) * amplitude;
+
+      // ★ z < 0 は描画しない
+      return noisy < 0 ? null : noisy;
+    })
   );
 }
+
 
 function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
   const rows = zData.map(row =>
