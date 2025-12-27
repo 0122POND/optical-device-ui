@@ -237,13 +237,13 @@ useEffect(() => {
   };
   }, [showSlice, zData, sliceIndex]);
 
-// 「はい」が押されたときの処理（モードごとに分岐）
+  // 「はい」が押されたときの処理（モードごとに分岐）
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
       setShowPlot(true);
       console.log("3次元形状計測を開始します");
     } else if (confirmMode === "csv") {
-// zData があればそれを書き出し、なければその場で生成して出力
+      // zData があればそれを書き出し、なければその場で生成して出力
       if (zData) {
         downloadCSV(zData, "surface.csv");
       } else {
@@ -330,7 +330,6 @@ useEffect(() => {
           overflow: "hidden",
         }}
       >    
-
 
         {/* ▼ 左：サイドパネル */}
         <div
@@ -444,7 +443,6 @@ useEffect(() => {
             </div>
           </div>
 
-
           {/* 区切り */}
           <div
             style={{
@@ -557,8 +555,6 @@ useEffect(() => {
               {(!zData && "※先に断層出力 or START でデータ生成してください") || ""}
             </div>
           </div>
-
-
 
           <div style={{ flexGrow: 1 }} />
         </div>
