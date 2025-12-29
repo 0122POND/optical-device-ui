@@ -88,6 +88,21 @@ function App() {
     if (!zData) return; // データがないなら何もしない
     setShowSlice((v) => !v);
   };
+
+    // 取得中（擬似ラグ中）フラグ
+  const [isAcquiring, setIsAcquiring] = useState(false);
+
+  // setTimeout のID保持（連打対策 & アンマウント対策）
+  const acquireTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (acquireTimerRef.current != null) {
+        window.clearTimeout(acquireTimerRef.current);
+      }
+    };
+  }, []);
+
   
   useEffect(() => {
     if (!showPlot || !plotRef.current) return;
@@ -103,6 +118,11 @@ function App() {
   
     // showPlot=false のときは何もしない（purgeしてもOK）
     if (!showPlot) {
+      Plotly.purge(plotRef.current);
+      return;
+    }
+      // ★ ここで zData が無いなら「まだ取得中」なので描画しない
+    if (!zData) {
       Plotly.purge(plotRef.current);
       return;
     }
@@ -237,13 +257,32 @@ useEffect(() => {
   };
   }, [showSlice, zData, sliceIndex]);
 
-  // 「はい」が押されたときの処理（モードごとに分岐）
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
-      setShowPlot(true);
-      console.log("3次元形状計測を開始します");
+      // 連打された時のために前のタイマーを止める
+      if (acquireTimerRef.current != null) {
+        window.clearTimeout(acquireTimerRef.current);
+      }
+  
+      // 表示初期化
+      setShowPlot(true);     // 右側エリアは「開始状態」にする
+      setShowSlice(false);   // 断層は一旦消す（好み）
+      setZData(null);        // 古いデータを捨てて「取得待ち」にする（好み）
+      setStatus("RUNNING");
+      setIsAcquiring(true);
+  
+      console.log("3次元形状データを取得中...");
+  
+      acquireTimerRef.current = window.setTimeout(() => {
+        const z = addNoise(generateCoinData(GRID_SIZE), 0.1);
+        setZData(z);
+  
+        setIsAcquiring(false);
+        setStatus("COMPLETE");
+        console.log("3次元形状データ取得完了");
+      }, 3000);
+  
     } else if (confirmMode === "csv") {
-      // zData があればそれを書き出し、なければその場で生成して出力
       if (zData) {
         downloadCSV(zData, "surface.csv");
       } else {
@@ -254,7 +293,7 @@ useEffect(() => {
   
     setShowConfirm(false);
     setConfirmMode(null);
-  };
+  };  
   
 
   // 「いいえ」の処理
@@ -595,6 +634,28 @@ useEffect(() => {
                   3次元形状計測を開始してください。
                 </div>
               )}
+
+              {isAcquiring && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#ddd",
+                    fontSize: "15px",
+                    backgroundColor: "rgba(0,0,0,0.25)",
+                    pointerEvents: "none",
+                    textAlign: "center",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  三次元形状データを取得中...
+                </div>
+              )}
+
+
             </div>
           </div>
 
