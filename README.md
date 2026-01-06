@@ -1,4 +1,4 @@
-# Optical Device UI (仮称)
+# Optical Device UI
 
 本リポジトリは、光学装置で取得したデータを用いて、
 三次元形状を可視化するための Web ベース UI を開発するプロジェクトです。
