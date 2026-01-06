@@ -531,14 +531,14 @@ useEffect(() => {
             {axisVisible ? "軸を非表示" : "軸を表示"}
           </button>
 
-          {/* CSV出力ボタン（緑） */}
+          {/* CSV出力ボタン（白） */}
           <button
             style={{
               height: "40px",
               borderRadius: "6px",
-              border: "none",
-              backgroundColor: "#2e7d32",
-              color: "#fff",
+              border: "1px solid #666",
+              backgroundColor: "#f2f2f2",
+              color: "#111",
               fontWeight: 600,
               cursor: "pointer",
               marginTop: "8px",
