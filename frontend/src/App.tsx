@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV } from "./utils/csv";
+import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import "./App.css";
 
 function App() {
@@ -42,6 +43,9 @@ function App() {
   const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("ms");
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
+  const [cloud, setCloud] = useState<PointCloud | null>(null);
+  const [cloudMeta, setCloudMeta] = useState<{ width: number; height: number; depth: number } | null>(null);
+
 
   const unitSelectStyle: React.CSSProperties = {
     height: "32px",
@@ -116,65 +120,53 @@ function App() {
   useEffect(() => {
     if (!plotRef.current) return;
   
-    // showPlot=false のときは何もしない（purgeしてもOK）
     if (!showPlot) {
       Plotly.purge(plotRef.current);
       return;
     }
-      // ★ ここで zData が無いなら「まだ取得中」なので描画しない
-    if (!zData) {
+    if (!cloud) {
       Plotly.purge(plotRef.current);
       return;
     }
   
-    // ★ zData がなければ生成（毎回生成しない！）
-    const z = zData ?? addNoise(generateCoinData(GRID_SIZE), 0.1);
-    if (!zData) setZData(z);
+    // ★ Python側と同じ azim/elev をここに固定（必要なら state化もOK）
+    const azim = 20;
+    const elev = 10;
   
-    // --- メイン surface ---
+    // ★ Python版と同じカメラ計算
+    const az = (azim * Math.PI) / 180;
+    const el = (elev * Math.PI) / 180;
+    const cam = {
+      eye: {
+        x: 2.0 * Math.cos(az) * Math.cos(el),
+        y: 2.0 * Math.sin(az) * Math.cos(el),
+        z: 2.0 * Math.sin(el) + 0.5,
+      },
+    };
+  
     const data: any[] = [
       {
-        z,
-        type: "surface",
-        colorbar: { x: 1.02, thickness: 15 },
+        type: "scatter3d",
+        mode: "markers",
+        x: cloud.x,
+        y: cloud.y,
+        z: cloud.z,
+        marker: {
+          size: 1,
+          opacity: 0.08,
+          color: cloud.c,
+          colorscale: "Viridis",
+          showscale: true,
+          colorbar: { title: "Z (flipped)", x: 1.02, thickness: 18, len: 0.75 },
+        },
       },
     ];
   
-    // --- ★ 断層リボン（A案） ---
-    if (showSlice && z) {
-      const y0 = Math.max(0, sliceIndex - 0.5);
-      const y1 = Math.min(GRID_SIZE - 1, sliceIndex + 0.5);
-  
-      const xVals = Array.from({ length: GRID_SIZE }, (_, i) => i);
-      const row = z[sliceIndex]; // y = sliceIndex の1行
-  
-      // 2行にして “細い帯(surface)” を作る
-      const ribbonZ = [row, row];
-      const ribbonX = [xVals, xVals];
-      const ribbonY = [xVals.map(() => y0), xVals.map(() => y1)];
-  
-      data.push({
-        type: "surface",
-        x: ribbonX,
-        y: ribbonY,
-        z: ribbonZ,
-        showscale: false,
-        opacity: 0.6,
-        hoverinfo: "skip",
-        // 単色っぽく見せたい場合（お好みで）
-        colorscale: [
-          [0, "rgba(255, 255, 0, 0.95)"],
-          [1, "rgba(255, 255, 0, 0.95)"],
-        ],
-        cmin: 0,
-        cmax: 1,
-      });
-    }
-  
     const layout: any = {
-      title: "Sample 3D Coin-like Surface",
+      title: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
       autosize: true,
-      margin: { l: 0, r: 20, t: 40, b: 40 },
+      // ★ Python版に寄せる（右マージンを極小に）
+      margin: { l: 0, r: 0, t: 30, b: 0 },
       scene: {
         xaxis: {
           title: axisVisible ? "X" : "",
@@ -187,14 +179,22 @@ function App() {
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
+          // ★ もし「画像座標っぽく」上を0にしたいならON
+          // autorange: "reversed",
         },
         zaxis: {
-          title: axisVisible ? "Height" : "",
+          title: axisVisible ? "Z (flipped)" : "",
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
         },
-        aspectratio: { x: 1, y: 1, z: 0.6 },
+  
+        // ★ ここが重要：Python版と同じ z_aspect=1.0
+        aspectmode: "manual",
+        aspectratio: { x: 1, y: 1, z: 1.0 },
+  
+        // ★ カメラをPython版と同じにする
+        camera: cam,
       },
     };
   
@@ -205,7 +205,9 @@ function App() {
     return () => {
       if (plotRef.current) Plotly.purge(plotRef.current);
     };
-  }, [showPlot, axisVisible, showSlice, sliceIndex, zData, GRID_SIZE]);
+  }, [showPlot, axisVisible, cloud]);
+  
+  
   
 
 // --- 2D 断層グラフ描画 ---
@@ -264,23 +266,42 @@ useEffect(() => {
         window.clearTimeout(acquireTimerRef.current);
       }
   
-      // 表示初期化
-      setShowPlot(true);     // 右側エリアは「開始状態」にする
-      setShowSlice(false);   // 断層は一旦消す（好み）
-      setZData(null);        // 古いデータを捨てて「取得待ち」にする（好み）
-      setStatus("RUNNING");
-      setIsAcquiring(true);
-  
-      console.log("3次元形状データを取得中...");
-  
-      acquireTimerRef.current = window.setTimeout(() => {
-        const z = addNoise(generateCoinData(GRID_SIZE), 0.1);
-        setZData(z);
-  
+    // 表示初期化
+    setShowPlot(true);
+    setShowSlice(false);     // 断層は今回一旦オフ
+    setZData(null);          // ★今は surface を使わないので、念のため捨てる
+    setCloud(null);
+    setCloudMeta(null);
+
+    setStatus("RUNNING");
+    setIsAcquiring(true);
+
+    console.log("点群生成中...");
+
+    (async () => {
+      try {
+        const { cloud, width, height, depth } = await buildPointCloudFromFolder({
+          folderUrl: "/data/result_coin_ruined",
+          threshold: 128,
+          samplePerSlice: 4000,
+          flipZ: true,
+          colorMode: "z", // "intensity" にすると輝度で着色
+        });
+
+        setCloud(cloud);
+        setCloudMeta({ width, height, depth });
+
         setIsAcquiring(false);
         setStatus("COMPLETE");
-        console.log("3次元形状データ取得完了");
-      }, 3000);
+        console.log("点群生成完了", { points: cloud.x.length, width, height, depth });
+      } catch (e) {
+        console.error(e);
+        setIsAcquiring(false);
+        setStatus("READY");
+        setShowPlot(false);
+        alert(`点群生成に失敗しました: ${(e as Error).message}`);
+      }
+    })();
   
     } else if (confirmMode === "csv") {
       if (zData) {
