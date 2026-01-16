@@ -1,57 +1,100 @@
 # Optical Device UI
 
-本リポジトリは、光学装置で取得したデータを用いて、
-三次元形状を可視化するための Web ベース UI を開発するプロジェクトです。
+光学デバイスで取得したデータから三次元形状を可視化するWebアプリケーションです。
 
-### 起動手順（開発用）
+## 機能
 
-1. フロントエンドへ移動
+- 光学計測画像の前処理（背景差分、ガウス窓、ピーク検出など）
+- 処理結果からの3D点群生成・表示
+- リアルタイム進捗表示
+- インタラクティブな3Dビューア（回転、ズーム、軸表示切替）
+- CSV出力
 
+## 技術スタック
+
+**フロントエンド**
+- React 19 + TypeScript
+- Plotly.js（3D可視化）
+- Vite（ビルドツール）
+
+**バックエンド**
+- Python + FastAPI
+- WebSocket（リアルタイム通信）
+- NumPy / SciPy / Pillow（画像処理）
+
+## 起動手順
+
+### 1. 依存関係のインストール
+
+```bash
+# フロントエンド
+cd frontend
+npm install
+
+# バックエンド（プロジェクトルートで実行）
+pip3 install fastapi uvicorn websockets numpy Pillow scipy
+```
+
+### 2. 画像データの配置
+
+処理対象の画像を以下に配置してください：
+
+```
+frontend/public/data/row_data/
+├── 001.bmp
+├── 002.bmp
+├── ...
+└── 170.bmp
+```
+
+### 3. サーバー起動
+
+**ターミナル1: バックエンド**
+```bash
+python3 -m uvicorn backend.app:app --reload --port 8000
+```
+
+**ターミナル2: フロントエンド**
 ```bash
 cd frontend
-```
-
-2. 依存関係のインストール（初回のみ）
-
-```bash
-npm install
-```
-
-3. 開発サーバを起動
-
-```bash
 npm run dev
 ```
 
-起動後、ターミナルに表示される URL（例: http://localhost:5173）をブラウザで開くと UI が表示されます。
+### 4. ブラウザでアクセス
 
-## 現状
+http://localhost:5173 を開き、「START」ボタンをクリックすると：
+1. 画像処理が実行される（進捗バー表示）
+2. 処理完了後、3D点群が表示される
 
-- リポジトリ構成の準備を開始
-- フロントエンド / バックエンド / データ格納場所などのディレクトリのみ作成済み
+## ディレクトリ構成
 
-## 目的（概要）
-
-- 取得した画像やデータから三次元的な形状を生成し、
-  ブラウザ上でインタラクティブに表示・操作できる環境を構築すること
-
-## 今後の予定（大枠）
-
-- フロントエンド環境（React + TypeScript + Plotly）構築
-- サンプルデータを使った 3D 表示の動作検証
-- データフォーマットおよび入出力仕様の整理
-- 必要に応じたバックエンド機能の追加（※将来的検討）
-
-## ディレクトリ構成（予定）
-
+```
 optical-device-ui/
-├── frontend/ # Web UI
-├── backend/ # API（必要に応じて実装）
-├── data/ # サンプルデータ
-├── docs/ # 仕様・メモ
-└── scripts/ # 変換・補助スクリプト
+├── frontend/               # React フロントエンド
+│   ├── src/
+│   │   ├── App.tsx        # メインコンポーネント
+│   │   └── utils/         # ユーティリティ関数
+│   └── public/data/       # 画像データ格納場所
+├── backend/
+│   └── app.py             # FastAPI サーバー
+├── scripts/
+│   └── preprocess_images.py  # 画像処理モジュール
+├── CLAUDE.md              # Claude Code用ガイド
+└── README.md
+```
 
----
+## 開発コマンド
 
-まだ試行段階ですが、実験的な機能追加や検証を進めながら、
-必要な設計や実装を段階的に整えていきます。
+```bash
+# フロントエンド
+cd frontend
+npm run dev      # 開発サーバー起動
+npm run build    # 本番ビルド
+npm run lint     # ESLint実行
+
+# バックエンド
+python3 -m uvicorn backend.app:app --reload --port 8000
+
+# 画像処理（CLI単体実行）
+python3 scripts/preprocess_images.py
+```
