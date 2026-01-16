@@ -7,6 +7,27 @@ import "./App.css";
 
 const WS_URL = "ws://localhost:8000/ws";
 
+// カラーパレット（モダングレー）
+const colors = {
+  bg: "#3a3f47",
+  bgLight: "#454b54",
+  bgDark: "#2d3139",
+  border: "#4f5661",
+  borderLight: "#5a6270",
+  text: "#f0f1f3",
+  textMuted: "#9ca3af",
+  textDim: "#8b939f",
+  primary: "#3b82f6",
+  primaryHover: "#2563eb",
+  danger: "#ef4444",
+  success: "#22c55e",
+  secondary: "#6b7280",
+  secondaryHover: "#4b5563",
+};
+
+// フォント設定
+const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
 function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
@@ -49,7 +70,7 @@ function App() {
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
-  const [cloudMeta, setCloudMeta] = useState<{ width: number; height: number; depth: number } | null>(null);
+  const [_cloudMeta, setCloudMeta] = useState<{ width: number; height: number; depth: number } | null>(null);
 
   // 進捗表示用
   const [progressStep, setProgressStep] = useState(0);
@@ -63,36 +84,76 @@ function App() {
   // setTimeout のID保持（連打対策 & アンマウント対策）
   const acquireTimerRef = useRef<number | null>(null);
 
-  const unitSelectStyle: React.CSSProperties = {
-    height: "32px",
-    padding: "0 10px",
+  const inputStyle: React.CSSProperties = {
+    height: "36px",
+    padding: "6px 12px",
     borderRadius: "6px",
-    border: "1px solid #555",
-    backgroundColor: "#181818",
-    color: "#fff",
-    fontSize: "12px",
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.bgDark,
+    color: colors.text,
+    fontSize: "13px",
+    fontFamily: fontFamily,
+    outline: "none",
+    transition: "border-color 0.2s",
+  };
+
+  const unitSelectStyle: React.CSSProperties = {
+    height: "36px",
+    padding: "0 12px",
+    borderRadius: "6px",
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.bgDark,
+    color: colors.text,
+    fontSize: "13px",
+    fontFamily: fontFamily,
     cursor: "pointer",
     outline: "none",
+  };
+
+  const buttonPrimaryStyle: React.CSSProperties = {
+    height: "42px",
+    borderRadius: "8px",
+    border: "none",
+    backgroundColor: colors.primary,
+    color: colors.text,
+    fontSize: "14px",
+    fontWeight: 600,
+    fontFamily: fontFamily,
+    cursor: "pointer",
+    transition: "background-color 0.2s, opacity 0.2s",
+  };
+
+  const buttonSecondaryStyle: React.CSSProperties = {
+    height: "38px",
+    borderRadius: "6px",
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.bgDark,
+    color: colors.text,
+    fontSize: "13px",
+    fontWeight: 500,
+    fontFamily: fontFamily,
+    cursor: "pointer",
+    transition: "background-color 0.2s",
   };
 
   const StatusBadge = ({ status }: { status: MeasureStatus }) => {
     const config = {
       READY: {
-        bg: "#1f2e1f",
+        bg: "#1e3a2f",
         color: "#6bff95",
         border: "#6bff9555",
         dot: "#3ddc84",
         label: "READY",
       },
       RUNNING: {
-        bg: "#2e1f1f",
+        bg: "#3a2828",
         color: "#ff6b6b",
         border: "#ff6b6b55",
         dot: "#ff4d4d",
         label: "RUNNING",
       },
       COMPLETE: {
-        bg: "#1f1f2e",
+        bg: "#1e2a3a",
         color: "#6b95ff",
         border: "#6b95ff55",
         dot: "#4d7fff",
@@ -127,11 +188,6 @@ function App() {
         {c.label}
       </div>
     );
-  };
-
-  const toggleSlice = () => {
-    if (!zData) return;
-    setShowSlice((v) => !v);
   };
 
   // WebSocket接続
@@ -349,9 +405,9 @@ function App() {
       xaxis: { title: "X index" },
       yaxis: { title: "Height" },
       height: 250,
-      paper_bgcolor: "#121212",
-      plot_bgcolor: "#121212",
-      font: { color: "#fff" },
+      paper_bgcolor: colors.bgDark,
+      plot_bgcolor: colors.bgDark,
+      font: { color: colors.text },
     };
 
     const config = {
@@ -441,8 +497,11 @@ function App() {
           height: "100vh",
           display: "grid",
           gridTemplateRows: "56px 1fr",
-          backgroundColor: "#2d2d2d",
-          color: "#fff",
+          backgroundColor: colors.bg,
+          color: colors.text,
+          fontFamily: fontFamily,
+          fontSize: "14px",
+          lineHeight: 1.5,
         }}
       >
         {/* ヘッダー */}
@@ -452,8 +511,8 @@ function App() {
             display: "flex",
             alignItems: "center",
             padding: "0 16px",
-            backgroundColor: "#2d2d2d",
-            borderBottom: "1px solid #444",
+            backgroundColor: colors.bgLight,
+            borderBottom: `1px solid ${colors.border}`,
             boxSizing: "border-box",
             gap: "10px",
           }}
@@ -464,7 +523,7 @@ function App() {
             style={{ height: "28px", width: "auto", opacity: 0.95 }}
           />
 
-          <div style={{ fontWeight: 600, fontSize: "15px" }}>
+          <div style={{ fontWeight: 600, fontSize: "16px", letterSpacing: "0.3px" }}>
             3D Surface Measurement UI
           </div>
 
@@ -478,7 +537,7 @@ function App() {
           >
             <StatusBadge status={status} />
 
-            <div style={{ fontSize: "12px", color: "#aaa" }}>Ver. 0.1.0</div>
+            <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.2.0</div>
           </div>
         </div>
 
@@ -499,18 +558,18 @@ function App() {
               display: "flex",
               flexDirection: "column",
               gap: "16px",
-              backgroundColor: "#2d2d2d",
+              backgroundColor: colors.bgLight,
               boxSizing: "border-box",
-              borderRight: "1px solid #444",
+              borderRight: `1px solid ${colors.border}`,
             }}
           >
-            <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
+            <div style={{ fontSize: "15px", fontWeight: 600, letterSpacing: "0.3px" }}>
               スキャン設定
             </div>
 
             {/* 掃引間隔 */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px" }}>掃引間隔</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引間隔</label>
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input
                   type="text"
@@ -518,13 +577,8 @@ function App() {
                   value={sweepInterval}
                   onChange={(e) => setSweepInterval(e.target.value)}
                   style={{
+                    ...inputStyle,
                     flex: 1,
-                    height: "32px",
-                    padding: "4px 8px",
-                    borderRadius: "6px",
-                    border: "1px solid #555",
-                    backgroundColor: "#181818",
-                    color: "#fff",
                   }}
                 />
                 <select
@@ -542,7 +596,7 @@ function App() {
 
             {/* 掃引範囲 */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px" }}>掃引範囲</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引範囲</label>
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input
                   type="text"
@@ -550,13 +604,8 @@ function App() {
                   value={sweepRange}
                   onChange={(e) => setSweepRange(e.target.value)}
                   style={{
+                    ...inputStyle,
                     flex: 1,
-                    height: "32px",
-                    padding: "4px 8px",
-                    borderRadius: "6px",
-                    border: "1px solid #555",
-                    backgroundColor: "#181818",
-                    color: "#fff",
                   }}
                 />
                 <select
@@ -574,7 +623,7 @@ function App() {
 
             {/* 次の掃引までの時間間隔 */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>次の掃引までの時間間隔</label>
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input
                   type="text"
@@ -582,14 +631,9 @@ function App() {
                   value={sweepTimeInterval}
                   onChange={(e) => setSweepTimeInterval(e.target.value)}
                   style={{
+                    ...inputStyle,
                     flex: 1,
                     minWidth: 0,
-                    height: "32px",
-                    padding: "4px 8px",
-                    borderRadius: "6px",
-                    border: "1px solid #555",
-                    backgroundColor: "#181818",
-                    color: "#fff",
                   }}
                 />
                 <select
@@ -608,7 +652,7 @@ function App() {
             <div
               style={{
                 height: "1px",
-                backgroundColor: "#333",
+                backgroundColor: colors.border,
                 margin: "8px 0",
               }}
             />
@@ -617,12 +661,8 @@ function App() {
             <button
               disabled={status === "RUNNING"}
               style={{
-                height: "40px",
-                borderRadius: "6px",
-                border: "none",
-                backgroundColor: status === "RUNNING" ? "#555" : "#1976d2",
-                color: "#fff",
-                fontWeight: 600,
+                ...buttonPrimaryStyle,
+                backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
                 cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                 marginTop: "4px",
                 opacity: status === "RUNNING" ? 0.7 : 1,
@@ -643,11 +683,8 @@ function App() {
                 setAxisVisible((v) => !v);
               }}
               style={{
-                height: "36px",
-                borderRadius: "6px",
-                border: "none",
-                backgroundColor: axisVisible ? "#444" : "#222",
-                color: "#fff",
+                ...buttonSecondaryStyle,
+                backgroundColor: axisVisible ? colors.borderLight : colors.bgDark,
                 cursor: showPlot ? "pointer" : "not-allowed",
                 opacity: showPlot ? 1 : 0.5,
               }}
@@ -658,13 +695,9 @@ function App() {
             {/* CSV出力ボタン */}
             <button
               style={{
-                height: "40px",
-                borderRadius: "6px",
-                border: "1px solid #666",
-                backgroundColor: "#f2f2f2",
-                color: "#111",
-                fontWeight: 600,
-                cursor: "pointer",
+                ...buttonSecondaryStyle,
+                height: "42px",
+                backgroundColor: colors.bgDark,
                 marginTop: "8px",
               }}
               onClick={() => {
@@ -672,19 +705,17 @@ function App() {
                 setShowConfirm(true);
               }}
             >
-              csvファイルを出力
+              CSVファイルを出力
             </button>
 
             {/* 断層 出力/停止 トグルボタン */}
             <button
               disabled={!zData}
               style={{
-                height: "40px",
-                borderRadius: "6px",
+                ...buttonSecondaryStyle,
+                height: "42px",
                 border: "none",
-                backgroundColor: showSlice ? "#8a2e2e" : "#555",
-                color: "#fff",
-                fontWeight: 600,
+                backgroundColor: showSlice ? colors.danger : colors.secondary,
                 cursor: zData ? "pointer" : "not-allowed",
                 opacity: zData ? 1 : 0.5,
                 marginTop: "8px",
@@ -699,7 +730,7 @@ function App() {
 
             {/* 断層位置スライダー */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "13px" }}>断層位置（y）: {sliceIndex}</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>断層位置（y）: {sliceIndex}</label>
 
               <input
                 type="range"
@@ -712,7 +743,7 @@ function App() {
                 style={{ width: "100%" }}
               />
 
-              <div style={{ fontSize: "12px", color: "#aaa" }}>
+              <div style={{ fontSize: "12px", color: colors.textDim }}>
                 {!zData && "※先に断層出力 or START でデータ生成してください"}
               </div>
             </div>
@@ -746,7 +777,7 @@ function App() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#777",
+                      color: colors.textDim,
                       fontSize: "15px",
                     }}
                   >
@@ -765,9 +796,9 @@ function App() {
                       flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#ddd",
+                      color: colors.text,
                       fontSize: "15px",
-                      backgroundColor: "rgba(0,0,0,0.6)",
+                      backgroundColor: "rgba(45, 49, 57, 0.85)",
                       pointerEvents: "none",
                       textAlign: "center",
                       lineHeight: 1.6,
@@ -783,7 +814,7 @@ function App() {
                       style={{
                         width: "300px",
                         height: "8px",
-                        backgroundColor: "#333",
+                        backgroundColor: colors.border,
                         borderRadius: "4px",
                         overflow: "hidden",
                       }}
@@ -792,7 +823,7 @@ function App() {
                         style={{
                           width: `${progressPercent}%`,
                           height: "100%",
-                          backgroundColor: "#1976d2",
+                          backgroundColor: colors.primary,
                           transition: "width 0.3s ease",
                         }}
                       />
@@ -802,7 +833,7 @@ function App() {
                       [{progressStep}/{progressTotal}] {progressMessage}
                     </div>
 
-                    <div style={{ fontSize: "12px", color: "#aaa" }}>
+                    <div style={{ fontSize: "12px", color: colors.textMuted }}>
                       {progressPercent}%
                     </div>
                   </div>
@@ -829,7 +860,7 @@ function App() {
           style={{
             position: "fixed",
             inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.45)",
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
@@ -839,18 +870,20 @@ function App() {
           <div
             style={{
               width: "320px",
-              backgroundColor: "#2b2b2b",
+              backgroundColor: colors.bgLight,
               borderRadius: "10px",
               padding: "20px 24px",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
               boxSizing: "border-box",
+              border: `1px solid ${colors.border}`,
             }}
           >
             <div
               style={{
                 fontSize: "15px",
-                marginBottom: "16px",
+                marginBottom: "20px",
                 fontWeight: 500,
+                lineHeight: 1.6,
               }}
             >
               {confirmMode === "csv"
@@ -861,17 +894,21 @@ function App() {
               style={{
                 display: "flex",
                 justifyContent: "flex-end",
-                gap: "8px",
+                gap: "10px",
               }}
             >
               <button
                 style={{
-                  padding: "6px 14px",
+                  padding: "8px 18px",
                   borderRadius: "6px",
                   border: "none",
-                  backgroundColor: "#444",
-                  color: "#fff",
+                  backgroundColor: colors.secondary,
+                  color: colors.text,
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  fontFamily: fontFamily,
                   cursor: "pointer",
+                  transition: "background-color 0.2s",
                 }}
                 onClick={handleConfirmCancel}
               >
@@ -879,13 +916,16 @@ function App() {
               </button>
               <button
                 style={{
-                  padding: "6px 14px",
+                  padding: "8px 18px",
                   borderRadius: "6px",
                   border: "none",
-                  backgroundColor: "#1976d2",
-                  color: "#fff",
-                  cursor: "pointer",
+                  backgroundColor: colors.primary,
+                  color: colors.text,
+                  fontSize: "13px",
                   fontWeight: 600,
+                  fontFamily: fontFamily,
+                  cursor: "pointer",
+                  transition: "background-color 0.2s",
                 }}
                 onClick={handleConfirmOk}
               >
