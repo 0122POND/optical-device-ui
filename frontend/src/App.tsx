@@ -75,7 +75,32 @@ function App() {
     outline: "none",
   };
 
-  const StatusBadge = ({ running }: { running: boolean }) => {
+  const StatusBadge = ({ status }: { status: MeasureStatus }) => {
+    const config = {
+      READY: {
+        bg: "#1f2e1f",
+        color: "#6bff95",
+        border: "#6bff9555",
+        dot: "#3ddc84",
+        label: "READY",
+      },
+      RUNNING: {
+        bg: "#2e1f1f",
+        color: "#ff6b6b",
+        border: "#ff6b6b55",
+        dot: "#ff4d4d",
+        label: "RUNNING",
+      },
+      COMPLETE: {
+        bg: "#1f1f2e",
+        color: "#6b95ff",
+        border: "#6b95ff55",
+        dot: "#4d7fff",
+        label: "COMPLETE",
+      },
+    };
+    const c = config[status];
+
     return (
       <div
         style={{
@@ -86,9 +111,9 @@ function App() {
           borderRadius: "999px",
           fontSize: "12px",
           fontWeight: 600,
-          backgroundColor: running ? "#2e1f1f" : "#1f2e1f",
-          color: running ? "#ff6b6b" : "#6bff95",
-          border: `1px solid ${running ? "#ff6b6b55" : "#6bff9555"}`,
+          backgroundColor: c.bg,
+          color: c.color,
+          border: `1px solid ${c.border}`,
         }}
       >
         <span
@@ -96,10 +121,10 @@ function App() {
             width: "8px",
             height: "8px",
             borderRadius: "50%",
-            backgroundColor: running ? "#ff4d4d" : "#3ddc84",
+            backgroundColor: c.dot,
           }}
         />
-        {running ? "RUNNING" : "READY"}
+        {c.label}
       </div>
     );
   };
@@ -451,7 +476,7 @@ function App() {
               gap: "12px",
             }}
           >
-            <StatusBadge running={status === "RUNNING"} />
+            <StatusBadge status={status} />
 
             <div style={{ fontSize: "12px", color: "#aaa" }}>Ver. 0.1.0</div>
           </div>
