@@ -23,6 +23,10 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# 画像データ（サイズが大きいため除外）
+frontend/public/data/row_data/
+frontend/public/data/result/
+
 # Python
 __pycache__/
 *.py[cod]

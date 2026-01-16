@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import "./App.css";
 
+const WS_URL = "ws://localhost:8000/ws";
+
 function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
+
+  // WebSocket
+  const wsRef = useRef<WebSocket | null>(null);
 
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
@@ -46,6 +51,17 @@ function App() {
   const [cloud, setCloud] = useState<PointCloud | null>(null);
   const [cloudMeta, setCloudMeta] = useState<{ width: number; height: number; depth: number } | null>(null);
 
+  // 進捗表示用
+  const [progressStep, setProgressStep] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [progressPercent, setProgressPercent] = useState(0);
+
+  // 取得中フラグ
+  const [isAcquiring, setIsAcquiring] = useState(false);
+
+  // setTimeout のID保持（連打対策 & アンマウント対策）
+  const acquireTimerRef = useRef<number | null>(null);
 
   const unitSelectStyle: React.CSSProperties = {
     height: "32px",
@@ -89,15 +105,99 @@ function App() {
   };
 
   const toggleSlice = () => {
-    if (!zData) return; // データがないなら何もしない
+    if (!zData) return;
     setShowSlice((v) => !v);
   };
 
-    // 取得中（擬似ラグ中）フラグ
-  const [isAcquiring, setIsAcquiring] = useState(false);
+  // WebSocket接続
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      return wsRef.current;
+    }
 
-  // setTimeout のID保持（連打対策 & アンマウント対策）
-  const acquireTimerRef = useRef<number | null>(null);
+    const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+    };
+
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WS message:", data);
+
+        if (data.type === "progress") {
+          setProgressStep(data.step);
+          setProgressTotal(data.total);
+          setProgressMessage(data.message);
+          setProgressPercent(data.percent);
+        } else if (data.type === "preprocess_complete") {
+          console.log("画像処理完了:", data.count, "files");
+          // 処理完了後、点群を読み込み
+          try {
+            const { cloud, width, height, depth } = await buildPointCloudFromFolder({
+              folderUrl: "/data/result",
+              threshold: 128,
+              samplePerSlice: 4000,
+              flipZ: true,
+              colorMode: "z",
+            });
+
+            setCloud(cloud);
+            setCloudMeta({ width, height, depth });
+            setIsAcquiring(false);
+            setStatus("COMPLETE");
+            setProgressMessage("完了");
+            setProgressPercent(100);
+            console.log("点群生成完了", { points: cloud.x.length, width, height, depth });
+          } catch (e) {
+            console.error(e);
+            setIsAcquiring(false);
+            setStatus("READY");
+            setShowPlot(false);
+            alert(`点群生成に失敗しました: ${(e as Error).message}`);
+          }
+        } else if (data.type === "status") {
+          if (data.value === "RUNNING") {
+            setStatus("RUNNING");
+          } else if (data.value === "COMPLETE") {
+            // preprocess_completeで処理するので、ここでは何もしない
+          } else if (data.value === "READY") {
+            setStatus("READY");
+          }
+        } else if (data.type === "error") {
+          console.error("Server error:", data.message);
+          setIsAcquiring(false);
+          setStatus("READY");
+          alert(`エラー: ${data.message}`);
+        }
+      } catch (e) {
+        console.error("Failed to parse WS message:", e);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket disconnected");
+      wsRef.current = null;
+    };
+
+    wsRef.current = ws;
+    return ws;
+  }, []);
+
+  // コンポーネントマウント時にWebSocket接続
+  useEffect(() => {
+    connectWebSocket();
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [connectWebSocket]);
 
   useEffect(() => {
     return () => {
@@ -107,11 +207,9 @@ function App() {
     };
   }, []);
 
-  
   useEffect(() => {
     if (!showPlot || !plotRef.current) return;
-  
-    // レイアウトが変わった「次の描画フレーム」で resize
+
     requestAnimationFrame(() => {
       Plotly.Plots.resize(plotRef.current as any);
     });
@@ -119,7 +217,7 @@ function App() {
 
   useEffect(() => {
     if (!plotRef.current) return;
-  
+
     if (!showPlot) {
       Plotly.purge(plotRef.current);
       return;
@@ -128,12 +226,10 @@ function App() {
       Plotly.purge(plotRef.current);
       return;
     }
-  
-    // ★ Python側と同じ azim/elev をここに固定（必要なら state化もOK）
+
     const azim = 20;
     const elev = 10;
-  
-    // ★ Python版と同じカメラ計算
+
     const az = (azim * Math.PI) / 180;
     const el = (elev * Math.PI) / 180;
     const cam = {
@@ -143,7 +239,7 @@ function App() {
         z: 2.0 * Math.sin(el) + 0.5,
       },
     };
-  
+
     const data: any[] = [
       {
         type: "scatter3d",
@@ -161,11 +257,10 @@ function App() {
         },
       },
     ];
-  
+
     const layout: any = {
       title: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
       autosize: true,
-      // ★ Python版に寄せる（右マージンを極小に）
       margin: { l: 0, r: 0, t: 30, b: 0 },
       scene: {
         xaxis: {
@@ -179,8 +274,6 @@ function App() {
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
-          // ★ もし「画像座標っぽく」上を0にしたいならON
-          // autorange: "reversed",
         },
         zaxis: {
           title: axisVisible ? "Z (flipped)" : "",
@@ -188,121 +281,114 @@ function App() {
           showgrid: axisVisible,
           zeroline: axisVisible,
         },
-  
-        // ★ ここが重要：Python版と同じ z_aspect=1.0
         aspectmode: "manual",
         aspectratio: { x: 1, y: 1, z: 1.0 },
-  
-        // ★ カメラをPython版と同じにする
         camera: cam,
       },
     };
-  
+
     const config: any = { responsive: true, displaylogo: false };
-  
+
     Plotly.newPlot(plotRef.current, data, layout, config);
-  
+
     return () => {
       if (plotRef.current) Plotly.purge(plotRef.current);
     };
   }, [showPlot, axisVisible, cloud]);
-  
-  
-  
 
-// --- 2D 断層グラフ描画 ---
-useEffect(() => {
-  if (!sliceRef.current) return;
+  // --- 2D 断層グラフ描画 ---
+  useEffect(() => {
+    if (!sliceRef.current) return;
 
-  // 非表示またはデータなしなら purge
-  if (!showSlice || !zData) {
-    Plotly.purge(sliceRef.current);
-    return;
-  }
-
-  // 断層として使う 1 行（y = sliceIndex）のデータ
-  const row = zData[sliceIndex];
-  const x = row.map((_, i) => i);
-  const y = row.map(v => (v == null ? null : v));
-
-  const data = [
-    {
-      x,
-      y,
-      type: "scatter" as const,
-      mode: "lines",
-    },
-  ];
-
-  const layout = {
-    title: `断層（y = ${sliceIndex}）`,
-    margin: { l: 40, r: 10, t: 30, b: 40 },
-    xaxis: { title: "X index" },
-    yaxis: { title: "Height" },
-    height: 250,
-    paper_bgcolor: "#121212",
-    plot_bgcolor: "#121212",
-    font: { color: "#fff" },
-  };
-
-  const config = {
-    responsive: true,
-    displaylogo: false,
-  };
-
-  Plotly.newPlot(sliceRef.current, data as any, layout as any, config as any);
-
-  return () => {
-    if (sliceRef.current) {
+    if (!showSlice || !zData) {
       Plotly.purge(sliceRef.current);
+      return;
     }
-  };
+
+    const row = zData[sliceIndex];
+    const x = row.map((_, i) => i);
+    const y = row.map((v) => (v == null ? null : v));
+
+    const data = [
+      {
+        x,
+        y,
+        type: "scatter" as const,
+        mode: "lines",
+      },
+    ];
+
+    const layout = {
+      title: `断層（y = ${sliceIndex}）`,
+      margin: { l: 40, r: 10, t: 30, b: 40 },
+      xaxis: { title: "X index" },
+      yaxis: { title: "Height" },
+      height: 250,
+      paper_bgcolor: "#121212",
+      plot_bgcolor: "#121212",
+      font: { color: "#fff" },
+    };
+
+    const config = {
+      responsive: true,
+      displaylogo: false,
+    };
+
+    Plotly.newPlot(sliceRef.current, data as any, layout as any, config as any);
+
+    return () => {
+      if (sliceRef.current) {
+        Plotly.purge(sliceRef.current);
+      }
+    };
   }, [showSlice, zData, sliceIndex]);
 
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
-      // 連打された時のために前のタイマーを止める
       if (acquireTimerRef.current != null) {
         window.clearTimeout(acquireTimerRef.current);
       }
-  
-    // 表示初期化
-    setShowPlot(true);
-    setShowSlice(false);     // 断層は今回一旦オフ
-    setZData(null);          // ★今は surface を使わないので、念のため捨てる
-    setCloud(null);
-    setCloudMeta(null);
 
-    setStatus("RUNNING");
-    setIsAcquiring(true);
+      // 表示初期化
+      setShowPlot(true);
+      setShowSlice(false);
+      setZData(null);
+      setCloud(null);
+      setCloudMeta(null);
 
-    console.log("点群生成中...");
+      // 進捗初期化
+      setProgressStep(0);
+      setProgressTotal(8);
+      setProgressMessage("処理を開始中...");
+      setProgressPercent(0);
 
-    (async () => {
-      try {
-        const { cloud, width, height, depth } = await buildPointCloudFromFolder({
-          folderUrl: "/data/result_coin_ruined",
-          threshold: 128,
-          samplePerSlice: 4000,
-          flipZ: true,
-          colorMode: "z", // "intensity" にすると輝度で着色
-        });
+      setStatus("RUNNING");
+      setIsAcquiring(true);
 
-        setCloud(cloud);
-        setCloudMeta({ width, height, depth });
+      console.log("画像処理開始...");
 
-        setIsAcquiring(false);
-        setStatus("COMPLETE");
-        console.log("点群生成完了", { points: cloud.x.length, width, height, depth });
-      } catch (e) {
-        console.error(e);
-        setIsAcquiring(false);
-        setStatus("READY");
-        setShowPlot(false);
-        alert(`点群生成に失敗しました: ${(e as Error).message}`);
-      }
-    })();
-  
+      // WebSocketでpreprocessコマンドを送信
+      const ws = connectWebSocket();
+
+      const sendCommand = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              cmd: "preprocess",
+              params: {
+                data_path: "frontend/public/data/row_data/",
+                result_path: "frontend/public/data/result/",
+                num_images: 170,
+                peak_threshold: 10,
+              },
+            })
+          );
+        } else {
+          // 接続待ち
+          setTimeout(sendCommand, 100);
+        }
+      };
+      sendCommand();
     } else if (confirmMode === "csv") {
       if (zData) {
         downloadCSV(zData, "surface.csv");
@@ -311,11 +397,10 @@ useEffect(() => {
         downloadCSV(fallback, "surface.csv");
       }
     }
-  
+
     setShowConfirm(false);
     setConfirmMode(null);
-  };  
-  
+  };
 
   // 「いいえ」の処理
   const handleConfirmCancel = () => {
@@ -330,370 +415,390 @@ useEffect(() => {
           width: "100vw",
           height: "100vh",
           display: "grid",
-          gridTemplateRows: "56px 1fr", // ← ヘッダー + メイン
+          gridTemplateRows: "56px 1fr",
           backgroundColor: "#2d2d2d",
           color: "#fff",
         }}
       >
-      
-      {/* ▼ ヘッダー */}
-      <div
-        style={{
-          height: "48px",
-          display: "flex",
-          alignItems: "center",
-          padding: "0 16px",
-          backgroundColor: "#2d2d2d",
-          borderBottom: "1px solid #444",
-          boxSizing: "border-box",
-          gap: "10px",
-        }}
-      >
-        {/* ロゴ */}
-        <img
-          src="/logo.jpg"
-          alt="Company Logo"
-          style={{ height: "28px", width: "auto", opacity: 0.95 }}
-        />
-
-        {/* タイトル */}
-        <div style={{ fontWeight: 600, fontSize: "15px" }}>
-          3D Surface Measurement UI
-        </div>
-
-        {/* 右寄せエリア */}
+        {/* ヘッダー */}
         <div
           style={{
-            marginLeft: "auto",
+            height: "48px",
             display: "flex",
             alignItems: "center",
-            gap: "12px",
+            padding: "0 16px",
+            backgroundColor: "#2d2d2d",
+            borderBottom: "1px solid #444",
+            boxSizing: "border-box",
+            gap: "10px",
           }}
         >
-          {/* ★ ステータス表示 */}
-          <StatusBadge running={showPlot} />
+          <img
+            src="/logo.jpg"
+            alt="Company Logo"
+            style={{ height: "28px", width: "auto", opacity: 0.95 }}
+          />
 
-          {/* バージョン */}
-          <div style={{ fontSize: "12px", color: "#aaa" }}>
-            Ver. 0.1
+          <div style={{ fontWeight: 600, fontSize: "15px" }}>
+            3D Surface Measurement UI
+          </div>
+
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            <StatusBadge running={status === "RUNNING"} />
+
+            <div style={{ fontSize: "12px", color: "#aaa" }}>Ver. 0.1.0</div>
           </div>
         </div>
-      </div>
 
-
-      {/* ▼ メインエリア（←ここが “2行目”） */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "280px 1fr",
-          height: "100%",
-          overflow: "hidden",
-        }}
-      >    
-
-        {/* ▼ 左：サイドパネル */}
+        {/* メインエリア */}
         <div
           style={{
+            display: "grid",
+            gridTemplateColumns: "280px 1fr",
             height: "100%",
-            padding: "16px 20px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-            backgroundColor: "#2d2d2d",
-            boxSizing: "border-box",
-            borderRight: "1px solid #444",
+            overflow: "hidden",
           }}
         >
+          {/* 左：サイドパネル */}
+          <div
+            style={{
+              height: "100%",
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+              backgroundColor: "#2d2d2d",
+              boxSizing: "border-box",
+              borderRight: "1px solid #444",
+            }}
+          >
+            <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
+              スキャン設定
+            </div>
 
-          {/* セクションタイトル */}
-          <div style={{ fontSize: "14px", fontWeight: 600, opacity: 0.85 }}>
-            スキャン設定
-          </div>
-
-          {/* 掃引間隔 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <label style={{ fontSize: "13px" }}>掃引間隔</label>
-            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
-              <input
-                type="text"
-                placeholder="入力してください"
-                value={sweepInterval}
-                onChange={e => setSweepInterval(e.target.value)}
-                style={{
-                  flex: 1,
-                  height: "32px",
-                  padding: "4px 8px",
-                  borderRadius: "6px",
-                  border: "1px solid #555",
-                  backgroundColor: "#181818",
-                  color: "#fff",
-                }}
-              />
+            {/* 掃引間隔 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "13px" }}>掃引間隔</label>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="入力してください"
+                  value={sweepInterval}
+                  onChange={(e) => setSweepInterval(e.target.value)}
+                  style={{
+                    flex: 1,
+                    height: "32px",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid #555",
+                    backgroundColor: "#181818",
+                    color: "#fff",
+                  }}
+                />
                 <select
                   value={sweepIntervalUnit}
-                  onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                  onChange={(e) =>
+                    setSweepIntervalUnit(e.target.value as "um" | "mm")
+                  }
                   style={unitSelectStyle}
                 >
                   <option value="um">µm</option>
                   <option value="mm">mm</option>
                 </select>
-              
+              </div>
             </div>
-          </div>
 
-          {/* 掃引範囲 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <label style={{ fontSize: "13px" }}>掃引範囲</label>
-            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-              <input
-                type="text"
-                placeholder="入力してください"
-                value={sweepRange}
-                onChange={e => setSweepRange(e.target.value)}
-                style={{
-                  flex: 1,
-                  height: "32px",
-                  padding: "4px 8px",
-                  borderRadius: "6px",
-                  border: "1px solid #555",
-                  backgroundColor: "#181818",
-                  color: "#fff",
-                }}
-              />
-              <select
-                value={sweepRangeUnit}
-                onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
-                style={unitSelectStyle}
-              >
-                <option value="um">µm</option>
-                <option value="mm">mm</option>
-              </select>
+            {/* 掃引範囲 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "13px" }}>掃引範囲</label>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="入力してください"
+                  value={sweepRange}
+                  onChange={(e) => setSweepRange(e.target.value)}
+                  style={{
+                    flex: 1,
+                    height: "32px",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid #555",
+                    backgroundColor: "#181818",
+                    color: "#fff",
+                  }}
+                />
+                <select
+                  value={sweepRangeUnit}
+                  onChange={(e) =>
+                    setSweepRangeUnit(e.target.value as "um" | "mm")
+                  }
+                  style={unitSelectStyle}
+                >
+                  <option value="um">µm</option>
+                  <option value="mm">mm</option>
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* 次の掃引までの時間間隔 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
-            <div style={{ display: "flex", gap: "6px", alignItems: "center"}}>
-              <input
-                type="text"
-                placeholder="入力してください"
-                value={sweepTimeInterval}
-                onChange={e => setSweepTimeInterval(e.target.value)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  height: "32px",
-                  padding: "4px 8px",
-                  borderRadius: "6px",
-                  border: "1px solid #555",
-                  backgroundColor: "#181818",
-                  color: "#fff",
-                }}
-              />
-              <select
-                value={sweepTimeUnit}
-                onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
-                style={unitSelectStyle}
-              >
-                <option value="ms">ms</option>
-                <option value="s">s</option>
-              </select>
-              
+            {/* 次の掃引までの時間間隔 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "13px" }}>次の掃引までの時間間隔</label>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="入力してください"
+                  value={sweepTimeInterval}
+                  onChange={(e) => setSweepTimeInterval(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: "32px",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid #555",
+                    backgroundColor: "#181818",
+                    color: "#fff",
+                  }}
+                />
+                <select
+                  value={sweepTimeUnit}
+                  onChange={(e) =>
+                    setSweepTimeUnit(e.target.value as "ms" | "s")
+                  }
+                  style={unitSelectStyle}
+                >
+                  <option value="ms">ms</option>
+                  <option value="s">s</option>
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* 区切り */}
-          <div
-            style={{
-              height: "1px",
-              backgroundColor: "#333",
-              margin: "8px 0",
-            }}
-          />
-
-          {/* 3D描画ボタン → 押すと確認モーダルを表示 */}
-          <button
-            style={{
-              height: "40px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: "#1976d2",
-              color: "#fff",
-              fontWeight: 600,
-              cursor: "pointer",
-              marginTop: "4px",
-            }}
-            onClick={() => {
-              setConfirmMode("plot");
-              setShowConfirm(true);
-            }}
-          >
-            START
-          </button>
-
-          {/* 軸トグルボタン */}
-          <button
-            disabled={!showPlot}
-            onClick={() => {
-              if (!showPlot) return; // ★ ガード（保険）
-              setAxisVisible(v => !v);
-            }}
-            style={{
-              height: "36px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: axisVisible ? "#444" : "#222",
-              color: "#fff",
-              cursor: showPlot ? "pointer" : "not-allowed",
-              opacity: showPlot ? 1 : 0.5,
-            }}
-          >
-            {axisVisible ? "軸を非表示" : "軸を表示"}
-          </button>
-
-          {/* CSV出力ボタン（白） */}
-          <button
-            style={{
-              height: "40px",
-              borderRadius: "6px",
-              border: "1px solid #666",
-              backgroundColor: "#f2f2f2",
-              color: "#111",
-              fontWeight: 600,
-              cursor: "pointer",
-              marginTop: "8px",
-            }}
-            onClick={() => {
-              setConfirmMode("csv");
-              setShowConfirm(true);
-            }}
-          >
-            csvファイルを出力
-          </button>
-
-          {/* ★ 断層 出力/停止 トグルボタン */}
-          <button
-            disabled={!zData}
-            style={{
-              height: "40px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: showSlice ? "#8a2e2e" : "#555",
-              color: "#fff",
-              fontWeight: 600,
-              cursor: zData ? "pointer" : "not-allowed",
-              opacity: zData ? 1 : 0.5,
-              marginTop: "8px",
-            }}
-            onClick={() => {
-              if (!zData) return;        // ★ ガード（保険）
-              setShowSlice((v) => !v);  // ★ 表示/非表示を切り替えるだけ
-            }}
-          >
-            {showSlice ? "断層出力を停止" : "断層を出力"}
-          </button>
-
-          {/* ★ 断層位置スライダー（showSlice のとき有効） */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "13px" }}>
-              断層位置（y）: {sliceIndex}
-            </label>
-
-            <input
-              type="range"
-              min={0}
-              max={GRID_SIZE - 1}
-              step={1}
-              value={sliceIndex}
-              disabled={!showSlice || !zData}
-              onChange={(e) => setSliceIndex(Number(e.target.value))}
-              style={{ width: "100%" }}
+            <div
+              style={{
+                height: "1px",
+                backgroundColor: "#333",
+                margin: "8px 0",
+              }}
             />
 
-            <div style={{ fontSize: "12px", color: "#aaa" }}>
-              {(!zData && "※先に断層出力 or START でデータ生成してください") || ""}
-            </div>
-          </div>
-
-          <div style={{ flexGrow: 1 }} />
-        </div>
-
-        {/* ▼ 右：3D Plot + 2D断層 エリア */}
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            padding: "12px",
-            boxSizing: "border-box",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-          }}
-        >
-          {/* 上：3D */}
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <div
-              ref={plotRef}
-              style={{ width: "100%", height: "100%", position: "relative" }}
+            {/* STARTボタン */}
+            <button
+              disabled={status === "RUNNING"}
+              style={{
+                height: "40px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: status === "RUNNING" ? "#555" : "#1976d2",
+                color: "#fff",
+                fontWeight: 600,
+                cursor: status === "RUNNING" ? "not-allowed" : "pointer",
+                marginTop: "4px",
+                opacity: status === "RUNNING" ? 0.7 : 1,
+              }}
+              onClick={() => {
+                setConfirmMode("plot");
+                setShowConfirm(true);
+              }}
             >
-              {/* まだ showPlot=false のときは案内メッセージを表示 */}
-              {!showPlot && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#777",
-                    fontSize: "15px",
-                  }}
-                >
-                  左側の「START」ボタンから
-                  <br />
-                  3次元形状計測を開始してください。
-                </div>
-              )}
+              {status === "RUNNING" ? "処理中..." : "START"}
+            </button>
 
-              {isAcquiring && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#ddd",
-                    fontSize: "15px",
-                    backgroundColor: "rgba(0,0,0,0.25)",
-                    pointerEvents: "none",
-                    textAlign: "center",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  三次元形状データを取得中...
-                </div>
-              )}
+            {/* 軸トグルボタン */}
+            <button
+              disabled={!showPlot}
+              onClick={() => {
+                if (!showPlot) return;
+                setAxisVisible((v) => !v);
+              }}
+              style={{
+                height: "36px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: axisVisible ? "#444" : "#222",
+                color: "#fff",
+                cursor: showPlot ? "pointer" : "not-allowed",
+                opacity: showPlot ? 1 : 0.5,
+              }}
+            >
+              {axisVisible ? "軸を非表示" : "軸を表示"}
+            </button>
 
+            {/* CSV出力ボタン */}
+            <button
+              style={{
+                height: "40px",
+                borderRadius: "6px",
+                border: "1px solid #666",
+                backgroundColor: "#f2f2f2",
+                color: "#111",
+                fontWeight: 600,
+                cursor: "pointer",
+                marginTop: "8px",
+              }}
+              onClick={() => {
+                setConfirmMode("csv");
+                setShowConfirm(true);
+              }}
+            >
+              csvファイルを出力
+            </button>
 
+            {/* 断層 出力/停止 トグルボタン */}
+            <button
+              disabled={!zData}
+              style={{
+                height: "40px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: showSlice ? "#8a2e2e" : "#555",
+                color: "#fff",
+                fontWeight: 600,
+                cursor: zData ? "pointer" : "not-allowed",
+                opacity: zData ? 1 : 0.5,
+                marginTop: "8px",
+              }}
+              onClick={() => {
+                if (!zData) return;
+                setShowSlice((v) => !v);
+              }}
+            >
+              {showSlice ? "断層出力を停止" : "断層を出力"}
+            </button>
+
+            {/* 断層位置スライダー */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ fontSize: "13px" }}>断層位置（y）: {sliceIndex}</label>
+
+              <input
+                type="range"
+                min={0}
+                max={GRID_SIZE - 1}
+                step={1}
+                value={sliceIndex}
+                disabled={!showSlice || !zData}
+                onChange={(e) => setSliceIndex(Number(e.target.value))}
+                style={{ width: "100%" }}
+              />
+
+              <div style={{ fontSize: "12px", color: "#aaa" }}>
+                {!zData && "※先に断層出力 or START でデータ生成してください"}
+              </div>
             </div>
+
+            <div style={{ flexGrow: 1 }} />
           </div>
 
-          {/* 下：2D 断層グラフ（showSlice のときだけ表示） */}
-          {showSlice && (
-            <div style={{ height: "260px" }}>
+          {/* 右：3D Plot + 2D断層 エリア */}
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              padding: "12px",
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+            }}
+          >
+            {/* 上：3D */}
+            <div style={{ flex: 1, minHeight: 0 }}>
               <div
-                ref={sliceRef}
-                style={{ width: "100%", height: "100%" }}
-              />
+                ref={plotRef}
+                style={{ width: "100%", height: "100%", position: "relative" }}
+              >
+                {!showPlot && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#777",
+                      fontSize: "15px",
+                    }}
+                  >
+                    左側の「START」ボタンから
+                    <br />
+                    3次元形状計測を開始してください。
+                  </div>
+                )}
+
+                {isAcquiring && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#ddd",
+                      fontSize: "15px",
+                      backgroundColor: "rgba(0,0,0,0.6)",
+                      pointerEvents: "none",
+                      textAlign: "center",
+                      lineHeight: 1.6,
+                      gap: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "18px", fontWeight: 600 }}>
+                      画像処理中...
+                    </div>
+
+                    {/* 進捗バー */}
+                    <div
+                      style={{
+                        width: "300px",
+                        height: "8px",
+                        backgroundColor: "#333",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${progressPercent}%`,
+                          height: "100%",
+                          backgroundColor: "#1976d2",
+                          transition: "width 0.3s ease",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ fontSize: "14px" }}>
+                      [{progressStep}/{progressTotal}] {progressMessage}
+                    </div>
+
+                    <div style={{ fontSize: "12px", color: "#aaa" }}>
+                      {progressPercent}%
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+
+            {/* 下：2D 断層グラフ */}
+            {showSlice && (
+              <div style={{ height: "260px" }}>
+                <div
+                  ref={sliceRef}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
 
-      {/* ▼ 確認モーダル */}
+      {/* 確認モーダル */}
       {showConfirm && confirmMode && (
         <div
           style={{

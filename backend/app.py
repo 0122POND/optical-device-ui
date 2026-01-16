@@ -5,10 +5,17 @@ import asyncio
 import json
 import math
 import random
+import sys
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+# scriptsディレクトリをパスに追加
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+from preprocess_images import run_preprocess
 
 
 # -----------------------------
@@ -17,7 +24,6 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 
 # 開発中はVite(5173)から接続することが多いので許可
-# 必要に応じて "http://localhost:5173" などに絞ってOK
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,10 +32,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# スレッドプール（画像処理用）
+executor = ThreadPoolExecutor(max_workers=2)
+
 
 # -----------------------------
 # Utility: sample data generator
-#   - TS側の generateCoinData/addNoise の代替
 # -----------------------------
 def generate_coin_data(size: int = 120) -> List[List[Optional[float]]]:
     z_data: List[List[Optional[float]]] = []
@@ -40,26 +48,20 @@ def generate_coin_data(size: int = 120) -> List[List[Optional[float]]]:
             y = (j / (size - 1)) * 2 - 1
             r = math.sqrt(x * x + y * y)
 
-            # 半径1より外はデータなし
             if r > 1:
                 row.append(None)
                 continue
 
             z = 0.0
-
-            # 中央のふくらみ
             z += 0.1 * (1 - r * r)
 
-            # 縁（リング状にちょい盛る）
             rim_inner, rim_outer = 0.80, 0.95
             if rim_inner < r < rim_outer:
-                t = (r - rim_inner) / (rim_outer - rim_inner)  # 0..1
-                z += 0.03 * (1 - (2 * t - 1) ** 2)  # 山型
+                t = (r - rim_inner) / (rim_outer - rim_inner)
+                z += 0.03 * (1 - (2 * t - 1) ** 2)
 
-            # ごく小さい波（雰囲気）
             z += 0.01 * math.sin(20 * r)
 
-            # 0未満は出さない（あなたの要望に合わせて）
             if z < 0:
                 z = 0.0
 
@@ -91,17 +93,12 @@ def add_noise(z_data: List[List[Optional[float]]], amplitude: float = 0.1) -> Li
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
-    print("✅ WebSocket connected")
+    print("WebSocket connected")
 
-    # ここは「計測中」などの状態管理に使える
     is_running = False
     running_task: Optional[asyncio.Task] = None
 
     async def stream_once(params: Dict[str, Any]):
-        """
-        1回分の結果（zData）を作って送る。
-        後でAI推論に差し替えるならこの中を置き換えるのが楽。
-        """
         size = int(params.get("size", 120))
         noise = float(params.get("noise", 0.1))
 
@@ -117,21 +114,78 @@ async def ws_endpoint(ws: WebSocket):
             },
         }
         await ws.send_text(json.dumps(payload))
-        # ここで "status" も送ってあげるとフロントが楽
         await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
 
     async def stream_loop(params: Dict[str, Any]):
-        """
-        連続で流したい場合のループ（デモ用）。
-        interval_ms ごとに更新して送る。
-        """
         interval_ms = int(params.get("interval_ms", 200))
         while True:
             await stream_once(params)
             await asyncio.sleep(interval_ms / 1000)
 
+    async def run_preprocess_with_progress(params: Dict[str, Any]):
+        """画像処理を実行し、進捗をWebSocketで送信"""
+        loop = asyncio.get_event_loop()
+        progress_queue: asyncio.Queue = asyncio.Queue()
+
+        def progress_callback(step: int, total: int, message: str):
+            # スレッドセーフにキューに追加
+            loop.call_soon_threadsafe(
+                progress_queue.put_nowait,
+                {"step": step, "total": total, "message": message}
+            )
+
+        def blocking_preprocess():
+            data_path = params.get("data_path", "frontend/public/data/row_data/")
+            result_path = params.get("result_path", "frontend/public/data/result/")
+            num_images = int(params.get("num_images", 170))
+            peak_threshold = int(params.get("peak_threshold", 10))
+
+            return run_preprocess(
+                data_path=data_path,
+                result_path=result_path,
+                num_images=num_images,
+                peak_threshold=peak_threshold,
+                progress_callback=progress_callback
+            )
+
+        # 別スレッドで画像処理を実行
+        future = loop.run_in_executor(executor, blocking_preprocess)
+
+        # 進捗を監視して送信
+        while not future.done():
+            try:
+                progress = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                await ws.send_text(json.dumps({
+                    "type": "progress",
+                    "step": progress["step"],
+                    "total": progress["total"],
+                    "message": progress["message"],
+                    "percent": int((progress["step"] / progress["total"]) * 100)
+                }))
+            except asyncio.TimeoutError:
+                pass
+
+        # 残りの進捗を送信
+        while not progress_queue.empty():
+            progress = await progress_queue.get()
+            await ws.send_text(json.dumps({
+                "type": "progress",
+                "step": progress["step"],
+                "total": progress["total"],
+                "message": progress["message"],
+                "percent": int((progress["step"] / progress["total"]) * 100)
+            }))
+
+        # 結果を取得
+        output_files = await asyncio.wrap_future(future)
+
+        await ws.send_text(json.dumps({
+            "type": "preprocess_complete",
+            "files": output_files,
+            "count": len(output_files)
+        }))
+
     try:
-        # 接続直後にREADYを送っておく（任意）
         await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
 
         while True:
@@ -149,14 +203,12 @@ async def ws_endpoint(ws: WebSocket):
                 await ws.send_text(json.dumps({"type": "pong"}))
 
             elif cmd == "start":
-                # 1回だけ送る（最小）
                 is_running = True
                 await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
                 await stream_once(params)
                 is_running = False
 
             elif cmd == "start_stream":
-                # 連続配信（デモ用）
                 if running_task and not running_task.done():
                     await ws.send_text(json.dumps({"type": "info", "message": "Already streaming"}))
                     continue
@@ -175,16 +227,35 @@ async def ws_endpoint(ws: WebSocket):
                 is_running = False
                 await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
 
+            elif cmd == "preprocess":
+                # 画像処理を実行
+                if is_running:
+                    await ws.send_text(json.dumps({"type": "error", "message": "Already running"}))
+                    continue
+
+                is_running = True
+                await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
+
+                try:
+                    await run_preprocess_with_progress(params)
+                    await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
+                except Exception as e:
+                    await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
+                    await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
+                finally:
+                    is_running = False
+
             else:
                 await ws.send_text(json.dumps({"type": "error", "message": f"Unknown cmd: {cmd}"}))
 
     except WebSocketDisconnect:
-        print("👋 WebSocket disconnected")
+        print("WebSocket disconnected")
         if running_task and not running_task.done():
             running_task.cancel()
 
+
 # -----------------------------
-# Optional: health check（追加で、GPUが使えるかどうかなども確認できると良いかも）
+# Health check
 # -----------------------------
 @app.get("/health")
 def health():
