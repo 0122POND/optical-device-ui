@@ -81,6 +81,9 @@ function App() {
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
 
+  // About Usポップアップ表示フラグ
+  const [showAbout, setShowAbout] = useState(false);
+
   // setTimeout のID保持（連打対策 & アンマウント対策）
   const acquireTimerRef = useRef<number | null>(null);
 
@@ -517,11 +520,54 @@ function App() {
             gap: "10px",
           }}
         >
-          <img
-            src="/logo.jpg"
-            alt="Company Logo"
-            style={{ height: "28px", width: "auto", opacity: 0.95 }}
-          />
+          <div
+            style={{ position: "relative" }}
+            onMouseEnter={() => setShowAbout(true)}
+            onMouseLeave={() => setShowAbout(false)}
+          >
+            <img
+              src="/logo.jpg"
+              alt="Company Logo"
+              style={{ height: "28px", width: "auto", opacity: 0.95, cursor: "pointer" }}
+            />
+
+            {/* About Us ポップアップ */}
+            {showAbout && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "36px",
+                  left: "0",
+                  width: "280px",
+                  padding: "16px",
+                  backgroundColor: colors.bgLight,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: "8px",
+                  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
+                  zIndex: 100,
+                }}
+              >
+                <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "10px" }}>
+                  About Us
+                </div>
+                <div style={{ fontSize: "12px", color: colors.textMuted, lineHeight: 1.6 }}>
+                  光学デバイスから取得した3次元面形状をブラウザで可視化するWebアプリケーションです。
+                </div>
+                <div
+                  style={{
+                    marginTop: "12px",
+                    paddingTop: "10px",
+                    borderTop: `1px solid ${colors.border}`,
+                    fontSize: "11px",
+                    color: colors.textDim,
+                  }}
+                >
+                  <div>Version: 0.1.0</div>
+                  <div style={{ marginTop: "4px" }}>© 2026 Trillion Technology</div>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div style={{ fontWeight: 600, fontSize: "16px", letterSpacing: "0.3px" }}>
             3D Surface Measurement UI
@@ -537,7 +583,7 @@ function App() {
           >
             <StatusBadge status={status} />
 
-            <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.2.0</div>
+            <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.1.0</div>
           </div>
         </div>
 
