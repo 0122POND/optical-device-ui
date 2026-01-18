@@ -186,6 +186,7 @@ function App() {
             height: "8px",
             borderRadius: "50%",
             backgroundColor: c.dot,
+            animation: status === "RUNNING" ? "blink 1s ease-in-out infinite" : "none",
           }}
         />
         {c.label}
