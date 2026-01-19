@@ -76,9 +76,9 @@ optical-device-ui/
 │   │   └── utils/         # ユーティリティ関数
 │   └── public/data/       # 画像データ格納場所
 ├── backend/
-│   └── app.py             # FastAPI サーバー
-├── scripts/
-│   └── preprocess_images.py  # 画像処理モジュール
+│   ├── app.py             # FastAPI サーバー
+│   └── preprocessing.py   # 画像処理モジュール
+├── docs/                   # ドキュメント
 ├── CLAUDE.md              # Claude Code用ガイド
 └── README.md
 ```
@@ -94,7 +94,4 @@ npm run lint     # ESLint実行
 
 # バックエンド
 python3 -m uvicorn backend.app:app --reload --port 8000
-
-# 画像処理（CLI単体実行）
-python3 scripts/preprocess_images.py
 ```

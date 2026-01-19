@@ -5,17 +5,13 @@ import asyncio
 import json
 import math
 import random
-import sys
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# scriptsディレクトリをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
-from preprocess_images import run_preprocess
+from preprocessing import run_preprocess
 
 
 # -----------------------------
