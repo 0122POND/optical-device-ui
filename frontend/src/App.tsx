@@ -140,6 +140,9 @@ function App() {
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
 
+  // AI結果読み込み中フラグ
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
 
@@ -510,6 +513,36 @@ function App() {
     setConfirmMode(null);
   };
 
+  // AI結果を表示する処理
+  const handleShowAIResult = async () => {
+    setShowPlot(true);
+    setShowSlice(false);
+    setCloud(null);
+    setIsLoadingAI(true);
+    setStatus("RUNNING");
+
+    try {
+      const { cloud: newCloud } = await buildPointCloudFromFolder({
+        folderUrl: "/data/result_coin_ai",
+        threshold: 128,
+        samplePerSlice: 4000,
+        flipZ: true,
+        colorMode: "z",
+      });
+
+      setCloud(newCloud);
+      setStatus("COMPLETE");
+      console.log("AI点群生成完了", { points: newCloud.x.length });
+    } catch (e) {
+      console.error(e);
+      setStatus("READY");
+      setShowPlot(false);
+      alert(`AI結果の読み込みに失敗しました: ${(e as Error).message}`);
+    } finally {
+      setIsLoadingAI(false);
+    }
+  };
+
   return (
     <>
       <div
@@ -733,6 +766,22 @@ function App() {
               }}
             >
               {status === "RUNNING" ? "処理中..." : "START"}
+            </button>
+
+            {/* AIでの結果を表示ボタン */}
+            <button
+              disabled={status === "RUNNING" || isLoadingAI}
+              style={{
+                ...buttonSecondaryStyle,
+                height: "42px",
+                backgroundColor: colors.success,
+                border: "none",
+                cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
+                opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
+              }}
+              onClick={handleShowAIResult}
+            >
+              {isLoadingAI ? "読み込み中..." : "AIでの結果を表示"}
             </button>
 
             {/* 軸トグルボタン */}
