@@ -5,11 +5,16 @@ import asyncio
 import json
 import math
 import random
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+# 同一ディレクトリのモジュールをインポートできるようにパスを追加
+sys.path.insert(0, str(Path(__file__).parent))
 
 from preprocessing import run_preprocess
 
