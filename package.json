@@ -1,0 +1,35 @@
+{
+  "name": "optical-device-ui",
+  "version": "1.0.0",
+  "description": "光学デバイスで取得したデータから三次元形状を可視化するWebアプリケーションです。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0122POND/optical-device-ui.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/0122POND/optical-device-ui/issues"
+  },
+  "homepage": "https://github.com/0122POND/optical-device-ui#readme",
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
+  },
+  "lint-staged": {
+    "frontend/src/**/*.{ts,tsx}": [
+      "npx --prefix frontend prettier --write",
+      "npx --prefix frontend eslint --config frontend/eslint.config.js --fix"
+    ]
+  }
+}

@@ -26,7 +26,8 @@ const colors = {
 };
 
 // フォント設定
-const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const fontFamily =
+  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 // 計測ステータス
 type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
@@ -635,9 +636,7 @@ function App() {
                 />
                 <select
                   value={sweepIntervalUnit}
-                  onChange={(e) =>
-                    setSweepIntervalUnit(e.target.value as "um" | "mm")
-                  }
+                  onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
                   style={unitSelectStyle}
                 >
                   <option value="um">µm</option>
@@ -662,9 +661,7 @@ function App() {
                 />
                 <select
                   value={sweepRangeUnit}
-                  onChange={(e) =>
-                    setSweepRangeUnit(e.target.value as "um" | "mm")
-                  }
+                  onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
                   style={unitSelectStyle}
                 >
                   <option value="um">µm</option>
@@ -675,7 +672,9 @@ function App() {
 
             {/* 次の掃引までの時間間隔 */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>次の掃引までの時間間隔</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                次の掃引までの時間間隔
+              </label>
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input
                   type="text"
@@ -690,9 +689,7 @@ function App() {
                 />
                 <select
                   value={sweepTimeUnit}
-                  onChange={(e) =>
-                    setSweepTimeUnit(e.target.value as "ms" | "s")
-                  }
+                  onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
                   style={unitSelectStyle}
                 >
                   <option value="ms">ms</option>
@@ -782,7 +779,9 @@ function App() {
 
             {/* 断層位置スライダー */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>断層位置（y）: {sliceIndex}</label>
+              <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                断層位置（y）: {sliceIndex}
+              </label>
 
               <input
                 type="range"
@@ -817,10 +816,7 @@ function App() {
           >
             {/* 上：3D */}
             <div style={{ flex: 1, minHeight: 0 }}>
-              <div
-                ref={plotRef}
-                style={{ width: "100%", height: "100%", position: "relative" }}
-              >
+              <div ref={plotRef} style={{ width: "100%", height: "100%", position: "relative" }}>
                 {!showPlot && (
                   <div
                     style={{
@@ -857,9 +853,7 @@ function App() {
                       gap: "16px",
                     }}
                   >
-                    <div style={{ fontSize: "18px", fontWeight: 600 }}>
-                      画像処理中...
-                    </div>
+                    <div style={{ fontSize: "18px", fontWeight: 600 }}>画像処理中...</div>
 
                     {/* 進捗バー */}
                     <div
@@ -896,10 +890,7 @@ function App() {
             {/* 下：2D 断層グラフ */}
             {showSlice && (
               <div style={{ height: "260px" }}>
-                <div
-                  ref={sliceRef}
-                  style={{ width: "100%", height: "100%" }}
-                />
+                <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
               </div>
             )}
           </div>
