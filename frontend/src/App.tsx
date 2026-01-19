@@ -523,7 +523,7 @@ function App() {
 
     try {
       const { cloud: newCloud } = await buildPointCloudFromFolder({
-        folderUrl: "/data/result_coin_ai",
+        folderUrl: "/data/result_coin_ai_masked",
         threshold: 128,
         samplePerSlice: 4000,
         flipZ: true,
