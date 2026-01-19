@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # フロントエンド（npm）
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "[chore]"
+    open-pull-requests-limit: 10
+
+  # ルート（npm - Husky/lint-staged）
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "tooling"
+    commit-message:
+      prefix: "[chore]"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "[chore]"
