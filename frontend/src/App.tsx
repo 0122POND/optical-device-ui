@@ -28,6 +28,64 @@ const colors = {
 // フォント設定
 const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
+// 計測ステータス
+type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
+
+const StatusBadge = ({ status }: { status: MeasureStatus }) => {
+  const config = {
+    READY: {
+      bg: "#1e3a2f",
+      color: "#6bff95",
+      border: "#6bff9555",
+      dot: "#3ddc84",
+      label: "READY",
+    },
+    RUNNING: {
+      bg: "#3a2828",
+      color: "#ff6b6b",
+      border: "#ff6b6b55",
+      dot: "#ff4d4d",
+      label: "RUNNING",
+    },
+    COMPLETE: {
+      bg: "#1e2a3a",
+      color: "#6b95ff",
+      border: "#6b95ff55",
+      dot: "#4d7fff",
+      label: "COMPLETE",
+    },
+  };
+  const c = config[status];
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "4px 10px",
+        borderRadius: "999px",
+        fontSize: "12px",
+        fontWeight: 600,
+        backgroundColor: c.bg,
+        color: c.color,
+        border: `1px solid ${c.border}`,
+      }}
+    >
+      <span
+        style={{
+          width: "8px",
+          height: "8px",
+          borderRadius: "50%",
+          backgroundColor: c.dot,
+          animation: status === "RUNNING" ? "blink 1s ease-in-out infinite" : "none",
+        }}
+      />
+      {c.label}
+    </div>
+  );
+};
+
 function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
@@ -54,8 +112,6 @@ function App() {
   // 断層位置（0~GRID_SIZE-1を動かす)
   const [sliceIndex, setSliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
-  // 計測ステータス
-  type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引関連の入力値 & 単位
@@ -70,7 +126,6 @@ function App() {
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
-  const [_cloudMeta, setCloudMeta] = useState<{ width: number; height: number; depth: number } | null>(null);
 
   // 進捗表示用
   const [progressStep, setProgressStep] = useState(0);
@@ -139,61 +194,6 @@ function App() {
     transition: "background-color 0.2s",
   };
 
-  const StatusBadge = ({ status }: { status: MeasureStatus }) => {
-    const config = {
-      READY: {
-        bg: "#1e3a2f",
-        color: "#6bff95",
-        border: "#6bff9555",
-        dot: "#3ddc84",
-        label: "READY",
-      },
-      RUNNING: {
-        bg: "#3a2828",
-        color: "#ff6b6b",
-        border: "#ff6b6b55",
-        dot: "#ff4d4d",
-        label: "RUNNING",
-      },
-      COMPLETE: {
-        bg: "#1e2a3a",
-        color: "#6b95ff",
-        border: "#6b95ff55",
-        dot: "#4d7fff",
-        label: "COMPLETE",
-      },
-    };
-    const c = config[status];
-
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          padding: "4px 10px",
-          borderRadius: "999px",
-          fontSize: "12px",
-          fontWeight: 600,
-          backgroundColor: c.bg,
-          color: c.color,
-          border: `1px solid ${c.border}`,
-        }}
-      >
-        <span
-          style={{
-            width: "8px",
-            height: "8px",
-            borderRadius: "50%",
-            backgroundColor: c.dot,
-            animation: status === "RUNNING" ? "blink 1s ease-in-out infinite" : "none",
-          }}
-        />
-        {c.label}
-      </div>
-    );
-  };
-
   // WebSocket接続
   const connectWebSocket = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -220,7 +220,7 @@ function App() {
           console.log("画像処理完了:", data.count, "files");
           // 処理完了後、点群を読み込み
           try {
-            const { cloud, width, height, depth } = await buildPointCloudFromFolder({
+            const { cloud: newCloud } = await buildPointCloudFromFolder({
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
@@ -228,13 +228,12 @@ function App() {
               colorMode: "z",
             });
 
-            setCloud(cloud);
-            setCloudMeta({ width, height, depth });
+            setCloud(newCloud);
             setIsAcquiring(false);
             setStatus("COMPLETE");
             setProgressMessage("完了");
             setProgressPercent(100);
-            console.log("点群生成完了", { points: cloud.x.length, width, height, depth });
+            console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
             console.error(e);
             setIsAcquiring(false);
@@ -285,30 +284,34 @@ function App() {
   }, [connectWebSocket]);
 
   useEffect(() => {
+    const timerRef = acquireTimerRef;
     return () => {
-      if (acquireTimerRef.current != null) {
-        window.clearTimeout(acquireTimerRef.current);
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
       }
     };
   }, []);
 
   useEffect(() => {
     if (!showPlot || !plotRef.current) return;
+    const el = plotRef.current;
 
     requestAnimationFrame(() => {
-      Plotly.Plots.resize(plotRef.current as any);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Plotly.Plots.resize(el as any);
     });
   }, [showSlice, showPlot]);
 
   useEffect(() => {
-    if (!plotRef.current) return;
+    const plotEl = plotRef.current;
+    if (!plotEl) return;
 
     if (!showPlot) {
-      Plotly.purge(plotRef.current);
+      Plotly.purge(plotEl);
       return;
     }
     if (!cloud) {
-      Plotly.purge(plotRef.current);
+      Plotly.purge(plotEl);
       return;
     }
 
@@ -325,6 +328,7 @@ function App() {
       },
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[] = [
       {
         type: "scatter3d",
@@ -343,6 +347,7 @@ function App() {
       },
     ];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
       title: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
       autosize: true,
@@ -372,21 +377,23 @@ function App() {
       },
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false };
 
-    Plotly.newPlot(plotRef.current, data, layout, config);
+    Plotly.newPlot(plotEl, data, layout, config);
 
     return () => {
-      if (plotRef.current) Plotly.purge(plotRef.current);
+      Plotly.purge(plotEl);
     };
   }, [showPlot, axisVisible, cloud]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
-    if (!sliceRef.current) return;
+    const sliceEl = sliceRef.current;
+    if (!sliceEl) return;
 
     if (!showSlice || !zData) {
-      Plotly.purge(sliceRef.current);
+      Plotly.purge(sliceEl);
       return;
     }
 
@@ -419,12 +426,11 @@ function App() {
       displaylogo: false,
     };
 
-    Plotly.newPlot(sliceRef.current, data as any, layout as any, config as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Plotly.newPlot(sliceEl, data as any, layout as any, config as any);
 
     return () => {
-      if (sliceRef.current) {
-        Plotly.purge(sliceRef.current);
-      }
+      Plotly.purge(sliceEl);
     };
   }, [showSlice, zData, sliceIndex]);
 
@@ -439,7 +445,6 @@ function App() {
       setShowSlice(false);
       setZData(null);
       setCloud(null);
-      setCloudMeta(null);
 
       // 進捗初期化
       setProgressStep(0);
