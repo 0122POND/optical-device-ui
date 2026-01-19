@@ -95,3 +95,7 @@ npm run lint     # ESLint実行
 # バックエンド
 python3 -m uvicorn backend.app:app --reload --port 8000
 ```
+
+## ライセンス
+
+このプロジェクトは [Apache License 2.0](LICENSE) の下で公開されています。
