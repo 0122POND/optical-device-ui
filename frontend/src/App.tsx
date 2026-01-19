@@ -98,6 +98,9 @@ function App() {
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
 
+  // 左右反転フラグ（true = 反転 / false = 通常）
+  const [flipX, setFlipX] = useState(false);
+
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -329,12 +332,20 @@ function App() {
       },
     };
 
+    // 左右反転時はX座標を反転
+    const xData = flipX
+      ? (() => {
+          const maxX = cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]);
+          return cloud.x.map((v) => maxX - v);
+        })()
+      : cloud.x;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[] = [
       {
         type: "scatter3d",
         mode: "markers",
-        x: cloud.x,
+        x: xData,
         y: cloud.y,
         z: cloud.z,
         marker: {
@@ -386,7 +397,7 @@ function App() {
     return () => {
       Plotly.purge(plotEl);
     };
-  }, [showPlot, axisVisible, cloud]);
+  }, [showPlot, axisVisible, cloud, flipX]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
@@ -739,6 +750,23 @@ function App() {
               }}
             >
               {axisVisible ? "軸を非表示" : "軸を表示"}
+            </button>
+
+            {/* 左右反転トグルボタン */}
+            <button
+              disabled={!showPlot}
+              onClick={() => {
+                if (!showPlot) return;
+                setFlipX((v) => !v);
+              }}
+              style={{
+                ...buttonSecondaryStyle,
+                backgroundColor: flipX ? colors.borderLight : colors.bgDark,
+                cursor: showPlot ? "pointer" : "not-allowed",
+                opacity: showPlot ? 1 : 0.5,
+              }}
+            >
+              {flipX ? "左右反転: ON" : "左右反転: OFF"}
             </button>
 
             {/* CSV出力ボタン */}
