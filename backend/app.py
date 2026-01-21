@@ -144,13 +144,11 @@ async def ws_endpoint(ws: WebSocket):
         def blocking_preprocess():
             data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
             result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
-            num_images = int(params.get("num_images", 170))
             peak_threshold = int(params.get("peak_threshold", 10))
 
             return run_preprocess(
                 data_path=data_path,
                 result_path=result_path,
-                num_images=num_images,
                 peak_threshold=peak_threshold,
                 progress_callback=progress_callback
             )

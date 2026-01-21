@@ -48,7 +48,6 @@ const ws = new WebSocket("ws://localhost:8000/ws");
 {
   "cmd": "preprocess",
   "params": {
-    "num_images": 170,
     "peak_threshold": 10
   }
 }
@@ -56,10 +55,10 @@ const ws = new WebSocket("ws://localhost:8000/ws");
 
 | パラメータ | 型 | デフォルト | 説明 |
 |----------|---|----------|------|
-| `num_images` | int | 170 | 処理する画像数 |
 | `peak_threshold` | int | 10 | ピーク検出閾値 |
 
 ※ 入出力ディレクトリはバックエンドで `data/row_data/` と `data/result/` が使用されます。
+※ `data/row_data/` 内の全BMPファイルが処理対象となります。
 
 **レスポンス（進捗）:**
 ```json

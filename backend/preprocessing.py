@@ -11,7 +11,6 @@ from typing import Callable, Optional, List
 _DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
 DEFAULT_RESULT_PATH = str(_DATA_DIR / "result") + "/"
-DEFAULT_NUM_IMAGES = 170
 DEFAULT_PEAK_THRESHOLD = 10
 
 
@@ -32,7 +31,6 @@ def create_gauss_window(h, w, sigma_scale=6):
 def run_preprocess(
     data_path: str = DEFAULT_DATA_PATH,
     result_path: str = DEFAULT_RESULT_PATH,
-    num_images: int = DEFAULT_NUM_IMAGES,
     peak_threshold: int = DEFAULT_PEAK_THRESHOLD,
     progress_callback: Optional[Callable[[int, int, str], None]] = None
 ) -> List[str]:
@@ -42,7 +40,6 @@ def run_preprocess(
     Args:
         data_path: 入力ディレクトリ
         result_path: 出力ディレクトリ
-        num_images: 処理する画像枚数
         peak_threshold: ピーク検出の閾値
         progress_callback: 進捗コールバック (current_step, total_steps, message)
 
@@ -57,9 +54,9 @@ def run_preprocess(
 
     os.makedirs(result_path, exist_ok=True)
 
-    # Step 1: 画像の読み込み
+    # Step 1: 画像の読み込み（ディレクトリ内の全BMPファイル）
     report(1, "画像を読み込み中...")
-    image_files = sorted([f for f in os.listdir(data_path) if f.lower().endswith('.bmp')])[:num_images]
+    image_files = sorted([f for f in os.listdir(data_path) if f.lower().endswith('.bmp')])
 
     if not image_files:
         raise ValueError("画像が見つかりません")
