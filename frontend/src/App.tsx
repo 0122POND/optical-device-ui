@@ -426,7 +426,6 @@ function App() {
             JSON.stringify({
               cmd: "preprocess",
               params: {
-                num_images: 170,
                 peak_threshold: 10,
               },
             })
