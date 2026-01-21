@@ -10,6 +10,10 @@ echo ""
 # スクリプトのディレクトリに移動
 cd "$(dirname "$0")"
 
+# 前回のプロセスを終了
+lsof -ti:8000 | xargs kill -9 2>/dev/null
+lsof -ti:5173 | xargs kill -9 2>/dev/null
+
 # 終了時にバックエンドも終了させる
 cleanup() {
     echo ""
