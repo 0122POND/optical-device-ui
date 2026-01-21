@@ -272,50 +272,29 @@ def health():
 # -----------------------------
 @app.post("/shutdown")
 def shutdown():
-    """アプリケーション全体をシャットダウンする"""
+    """アプリケーション全体をシャットダウンする（stopスクリプトを実行）"""
     import subprocess
     import platform
     import threading
     import time
 
+    # プロジェクトルートディレクトリ（backend/の親）
+    project_root = Path(__file__).parent.parent
+
     def delayed_shutdown():
-        """1秒後にプロセスを終了"""
+        """1秒後にstopスクリプトを実行"""
         time.sleep(1)
         system = platform.system()
 
         if system == "Darwin":  # macOS
-            subprocess.run(
-                "lsof -ti:8000 | xargs kill -9 2>/dev/null; lsof -ti:5173 | xargs kill -9 2>/dev/null",
-                shell=True
-            )
+            stop_script = project_root / "stop_mac.sh"
+            subprocess.run(["bash", str(stop_script)])
         elif system == "Windows":
-            # バックエンドをウィンドウタイトルで終了
-            subprocess.run(
-                ['taskkill', '/fi', 'WINDOWTITLE eq Backend-Server', '/f'],
-                capture_output=True
-            )
-            # ポート8000を使用しているプロセスを終了
-            result = subprocess.run(
-                ['netstat', '-ano'],
-                capture_output=True,
-                text=True
-            )
-            for line in result.stdout.split('\n'):
-                if ':8000' in line and 'LISTENING' in line:
-                    parts = line.split()
-                    if parts:
-                        pid = parts[-1]
-                        subprocess.run(['taskkill', '/pid', pid, '/f'], capture_output=True)
-                if ':5173' in line and 'LISTENING' in line:
-                    parts = line.split()
-                    if parts:
-                        pid = parts[-1]
-                        subprocess.run(['taskkill', '/pid', pid, '/f'], capture_output=True)
+            stop_script = project_root / "stop_win.bat"
+            subprocess.run(["cmd", "/c", str(stop_script)], shell=True)
         else:  # Linux
-            subprocess.run(
-                "fuser -k 8000/tcp 2>/dev/null; fuser -k 5173/tcp 2>/dev/null",
-                shell=True
-            )
+            stop_script = project_root / "stop_mac.sh"
+            subprocess.run(["bash", str(stop_script)])
 
     # バックグラウンドスレッドで遅延シャットダウン
     thread = threading.Thread(target=delayed_shutdown, daemon=True)
