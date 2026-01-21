@@ -59,7 +59,14 @@ data/row_data/
 ./start_mac.sh
 ```
 
-終了するには `Ctrl+C` を押してください。フロントエンドとバックエンドが両方とも自動で終了します。
+#### 終了方法
+
+- `Ctrl+C` を押す、または
+- 終了スクリプトを実行:
+  - Windows: `stop_win.bat` をダブルクリック
+  - macOS / Linux: `./stop_mac.sh`
+
+※ 起動スクリプトは、前回のプロセスが残っていた場合も自動でクリーンアップします。
 
 #### 手動で起動する場合
 
@@ -99,6 +106,8 @@ optical-device-ui/
 ├── docs/                   # ドキュメント
 ├── start_win.bat          # 起動スクリプト（Windows用）
 ├── start_mac.sh           # 起動スクリプト（macOS/Linux用）
+├── stop_win.bat           # 終了スクリプト（Windows用）
+├── stop_mac.sh            # 終了スクリプト（macOS/Linux用）
 ├── CLAUDE.md              # Claude Code用ガイド
 └── README.md
 ```

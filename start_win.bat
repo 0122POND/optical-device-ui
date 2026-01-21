@@ -10,6 +10,11 @@ echo.
 
 cd /d "%~dp0"
 
+REM Kill any existing processes from previous run
+taskkill /fi "WINDOWTITLE eq Backend-Server" /f > nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /pid %%a /f > nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5173 ^| findstr LISTENING') do taskkill /pid %%a /f > nul 2>&1
+
 REM Start backend (minimized window)
 echo (1/2) Starting backend...
 start "Backend-Server" /min cmd /c "cd /d "%~dp0backend" && python -m uvicorn app:app --host 0.0.0.0 --port 8000"
