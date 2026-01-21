@@ -52,11 +52,11 @@ data/row_data/
 #### 簡単な起動方法（推奨）
 
 **Windows:**
-- `start.bat` をダブルクリック
+- `start_win.bat` をダブルクリック
 
 **macOS / Linux:**
 ```bash
-./start.sh
+./start_mac.sh
 ```
 
 終了するには `Ctrl+C` を押してください。フロントエンドとバックエンドが両方とも自動で終了します。
@@ -97,8 +97,8 @@ optical-device-ui/
 │   ├── app.py             # FastAPI サーバー（静的ファイル配信含む）
 │   └── preprocessing.py   # 画像処理モジュール
 ├── docs/                   # ドキュメント
-├── start.bat              # 起動スクリプト（Windows用）
-├── start.sh               # 起動スクリプト（macOS/Linux用）
+├── start_win.bat          # 起動スクリプト（Windows用）
+├── start_mac.sh           # 起動スクリプト（macOS/Linux用）
 ├── CLAUDE.md              # Claude Code用ガイド
 └── README.md
 ```
