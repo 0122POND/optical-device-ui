@@ -26,6 +26,11 @@ Temporary Items
 # 画像データ（サイズが大きいため除外）
 data/row_data/
 data/result/
+data/result_coin_ai/
+data/result_coin_ruined/
+
+# Claude Code
+CLAUDE.md
 
 # Python
 __pycache__/
