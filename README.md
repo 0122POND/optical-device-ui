@@ -40,7 +40,7 @@ pip3 install fastapi uvicorn websockets numpy Pillow scipy
 処理対象の画像を以下に配置してください：
 
 ```
-frontend/public/data/row_data/
+data/row_data/
 ├── 001.bmp
 ├── 002.bmp
 ├── ...
@@ -70,13 +70,16 @@ http://localhost:5173 を開き、「START」ボタンをクリックすると�
 
 ```
 optical-device-ui/
+├── data/                   # 画像データ格納場所
+│   ├── row_data/          # 入力画像
+│   └── result/            # 処理結果
 ├── frontend/               # React フロントエンド
 │   ├── src/
 │   │   ├── App.tsx        # メインコンポーネント
 │   │   └── utils/         # ユーティリティ関数
-│   └── public/data/       # 画像データ格納場所
+│   └── public/
 ├── backend/
-│   ├── app.py             # FastAPI サーバー
+│   ├── app.py             # FastAPI サーバー（静的ファイル配信含む）
 │   └── preprocessing.py   # 画像処理モジュール
 ├── docs/                   # ドキュメント
 ├── CLAUDE.md              # Claude Code用ガイド

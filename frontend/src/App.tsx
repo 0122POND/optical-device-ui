@@ -90,7 +90,6 @@ const StatusBadge = ({ status }: { status: MeasureStatus }) => {
 function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
-  const sliceRef = useRef<HTMLDivElement | null>(null);
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
@@ -109,12 +108,6 @@ function App() {
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
-
-  // 断層グラフを表示するかどうか
-  const [showSlice, setShowSlice] = useState(false);
-
-  // 断層位置（0~GRID_SIZE-1を動かす)
-  const [sliceIndex, setSliceIndex] = useState(Math.floor(GRID_SIZE / 2));
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
@@ -307,7 +300,7 @@ function App() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       Plotly.Plots.resize(el as any);
     });
-  }, [showSlice, showPlot]);
+  }, [showPlot]);
 
   useEffect(() => {
     const plotEl = plotRef.current;
@@ -402,53 +395,6 @@ function App() {
     };
   }, [showPlot, axisVisible, cloud, flipX]);
 
-  // --- 2D 断層グラフ描画 ---
-  useEffect(() => {
-    const sliceEl = sliceRef.current;
-    if (!sliceEl) return;
-
-    if (!showSlice || !zData) {
-      Plotly.purge(sliceEl);
-      return;
-    }
-
-    const row = zData[sliceIndex];
-    const x = row.map((_, i) => i);
-    const y = row.map((v) => (v == null ? null : v));
-
-    const data = [
-      {
-        x,
-        y,
-        type: "scatter" as const,
-        mode: "lines",
-      },
-    ];
-
-    const layout = {
-      title: `断層（y = ${sliceIndex}）`,
-      margin: { l: 40, r: 10, t: 30, b: 40 },
-      xaxis: { title: "X index" },
-      yaxis: { title: "Height" },
-      height: 250,
-      paper_bgcolor: colors.bgDark,
-      plot_bgcolor: colors.bgDark,
-      font: { color: colors.text },
-    };
-
-    const config = {
-      responsive: true,
-      displaylogo: false,
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    Plotly.newPlot(sliceEl, data as any, layout as any, config as any);
-
-    return () => {
-      Plotly.purge(sliceEl);
-    };
-  }, [showSlice, zData, sliceIndex]);
-
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
       if (acquireTimerRef.current != null) {
@@ -457,7 +403,6 @@ function App() {
 
       // 表示初期化
       setShowPlot(true);
-      setShowSlice(false);
       setZData(null);
       setCloud(null);
 
@@ -481,8 +426,6 @@ function App() {
             JSON.stringify({
               cmd: "preprocess",
               params: {
-                data_path: "frontend/public/data/row_data/",
-                result_path: "frontend/public/data/result/",
                 num_images: 170,
                 peak_threshold: 10,
               },
@@ -516,7 +459,6 @@ function App() {
   // AI結果を表示する処理
   const handleShowAIResult = async () => {
     setShowPlot(true);
-    setShowSlice(false);
     setCloud(null);
     setIsLoadingAI(true);
     setStatus("RUNNING");
@@ -642,12 +584,98 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "280px 1fr",
+            gridTemplateColumns: "1fr 280px",
             height: "100%",
             overflow: "hidden",
           }}
         >
-          {/* 左：サイドパネル */}
+          {/* 左：3D Plot + 2D断層 エリア */}
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              padding: "12px",
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+            }}
+          >
+            {/* 上：3D */}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <div ref={plotRef} style={{ width: "100%", height: "100%", position: "relative" }}>
+                {!showPlot && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: colors.textDim,
+                      fontSize: "15px",
+                    }}
+                  >
+                    右側の「START」ボタンから
+                    <br />
+                    3次元形状計測を開始してください。
+                  </div>
+                )}
+
+                {isAcquiring && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: colors.text,
+                      fontSize: "15px",
+                      backgroundColor: "rgba(45, 49, 57, 0.85)",
+                      pointerEvents: "none",
+                      textAlign: "center",
+                      lineHeight: 1.6,
+                      gap: "16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "18px", fontWeight: 600 }}>画像処理中...</div>
+
+                    {/* 進捗バー */}
+                    <div
+                      style={{
+                        width: "300px",
+                        height: "8px",
+                        backgroundColor: colors.border,
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${progressPercent}%`,
+                          height: "100%",
+                          backgroundColor: colors.primary,
+                          transition: "width 0.3s ease",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ fontSize: "14px" }}>
+                      [{progressStep}/{progressTotal}] {progressMessage}
+                    </div>
+
+                    <div style={{ fontSize: "12px", color: colors.textMuted }}>
+                      {progressPercent}%
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 右：サイドパネル */}
           <div
             style={{
               height: "100%",
@@ -657,7 +685,7 @@ function App() {
               gap: "16px",
               backgroundColor: colors.bgLight,
               boxSizing: "border-box",
-              borderRight: `1px solid ${colors.border}`,
+              borderLeft: `1px solid ${colors.border}`,
             }}
           >
             <div style={{ fontSize: "15px", fontWeight: 600, letterSpacing: "0.3px" }}>
@@ -834,142 +862,7 @@ function App() {
               CSVファイルを出力
             </button>
 
-            {/* 断層 出力/停止 トグルボタン */}
-            <button
-              disabled={!zData}
-              style={{
-                ...buttonSecondaryStyle,
-                height: "42px",
-                border: "none",
-                backgroundColor: showSlice ? colors.danger : colors.secondary,
-                cursor: zData ? "pointer" : "not-allowed",
-                opacity: zData ? 1 : 0.5,
-                marginTop: "8px",
-              }}
-              onClick={() => {
-                if (!zData) return;
-                setShowSlice((v) => !v);
-              }}
-            >
-              {showSlice ? "断層出力を停止" : "断層を出力"}
-            </button>
-
-            {/* 断層位置スライダー */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                断層位置（y）: {sliceIndex}
-              </label>
-
-              <input
-                type="range"
-                min={0}
-                max={GRID_SIZE - 1}
-                step={1}
-                value={sliceIndex}
-                disabled={!showSlice || !zData}
-                onChange={(e) => setSliceIndex(Number(e.target.value))}
-                style={{ width: "100%" }}
-              />
-
-              <div style={{ fontSize: "12px", color: colors.textDim }}>
-                {!zData && "※先に断層出力 or START でデータ生成してください"}
-              </div>
-            </div>
-
             <div style={{ flexGrow: 1 }} />
-          </div>
-
-          {/* 右：3D Plot + 2D断層 エリア */}
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              padding: "12px",
-              boxSizing: "border-box",
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-            }}
-          >
-            {/* 上：3D */}
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <div ref={plotRef} style={{ width: "100%", height: "100%", position: "relative" }}>
-                {!showPlot && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: colors.textDim,
-                      fontSize: "15px",
-                    }}
-                  >
-                    左側の「START」ボタンから
-                    <br />
-                    3次元形状計測を開始してください。
-                  </div>
-                )}
-
-                {isAcquiring && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: colors.text,
-                      fontSize: "15px",
-                      backgroundColor: "rgba(45, 49, 57, 0.85)",
-                      pointerEvents: "none",
-                      textAlign: "center",
-                      lineHeight: 1.6,
-                      gap: "16px",
-                    }}
-                  >
-                    <div style={{ fontSize: "18px", fontWeight: 600 }}>画像処理中...</div>
-
-                    {/* 進捗バー */}
-                    <div
-                      style={{
-                        width: "300px",
-                        height: "8px",
-                        backgroundColor: colors.border,
-                        borderRadius: "4px",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${progressPercent}%`,
-                          height: "100%",
-                          backgroundColor: colors.primary,
-                          transition: "width 0.3s ease",
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ fontSize: "14px" }}>
-                      [{progressStep}/{progressTotal}] {progressMessage}
-                    </div>
-
-                    <div style={{ fontSize: "12px", color: colors.textMuted }}>
-                      {progressPercent}%
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 下：2D 断層グラフ */}
-            {showSlice && (
-              <div style={{ height: "260px" }}>
-                <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
-              </div>
-            )}
           </div>
         </div>
       </div>
