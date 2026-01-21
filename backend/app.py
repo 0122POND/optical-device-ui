@@ -265,3 +265,60 @@ async def ws_endpoint(ws: WebSocket):
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+# -----------------------------
+# Shutdown endpoint
+# -----------------------------
+@app.post("/shutdown")
+def shutdown():
+    """アプリケーション全体をシャットダウンする"""
+    import subprocess
+    import platform
+    import threading
+    import time
+
+    def delayed_shutdown():
+        """1秒後にプロセスを終了"""
+        time.sleep(1)
+        system = platform.system()
+
+        if system == "Darwin":  # macOS
+            subprocess.run(
+                "lsof -ti:8000 | xargs kill -9 2>/dev/null; lsof -ti:5173 | xargs kill -9 2>/dev/null",
+                shell=True
+            )
+        elif system == "Windows":
+            # バックエンドをウィンドウタイトルで終了
+            subprocess.run(
+                ['taskkill', '/fi', 'WINDOWTITLE eq Backend-Server', '/f'],
+                capture_output=True
+            )
+            # ポート8000を使用しているプロセスを終了
+            result = subprocess.run(
+                ['netstat', '-ano'],
+                capture_output=True,
+                text=True
+            )
+            for line in result.stdout.split('\n'):
+                if ':8000' in line and 'LISTENING' in line:
+                    parts = line.split()
+                    if parts:
+                        pid = parts[-1]
+                        subprocess.run(['taskkill', '/pid', pid, '/f'], capture_output=True)
+                if ':5173' in line and 'LISTENING' in line:
+                    parts = line.split()
+                    if parts:
+                        pid = parts[-1]
+                        subprocess.run(['taskkill', '/pid', pid, '/f'], capture_output=True)
+        else:  # Linux
+            subprocess.run(
+                "fuser -k 8000/tcp 2>/dev/null; fuser -k 5173/tcp 2>/dev/null",
+                shell=True
+            )
+
+    # バックグラウンドスレッドで遅延シャットダウン
+    thread = threading.Thread(target=delayed_shutdown, daemon=True)
+    thread.start()
+
+    return {"ok": True, "message": "Shutting down..."}
