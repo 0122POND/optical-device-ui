@@ -48,8 +48,6 @@ const ws = new WebSocket("ws://localhost:8000/ws");
 {
   "cmd": "preprocess",
   "params": {
-    "data_path": "frontend/public/data/row_data/",
-    "result_path": "frontend/public/data/result/",
     "num_images": 170,
     "peak_threshold": 10
   }
@@ -58,10 +56,10 @@ const ws = new WebSocket("ws://localhost:8000/ws");
 
 | パラメータ | 型 | デフォルト | 説明 |
 |----------|---|----------|------|
-| `data_path` | string | `frontend/public/data/row_data/` | 入力画像ディレクトリ |
-| `result_path` | string | `frontend/public/data/result/` | 出力画像ディレクトリ |
 | `num_images` | int | 170 | 処理する画像数 |
 | `peak_threshold` | int | 10 | ピーク検出閾値 |
+
+※ 入出力ディレクトリはバックエンドで `data/row_data/` と `data/result/` が使用されます。
 
 **レスポンス（進捗）:**
 ```json
