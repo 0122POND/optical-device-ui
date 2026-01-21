@@ -20,9 +20,13 @@ timeout /t 2 /nobreak > nul
 
 echo [2/2] フロントエンドを起動しています...
 echo.
+
+REM ブラウザを開く（少し待ってから）
+timeout /t 3 /nobreak > nul
+start http://localhost:5173
+
 echo ----------------------------------------
-echo   ブラウザで http://localhost:5173 を
-echo   開いてください
+echo   ブラウザが自動で開きます
 echo ----------------------------------------
 echo.
 echo   終了するには Ctrl+C を押してください
