@@ -103,8 +103,8 @@ function App() {
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // 確認ダイアログの種類（3D開始 or CSV出力）
-  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
+  // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
+  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "close" | null>(null);
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -443,6 +443,13 @@ function App() {
         const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
         downloadCSV(fallback, "surface.csv");
       }
+    } else if (confirmMode === "close") {
+      // バックエンドにシャットダウンリクエストを送信してからブラウザを閉じる
+      fetch("http://localhost:8000/shutdown", { method: "POST" }).catch(() => {
+        // エラーは無視（サーバーが先に終了する可能性があるため）
+      });
+      // ブラウザウィンドウを閉じる
+      window.close();
     }
 
     setShowConfirm(false);
@@ -862,6 +869,23 @@ function App() {
             </button>
 
             <div style={{ flexGrow: 1 }} />
+
+            {/* 終了ボタン */}
+            <button
+              style={{
+                ...buttonSecondaryStyle,
+                height: "42px",
+                backgroundColor: colors.danger,
+                border: "none",
+                color: colors.text,
+              }}
+              onClick={() => {
+                setConfirmMode("close");
+                setShowConfirm(true);
+              }}
+            >
+              終了
+            </button>
           </div>
         </div>
       </div>
@@ -900,7 +924,9 @@ function App() {
             >
               {confirmMode === "csv"
                 ? "csvファイルを出力しますか？"
-                : "3次元形状計測を開始しますか？"}
+                : confirmMode === "close"
+                  ? "アプリケーションを終了しますか？"
+                  : "3次元形状計測を開始しますか？"}
             </div>
             <div
               style={{
