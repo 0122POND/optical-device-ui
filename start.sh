@@ -36,9 +36,12 @@ sleep 2
 # フロントエンドを起動
 echo "[2/2] フロントエンドを起動しています..."
 echo ""
+
+# ブラウザを開く（バックグラウンドで少し待ってから）
+(sleep 3 && open http://localhost:5173 2>/dev/null || xdg-open http://localhost:5173 2>/dev/null || start http://localhost:5173 2>/dev/null) &
+
 echo "----------------------------------------"
-echo "  ブラウザで http://localhost:5173 を"
-echo "  開いてください"
+echo "  ブラウザが自動で開きます"
 echo "----------------------------------------"
 echo ""
 echo "  終了するには Ctrl+C を押してください"
