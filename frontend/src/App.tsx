@@ -481,8 +481,6 @@ function App() {
             JSON.stringify({
               cmd: "preprocess",
               params: {
-                data_path: "frontend/public/data/row_data/",
-                result_path: "frontend/public/data/result/",
                 num_images: 170,
                 peak_threshold: 10,
               },

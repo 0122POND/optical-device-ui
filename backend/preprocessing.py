@@ -1,13 +1,16 @@
 import os
 import json
 import numpy as np
+from pathlib import Path
 from PIL import Image
 from scipy.ndimage import gaussian_filter
 from typing import Callable, Optional, List
 
 # --- デフォルト設定 ---
-DEFAULT_DATA_PATH = 'frontend/public/data/row_data/'
-DEFAULT_RESULT_PATH = 'frontend/public/data/result/'
+# backendディレクトリから実行されることを想定し、親ディレクトリのdataを参照
+_DATA_DIR = Path(__file__).parent.parent / "data"
+DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
+DEFAULT_RESULT_PATH = str(_DATA_DIR / "result") + "/"
 DEFAULT_NUM_IMAGES = 170
 DEFAULT_PEAK_THRESHOLD = 10
 

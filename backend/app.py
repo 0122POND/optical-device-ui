@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # 同一ディレクトリのモジュールをインポートできるようにパスを追加
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,6 +33,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 静的ファイル配信（dataディレクトリ）
+# backendディレクトリから実行されることを想定し、親ディレクトリのdataを参照
+DATA_DIR = Path(__file__).parent.parent / "data"
+app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 # スレッドプール（画像処理用）
 executor = ThreadPoolExecutor(max_workers=2)
@@ -136,8 +142,8 @@ async def ws_endpoint(ws: WebSocket):
             )
 
         def blocking_preprocess():
-            data_path = params.get("data_path", "frontend/public/data/row_data/")
-            result_path = params.get("result_path", "frontend/public/data/result/")
+            data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
+            result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
             num_images = int(params.get("num_images", 170))
             peak_threshold = int(params.get("peak_threshold", 10))
 
