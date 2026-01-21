@@ -44,14 +44,29 @@ data/row_data/
 ├── 001.bmp
 ├── 002.bmp
 ├── ...
-└── 170.bmp
+└── (任意の枚数)
 ```
 
 ### 3. サーバー起動
 
+#### 簡単な起動方法（推奨）
+
+**Windows:**
+- `start.bat` をダブルクリック
+
+**macOS / Linux:**
+```bash
+./start.sh
+```
+
+終了するには `Ctrl+C` を押してください。フロントエンドとバックエンドが両方とも自動で終了します。
+
+#### 手動で起動する場合
+
 **ターミナル1: バックエンド**
 ```bash
-python3 -m uvicorn backend.app:app --reload --port 8000
+cd backend
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 **ターミナル2: フロントエンド**
@@ -82,6 +97,8 @@ optical-device-ui/
 │   ├── app.py             # FastAPI サーバー（静的ファイル配信含む）
 │   └── preprocessing.py   # 画像処理モジュール
 ├── docs/                   # ドキュメント
+├── start.bat              # 起動スクリプト（Windows用）
+├── start.sh               # 起動スクリプト（macOS/Linux用）
 ├── CLAUDE.md              # Claude Code用ガイド
 └── README.md
 ```
