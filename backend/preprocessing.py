@@ -6,8 +6,16 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, List
 
 import cv2
-import numexpr as ne
-from scipy.ndimage import gaussian_filter1d
+
+# --- GPU対応: CuPyが使用可能か判定 ---
+try:
+    import cupy as cp
+    from cupyx.scipy.ndimage import gaussian_filter, gaussian_filter1d
+    GPU_AVAILABLE = True
+except ImportError:
+    cp = None
+    from scipy.ndimage import gaussian_filter, gaussian_filter1d
+    GPU_AVAILABLE = False
 
 # --- デフォルト設定 ---
 # backendディレクトリから実行されることを想定し、親ディレクトリのdataを参照
@@ -17,19 +25,40 @@ DEFAULT_RESULT_PATH = str(_DATA_DIR / "result") + "/"
 DEFAULT_PEAK_THRESHOLD = 10
 
 
-def create_gauss_window(h, w, sigma_scale=6):
-    """ガウス窓を作成 (NumPy版・最適化済み)"""
+def get_array_module(use_gpu: bool = True):
+    """使用する配列モジュールを取得（GPU/CPU自動切り替え）"""
+    if use_gpu and GPU_AVAILABLE:
+        return cp
+    return np
+
+
+def to_gpu(arr, xp):
+    """配列をGPUに転送（GPUが使用可能な場合）"""
+    if xp is cp:
+        return cp.asarray(arr)
+    return arr
+
+
+def to_cpu(arr):
+    """配列をCPUに転送（CuPy配列の場合のみ）"""
+    if GPU_AVAILABLE and isinstance(arr, cp.ndarray):
+        return cp.asnumpy(arr)
+    return arr
+
+
+def create_gauss_window(h, w, sigma_scale=6, xp=np):
+    """ガウス窓を作成（GPU/CPU対応）"""
     cy, cx = h // 2, w // 2
     sigma_y = h / sigma_scale
     sigma_x = w / sigma_scale
 
-    y = np.arange(h, dtype=np.float32) - cy
-    x = np.arange(w, dtype=np.float32) - cx
+    y = xp.arange(h, dtype=xp.float32) - cy
+    x = xp.arange(w, dtype=xp.float32) - cx
 
-    gy = np.exp(-y**2 / (2 * sigma_y**2))
-    gx = np.exp(-x**2 / (2 * sigma_x**2))
+    gy = xp.exp(-y**2 / (2 * sigma_y**2))
+    gx = xp.exp(-x**2 / (2 * sigma_x**2))
 
-    gauss = np.outer(gy, gx)
+    gauss = xp.outer(gy, gx)
     gauss /= gauss.max()
     return gauss
 
@@ -49,34 +78,36 @@ def _save_image(args: tuple) -> str:
     return os.path.basename(save_path)
 
 
-def _apply_gaussian_blur_2d(img: np.ndarray) -> np.ndarray:
-    """OpenCVで2Dガウスブラーを適用"""
-    return cv2.GaussianBlur(img, (15, 15), 7)
-
-
 def run_preprocess(
     data_path: str = DEFAULT_DATA_PATH,
     result_path: str = DEFAULT_RESULT_PATH,
     peak_threshold: int = DEFAULT_PEAK_THRESHOLD,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    use_gpu: bool = True
 ) -> List[str]:
     """
-    画像処理を実行する（高速化版）
+    画像処理を実行する（GPU/CPU自動切り替え版）
 
     Args:
         data_path: 入力ディレクトリ
         result_path: 出力ディレクトリ
         peak_threshold: ピーク検出の閾値
         progress_callback: 進捗コールバック (current_step, total_steps, message)
+        use_gpu: GPUを使用するかどうか（Trueでも利用不可なら自動でCPUにフォールバック）
 
     Returns:
         生成されたファイル名のリスト
     """
     total_steps = 8
 
+    # 使用する配列モジュールを決定
+    xp = get_array_module(use_gpu)
+    using_gpu = xp is cp
+
     def report(step: int, message: str):
         if progress_callback:
-            progress_callback(step, total_steps, message)
+            device = "GPU" if using_gpu else "CPU"
+            progress_callback(step, total_steps, f"[{device}] {message}")
 
     os.makedirs(result_path, exist_ok=True)
 
@@ -91,64 +122,59 @@ def run_preprocess(
     with ThreadPoolExecutor() as executor:
         img_list = list(executor.map(_load_image, paths))
 
-    images = np.stack(img_list)
+    # CPUで読み込んだ後、GPUに転送
+    images = xp.stack([to_gpu(img, xp) for img in img_list])
 
     # Step 2: 中央値画像の計算
     report(2, "背景画像を計算中...")
-    bg_image = np.median(images, axis=0)
+    bg_image = xp.median(images, axis=0)
 
-    # Step 3: 背景差分 & クリップ（numexprで高速化）
+    # Step 3: 背景差分 & クリップ
     report(3, "背景差分を計算中...")
-    sub_bg = ne.evaluate("where(images > bg_image, images - bg_image, 0)")
+    sub_bg = xp.maximum(images - bg_image, 0)
 
-    # Step 4: 横方向差分 & 強調（numexprで高速化）
+    # Step 4: 横方向差分 & 強調
     report(4, "横方向差分と強調処理中...")
-    diff_x = np.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
+    diff_x = xp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
 
-    max_val = diff_x.max()
+    max_val = float(diff_x.max())
     if max_val == 0:
         max_val = 1.0
 
-    # numexprでべき乗演算を高速化
     inv_max = 1.0 / max_val
-    enhanced = ne.evaluate("(diff_x * inv_max) ** 0.7 * 255")
+    enhanced = xp.power(diff_x * inv_max, 0.7) * 255
 
     # Step 5: ガウス窓の適用
     report(5, "ガウス窓を適用中...")
     _, h, w_diff = enhanced.shape
-    gauss_window = create_gauss_window(h, w_diff, sigma_scale=6)
+    gauss_window = create_gauss_window(h, w_diff, sigma_scale=6, xp=xp)
 
-    gausswin = ne.evaluate("where(enhanced * gauss_window > 255, 255, enhanced * gauss_window)")
+    gausswin = xp.minimum(enhanced * gauss_window, 255)
 
-    # Step 6: スタックブラー（OpenCV 2D + scipy 1Dで高速化）
+    # Step 6: スタックブラー（3次元ガウスフィルタ）
     report(6, "3次元スタックブラーを適用中...")
 
-    # 2Dガウスブラーを並列適用（OpenCVはSIMD最適化済み）
-    with ThreadPoolExecutor() as executor:
-        blurred_2d = list(executor.map(_apply_gaussian_blur_2d, gausswin))
-    blurred_stack = np.stack(blurred_2d)
-
-    # Z方向のみscipy（1D）
-    blurred_stack = gaussian_filter1d(blurred_stack, sigma=1, axis=0)
+    # GPU: CuPyのgaussian_filter、CPU: SciPyのgaussian_filter
+    blurred_stack = gaussian_filter(gausswin, sigma=(1, 7, 7))
 
     # コントラスト正規化
-    max_vals = np.max(blurred_stack, axis=(1, 2), keepdims=True)
-    max_vals = np.where(max_vals == 0, 1, max_vals)
-    contrast = ne.evaluate("blurred_stack / max_vals * 255")
+    max_vals = xp.max(blurred_stack, axis=(1, 2), keepdims=True)
+    max_vals = xp.where(max_vals == 0, 1, max_vals)
+    contrast = blurred_stack / max_vals * 255
 
-    # Step 7: ピーク検出（最適化済み）
+    # Step 7: ピーク検出
     report(7, "ピーク検出を実行中...")
     n_img, h_img, w_img = contrast.shape
 
     # argmaxとmaxを効率的に計算
-    max_indices = np.argmax(contrast, axis=2)
-    max_values = np.take_along_axis(contrast, max_indices[:, :, np.newaxis], axis=2).squeeze(axis=2)
+    max_indices = xp.argmax(contrast, axis=2)
+    max_values = xp.take_along_axis(contrast, max_indices[:, :, xp.newaxis], axis=2).squeeze(axis=2)
 
-    peak_result = np.zeros((n_img, h_img, w_img), dtype=np.uint8)
+    peak_result = xp.zeros((n_img, h_img, w_img), dtype=xp.uint8)
     valid_mask = max_values >= peak_threshold
 
     # インデックス配列を効率的に生成
-    img_idx, row_idx = np.mgrid[:n_img, :h_img]
+    img_idx, row_idx = xp.mgrid[:n_img, :h_img]
 
     valid_img = img_idx[valid_mask]
     valid_row = row_idx[valid_mask]
@@ -156,6 +182,9 @@ def run_preprocess(
 
     peak_result[valid_img, valid_row, valid_col] = 255
     peak_result[:, :, :-1] |= peak_result[:, :, 1:]
+
+    # GPUからCPUに転送（保存のため）
+    peak_result_cpu = to_cpu(peak_result)
 
     # Step 8: 並列保存
     report(8, "結果を保存中...")
@@ -166,7 +195,7 @@ def run_preprocess(
         base_name = os.path.splitext(fname)[0]
         save_name = f"{base_name}_gausswin_stackblur_contrast_peak.bmp"
         save_path = os.path.join(result_path, save_name)
-        save_args.append((save_path, peak_result[i]))
+        save_args.append((save_path, peak_result_cpu[i]))
         output_files.append(save_name)
 
     with ThreadPoolExecutor() as executor:
@@ -180,10 +209,40 @@ def run_preprocess(
     return output_files
 
 
+def is_gpu_available() -> bool:
+    """GPUが使用可能かどうかを返す"""
+    return GPU_AVAILABLE
+
+
+def get_gpu_info() -> dict:
+    """GPU情報を取得"""
+    if not GPU_AVAILABLE:
+        return {"available": False, "message": "CuPy is not installed or CUDA is not available"}
+
+    try:
+        device = cp.cuda.Device()
+        props = cp.cuda.runtime.getDeviceProperties(device.id)
+        return {
+            "available": True,
+            "device_id": device.id,
+            "name": props["name"].decode() if isinstance(props["name"], bytes) else props["name"],
+            "total_memory_gb": props["totalGlobalMem"] / (1024**3),
+        }
+    except Exception as e:
+        return {"available": False, "message": str(e)}
+
+
 # CLI実行用
 if __name__ == "__main__":
     def print_progress(step: int, total: int, message: str):
         print(f"[{step}/{total}] {message}")
+
+    # GPU情報を表示
+    gpu_info = get_gpu_info()
+    if gpu_info["available"]:
+        print(f"GPU検出: {gpu_info['name']} ({gpu_info['total_memory_gb']:.1f} GB)")
+    else:
+        print(f"GPU未検出: {gpu_info.get('message', 'CPU mode')}")
 
     run_preprocess(progress_callback=print_progress)
     print("完了しました")
