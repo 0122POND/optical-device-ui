@@ -145,12 +145,14 @@ async def ws_endpoint(ws: WebSocket):
             data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
             result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
             peak_threshold = int(params.get("peak_threshold", 10))
+            use_gpu = params.get("use_gpu", True)
 
             return run_preprocess(
                 data_path=data_path,
                 result_path=result_path,
                 peak_threshold=peak_threshold,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                use_gpu=use_gpu
             )
 
         # 別スレッドで画像処理を実行

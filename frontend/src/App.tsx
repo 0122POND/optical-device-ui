@@ -90,6 +90,7 @@ const StatusBadge = ({ status }: { status: MeasureStatus }) => {
 function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
+  const sliceRef = useRef<HTMLDivElement | null>(null);
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
@@ -106,8 +107,17 @@ function App() {
   // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
   const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "close" | null>(null);
 
+  // GPU使用フラグ（STARTボタンで選択）
+  const [useGpu, setUseGpu] = useState(false);
+
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
+
+  // 断層グラフを表示するかどうか
+  const [showSlice, setShowSlice] = useState(false);
+
+  // 断層位置（Y値のパーセンテージ 0-100）
+  const [sliceYPercent, setSliceYPercent] = useState(50);
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
@@ -296,11 +306,16 @@ function App() {
     if (!showPlot || !plotRef.current) return;
     const el = plotRef.current;
 
-    requestAnimationFrame(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Plotly.Plots.resize(el as any);
-    });
-  }, [showPlot]);
+    // showSliceが変わるとコンテナサイズが変わるので、少し遅延してリサイズ
+    const timer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        Plotly.Plots.resize(el as any);
+      });
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, [showPlot, showSlice]);
 
   useEffect(() => {
     const plotEl = plotRef.current;
@@ -395,6 +410,77 @@ function App() {
     };
   }, [showPlot, axisVisible, cloud, flipX]);
 
+  // --- 2D 断層グラフ描画 ---
+  useEffect(() => {
+    const sliceEl = sliceRef.current;
+    if (!sliceEl) return;
+
+    if (!showSlice || !cloud) {
+      Plotly.purge(sliceEl);
+      return;
+    }
+
+    // Y値の範囲を計算（大きな配列ではスプレッド演算子が使えないためループで計算）
+    let minY = cloud.y[0];
+    let maxY = cloud.y[0];
+    for (let i = 1; i < cloud.y.length; i++) {
+      if (cloud.y[i] < minY) minY = cloud.y[i];
+      if (cloud.y[i] > maxY) maxY = cloud.y[i];
+    }
+    const targetY = minY + (maxY - minY) * (sliceYPercent / 100);
+    const tolerance = (maxY - minY) * 0.02; // Y範囲の2%を許容誤差とする
+
+    // 指定Y位置周辺の点を抽出
+    const slicePoints: { x: number; z: number }[] = [];
+    for (let i = 0; i < cloud.y.length; i++) {
+      if (Math.abs(cloud.y[i] - targetY) <= tolerance) {
+        slicePoints.push({ x: cloud.x[i], z: cloud.z[i] });
+      }
+    }
+
+    // X座標でソート
+    slicePoints.sort((a, b) => a.x - b.x);
+
+    const xData = slicePoints.map((p) => p.x);
+    const zData = slicePoints.map((p) => p.z);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any[] = [
+      {
+        x: xData,
+        y: zData,
+        type: "scatter",
+        mode: "markers",
+        marker: {
+          size: 3,
+          color: colors.primary,
+          opacity: 0.6,
+        },
+      },
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const layout: any = {
+      title: `断層（Y = ${targetY.toFixed(1)}、${slicePoints.length} points）`,
+      margin: { l: 50, r: 20, t: 40, b: 50 },
+      xaxis: { title: "X", color: colors.text, gridcolor: colors.border },
+      yaxis: { title: "Z", color: colors.text, gridcolor: colors.border },
+      height: 250,
+      paper_bgcolor: colors.bgDark,
+      plot_bgcolor: colors.bgDark,
+      font: { color: colors.text, family: fontFamily },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config: any = { responsive: true, displaylogo: false };
+
+    Plotly.newPlot(sliceEl, data, layout, config);
+
+    return () => {
+      Plotly.purge(sliceEl);
+    };
+  }, [showSlice, cloud, sliceYPercent]);
+
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
       if (acquireTimerRef.current != null) {
@@ -427,6 +513,7 @@ function App() {
               cmd: "preprocess",
               params: {
                 peak_threshold: 10,
+                use_gpu: useGpu,
               },
             })
           );
@@ -608,7 +695,7 @@ function App() {
             }}
           >
             {/* 上：3D */}
-            <div style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
               <div ref={plotRef} style={{ width: "100%", height: "100%", position: "relative" }}>
                 {!showPlot && (
                   <div
@@ -622,7 +709,7 @@ function App() {
                       fontSize: "15px",
                     }}
                   >
-                    右側の「START」ボタンから
+                    右側の「START（CPU）」または「START（GPU）」ボタンから
                     <br />
                     3次元形状計測を開始してください。
                   </div>
@@ -679,6 +766,13 @@ function App() {
                 )}
               </div>
             </div>
+
+            {/* 下：2D 断層グラフ */}
+            {showSlice && (
+              <div style={{ height: "260px", flexShrink: 0 }}>
+                <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
+              </div>
+            )}
           </div>
 
           {/* 右：サイドパネル */}
@@ -784,23 +878,43 @@ function App() {
               }}
             />
 
-            {/* STARTボタン */}
-            <button
-              disabled={status === "RUNNING"}
-              style={{
-                ...buttonPrimaryStyle,
-                backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
-                cursor: status === "RUNNING" ? "not-allowed" : "pointer",
-                marginTop: "4px",
-                opacity: status === "RUNNING" ? 0.7 : 1,
-              }}
-              onClick={() => {
-                setConfirmMode("plot");
-                setShowConfirm(true);
-              }}
-            >
-              {status === "RUNNING" ? "処理中..." : "START"}
-            </button>
+            {/* STARTボタン（CPU/GPU） */}
+            <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+              <button
+                disabled={status === "RUNNING"}
+                style={{
+                  ...buttonPrimaryStyle,
+                  flex: 1,
+                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
+                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
+                  opacity: status === "RUNNING" ? 0.7 : 1,
+                }}
+                onClick={() => {
+                  setUseGpu(false);
+                  setConfirmMode("plot");
+                  setShowConfirm(true);
+                }}
+              >
+                {status === "RUNNING" ? "処理中..." : "START（CPU）"}
+              </button>
+              <button
+                disabled={status === "RUNNING"}
+                style={{
+                  ...buttonPrimaryStyle,
+                  flex: 1,
+                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.success,
+                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
+                  opacity: status === "RUNNING" ? 0.7 : 1,
+                }}
+                onClick={() => {
+                  setUseGpu(true);
+                  setConfirmMode("plot");
+                  setShowConfirm(true);
+                }}
+              >
+                {status === "RUNNING" ? "処理中..." : "START（GPU）"}
+              </button>
+            </div>
 
             {/* AIでの結果を表示ボタン */}
             <button
@@ -868,6 +982,47 @@ function App() {
               CSVファイルを出力
             </button>
 
+            {/* 断層 出力/停止 トグルボタン */}
+            <button
+              disabled={!cloud}
+              style={{
+                ...buttonSecondaryStyle,
+                height: "42px",
+                border: "none",
+                backgroundColor: showSlice ? colors.danger : colors.secondary,
+                cursor: cloud ? "pointer" : "not-allowed",
+                opacity: cloud ? 1 : 0.5,
+                marginTop: "8px",
+              }}
+              onClick={() => {
+                if (!cloud) return;
+                setShowSlice((v) => !v);
+              }}
+            >
+              {showSlice ? "断層出力を停止" : "断層画像を出力"}
+            </button>
+
+            {/* 断層位置スライダー */}
+            {showSlice && cloud && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                  断層位置（Y）: {sliceYPercent}%
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={sliceYPercent}
+                  onChange={(e) => setSliceYPercent(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    cursor: "pointer",
+                    accentColor: colors.primary,
+                  }}
+                />
+              </div>
+            )}
+
             <div style={{ flexGrow: 1 }} />
 
             {/* 終了ボタン */}
@@ -926,7 +1081,7 @@ function App() {
                 ? "csvファイルを出力しますか？"
                 : confirmMode === "close"
                   ? "アプリケーションを終了しますか？"
-                  : "3次元形状計測を開始しますか？"}
+                  : `3次元形状計測を開始しますか？（${useGpu ? "GPU" : "CPU"}モード）`}
             </div>
             <div
               style={{
