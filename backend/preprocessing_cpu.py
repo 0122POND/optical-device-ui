@@ -142,7 +142,7 @@ def run_preprocess(
     peak_result[valid_img, valid_row, valid_col] = 255
     peak_result[:, :, :-1] |= peak_result[:, :, 1:]
 
-    # Step 8: 並列保存
+    # Step 8: 並列保存（I/Oバウンドなのでワーカー数を増やす）
     report(8, "結果を保存中...")
     save_args = []
     output_files = []
@@ -154,7 +154,9 @@ def run_preprocess(
         save_args.append((save_path, peak_result[i]))
         output_files.append(save_name)
 
-    with ThreadPoolExecutor() as executor:
+    # I/Oバウンドなのでワーカー数を多めに設定
+    max_workers = min(32, len(save_args))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(_save_image, save_args))
 
     # manifest.json を生成
