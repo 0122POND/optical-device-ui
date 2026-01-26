@@ -189,6 +189,11 @@ function App() {
     fontFamily: fontFamily,
     cursor: "pointer",
     transition: "background-color 0.2s, opacity 0.2s",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 12px",
+    boxSizing: "border-box",
   };
 
   const buttonSecondaryStyle: React.CSSProperties = {
@@ -202,6 +207,11 @@ function App() {
     fontFamily: fontFamily,
     cursor: "pointer",
     transition: "background-color 0.2s",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 12px",
+    boxSizing: "border-box",
   };
 
   // WebSocket接続
