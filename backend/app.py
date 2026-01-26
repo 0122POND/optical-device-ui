@@ -17,8 +17,6 @@ from fastapi.staticfiles import StaticFiles
 # 同一ディレクトリのモジュールをインポートできるようにパスを追加
 sys.path.insert(0, str(Path(__file__).parent))
 
-from preprocessing import run_preprocess
-
 
 # -----------------------------
 # App / CORS
@@ -147,12 +145,17 @@ async def ws_endpoint(ws: WebSocket):
             peak_threshold = int(params.get("peak_threshold", 10))
             use_gpu = params.get("use_gpu", True)
 
+            # use_gpu に応じて適切なモジュールを動的にインポート
+            if use_gpu:
+                from preprocessing_gpu import run_preprocess
+            else:
+                from preprocessing_cpu import run_preprocess
+
             return run_preprocess(
                 data_path=data_path,
                 result_path=result_path,
                 peak_threshold=peak_threshold,
                 progress_callback=progress_callback,
-                use_gpu=use_gpu
             )
 
         # 別スレッドで画像処理を実行
