@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, List
 
 import cv2
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter1d
 
 # --- デフォルト設定 ---
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -113,8 +113,19 @@ def run_preprocess(
     gausswin = np.minimum(enhanced * gauss_window, 255)
 
     # Step 6: スタックブラー（3次元ガウスフィルタ）
+    # OpenCV + scipy.ndimage.gaussian_filter1d で高速化
     report(6, "3次元スタックブラーを適用中...")
-    blurred_stack = gaussian_filter(gausswin, sigma=(1, 7, 7))
+
+    # axis=0 (画像間方向) に sigma=1 のガウスフィルタ
+    temp = gaussian_filter1d(gausswin, sigma=1, axis=0)
+
+    # axis=1,2 (2D画像) に sigma=7 のガウスフィルタ（OpenCVで高速化）
+    def blur_2d(img):
+        return cv2.GaussianBlur(img.astype(np.float32), (0, 0), sigmaX=7, sigmaY=7)
+
+    with ThreadPoolExecutor() as executor:
+        blurred_list = list(executor.map(blur_2d, temp))
+    blurred_stack = np.stack(blurred_list)
 
     # コントラスト正規化
     max_vals = np.max(blurred_stack, axis=(1, 2), keepdims=True)
