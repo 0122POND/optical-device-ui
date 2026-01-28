@@ -382,27 +382,38 @@ function App() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
-      title: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
+      title: {
+        text: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
+        font: { color: "#ffffff" },
+      },
       autosize: true,
       margin: { l: 0, r: 0, t: 30, b: 0 },
+      paper_bgcolor: "#000000",
       scene: {
+        bgcolor: "#000000",
         xaxis: {
           title: axisVisible ? "X" : "",
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
+          color: "#ffffff",
+          gridcolor: "#333333",
         },
         yaxis: {
           title: axisVisible ? "Y" : "",
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
+          color: "#ffffff",
+          gridcolor: "#333333",
         },
         zaxis: {
           title: axisVisible ? "Z (flipped)" : "",
           visible: axisVisible,
           showgrid: axisVisible,
           zeroline: axisVisible,
+          color: "#ffffff",
+          gridcolor: "#333333",
         },
         aspectmode: "manual",
         aspectratio: { x: 1, y: 1, z: 1.0 },
