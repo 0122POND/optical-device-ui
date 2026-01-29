@@ -1632,6 +1632,8 @@ function App() {
                 style={{
                   ...buttonPrimaryStyle,
                   flex: 1,
+                  height: "56px",
+                  fontSize: "16px",
                   backgroundColor: status === "RUNNING" ? "#4a6280" : "#4a90e2",
                   cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                   opacity: status === "RUNNING" ? 0.7 : 1,
@@ -1642,13 +1644,21 @@ function App() {
                   setShowConfirm(true);
                 }}
               >
-                {status === "RUNNING" ? "処理中..." : "▶ CPU"}
+                {status === "RUNNING" ? (
+                  "処理中..."
+                ) : (
+                  <>
+                    <span style={{ fontSize: "40px", lineHeight: 1 }}>▶</span> CPU
+                  </>
+                )}
               </button>
               <button
                 disabled={status === "RUNNING"}
                 style={{
                   ...buttonPrimaryStyle,
                   flex: 1,
+                  height: "56px",
+                  fontSize: "16px",
                   backgroundColor: status === "RUNNING" ? "#4a6280" : colors.success,
                   cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                   opacity: status === "RUNNING" ? 0.7 : 1,
@@ -1659,7 +1669,13 @@ function App() {
                   setShowConfirm(true);
                 }}
               >
-                {status === "RUNNING" ? "処理中..." : "▶ GPU"}
+                {status === "RUNNING" ? (
+                  "処理中..."
+                ) : (
+                  <>
+                    <span style={{ fontSize: "40px", lineHeight: 1 }}>▶</span> GPU
+                  </>
+                )}
               </button>
             </div>
           </div>
