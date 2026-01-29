@@ -164,6 +164,19 @@ function App() {
 
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
+  const aboutRef = useRef<HTMLDivElement>(null);
+
+  // About Usポップアップ外クリックで閉じる
+  useEffect(() => {
+    if (!showAbout) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (aboutRef.current && !aboutRef.current.contains(e.target as Node)) {
+        setShowAbout(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAbout]);
 
   // 最終計測日時
   const [lastMeasuredAt, setLastMeasuredAt] = useState<string | null>(null);
@@ -816,9 +829,9 @@ function App() {
           }}
         >
           <div
+            ref={aboutRef}
             style={{ position: "relative" }}
-            onMouseEnter={() => setShowAbout(true)}
-            onMouseLeave={() => setShowAbout(false)}
+            onClick={() => setShowAbout((prev) => !prev)}
           >
             <img
               src="/logo.jpg"
