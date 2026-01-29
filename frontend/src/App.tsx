@@ -393,6 +393,49 @@ function App() {
               };
             })();
 
+      // カラーバーのカスタムtick（最大値のみ単位表示）
+      const colorData = viewMode === "2D-camera" ? xData : cloud.c;
+      let cMin = colorData[0];
+      let cMax = colorData[0];
+      for (let i = 1; i < colorData.length; i++) {
+        if (colorData[i] < cMin) cMin = colorData[i];
+        if (colorData[i] > cMax) cMax = colorData[i];
+      }
+      // µm換算
+      const cMaxUm = cMax * UM_PER_PIXEL;
+      // mm超えたらmm表示
+      const useMillimeter = cMaxUm >= 1000;
+      const unitLabel = useMillimeter ? "mm" : "µm";
+      const toUnit = (px: number) => {
+        const um = px * UM_PER_PIXEL;
+        return useMillimeter ? um / 1000 : um;
+      };
+      // キリの良い数値でtickを生成
+      const rangeUnit = toUnit(cMax) - toUnit(cMin);
+      const rawStep = rangeUnit / 5;
+      // 1, 2, 5 の倍数に丸める
+      const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+      const residual = rawStep / mag;
+      const niceStep = residual <= 1.5 ? 1 * mag : residual <= 3.5 ? 2 * mag : 5 * mag;
+      const minUnit = toUnit(cMin);
+      const maxUnit = toUnit(cMax);
+      const niceStart = Math.ceil(minUnit / niceStep) * niceStep;
+      const tickvals: number[] = [];
+      const ticktext: string[] = [];
+      // niceStepに基づいて小数桁数を決定
+      const decimals = niceStep >= 1 ? 0 : Math.max(0, Math.ceil(-Math.log10(niceStep)));
+      const fmt = Math.max(decimals, 3);
+      for (let v = niceStart; v <= maxUnit + niceStep * 0.01; v += niceStep) {
+        // ピクセル値に逆換算
+        const px = useMillimeter ? (v * 1000) / UM_PER_PIXEL : v / UM_PER_PIXEL;
+        tickvals.push(px);
+        ticktext.push(v.toFixed(fmt));
+      }
+      // 最大tickにのみ単位を付与
+      if (ticktext.length > 0) {
+        ticktext[ticktext.length - 1] = `${ticktext[ticktext.length - 1]} ${unitLabel}`;
+      }
+
       data = [
         {
           type: "scatter3d",
@@ -403,7 +446,7 @@ function App() {
           marker: {
             size: viewMode === "2D-camera" ? 1.5 : 1,
             opacity: viewMode === "2D-camera" ? 0.15 : 0.08,
-            color: viewMode === "2D-camera" ? xData : cloud.c,
+            color: colorData,
             colorscale: [
               [0, "#0000ff"],
               [0.25, "#00bfff"],
@@ -413,10 +456,16 @@ function App() {
             ],
             showscale: true,
             colorbar: {
-              title: viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)",
+              title: {
+                text: viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)",
+                font: { color: "#ffffff" },
+              },
               x: -0.05,
               thickness: 18,
               len: 0.75,
+              tickfont: { color: "#ffffff" },
+              tickvals,
+              ticktext,
             },
           },
         },
@@ -764,7 +813,7 @@ function App() {
             display: "flex",
             alignItems: "center",
             padding: "0 16px",
-            backgroundColor: "#565d68",
+            backgroundColor: "#6b737e",
             borderBottom: `1px solid ${colors.border}`,
             boxSizing: "border-box",
             gap: "10px",
@@ -883,7 +932,7 @@ function App() {
               alignItems: "center",
               gap: "8px",
               padding: "0 12px",
-              backgroundColor: "#9aa2ae",
+              backgroundColor: "#aab2be",
             }}
           >
             <div
@@ -1035,9 +1084,9 @@ function App() {
               display: "flex",
               flexDirection: "column",
               gap: "16px",
-              backgroundColor: colors.bgLight,
+              backgroundColor: "#2c3e56",
               boxSizing: "border-box",
-              borderLeft: `1px solid ${colors.border}`,
+              borderLeft: `1px solid #3a5068`,
             }}
           >
             {/* タブヘッダー */}
@@ -1189,7 +1238,8 @@ function App() {
                   }}
                   style={{
                     ...buttonSecondaryStyle,
-                    backgroundColor: axisVisible ? colors.borderLight : colors.bgDark,
+                    backgroundColor: axisVisible ? "#4a6280" : "#1e2d42",
+                    border: `1px solid #3a5068`,
                     cursor: showPlot ? "pointer" : "not-allowed",
                     opacity: showPlot ? 1 : 0.5,
                   }}
@@ -1206,7 +1256,8 @@ function App() {
                   }}
                   style={{
                     ...buttonSecondaryStyle,
-                    backgroundColor: flipX ? colors.borderLight : colors.bgDark,
+                    backgroundColor: flipX ? "#4a6280" : "#1e2d42",
+                    border: `1px solid #3a5068`,
                     cursor: showPlot ? "pointer" : "not-allowed",
                     opacity: showPlot ? 1 : 0.5,
                   }}
@@ -1219,7 +1270,8 @@ function App() {
                   style={{
                     ...buttonSecondaryStyle,
                     height: "42px",
-                    backgroundColor: colors.bgDark,
+                    backgroundColor: "#1e2d42",
+                    border: `1px solid #3a5068`,
                     marginTop: "8px",
                   }}
                   onClick={() => {
@@ -1237,7 +1289,7 @@ function App() {
                     ...buttonSecondaryStyle,
                     height: "42px",
                     border: "none",
-                    backgroundColor: showSlice ? colors.danger : colors.secondary,
+                    backgroundColor: showSlice ? colors.danger : "#3d5a80",
                     cursor: cloud ? "pointer" : "not-allowed",
                     opacity: cloud ? 1 : 0.5,
                     marginTop: "8px",
@@ -1268,7 +1320,7 @@ function App() {
                 style={{
                   ...buttonPrimaryStyle,
                   flex: 1,
-                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
+                  backgroundColor: status === "RUNNING" ? "#4a6280" : "#4a90e2",
                   cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                   opacity: status === "RUNNING" ? 0.7 : 1,
                 }}
@@ -1285,7 +1337,7 @@ function App() {
                 style={{
                   ...buttonPrimaryStyle,
                   flex: 1,
-                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.success,
+                  backgroundColor: status === "RUNNING" ? "#4a6280" : colors.success,
                   cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                   opacity: status === "RUNNING" ? 0.7 : 1,
                 }}
@@ -1334,9 +1386,14 @@ function App() {
                 lineHeight: 1.6,
               }}
             >
-              {confirmMode === "csv"
-                ? "csvファイルを出力しますか？"
-                : `3次元形状計測を開始しますか？（${useGpu ? "GPU" : "CPU"}モード）`}
+              {confirmMode === "csv" ? (
+                "csvファイルを出力しますか？"
+              ) : (
+                <>
+                  3次元形状計測を開始しますか？
+                  <br />（{useGpu ? "GPU" : "CPU"}モード）
+                </>
+              )}
             </div>
             <div
               style={{
