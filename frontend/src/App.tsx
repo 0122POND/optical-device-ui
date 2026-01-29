@@ -95,6 +95,10 @@ function App() {
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
 
+  // 表示モード
+  type ViewMode = "3D" | "2D-camera";
+  const [viewMode, setViewMode] = useState<ViewMode>("3D");
+
   // 軸表示フラグ（true = 表示 / false = 非表示）
   const [axisVisible, setAxisVisible] = useState(true);
 
@@ -105,7 +109,7 @@ function App() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
-  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "close" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
@@ -148,6 +152,12 @@ function App() {
 
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
+
+  // 最終計測日時
+  const [lastMeasuredAt, setLastMeasuredAt] = useState<string | null>(null);
+
+  // 測定回数
+  const [measureCount, setMeasureCount] = useState(0);
 
   // setTimeout のID保持（連打対策 & アンマウント対策）
   const acquireTimerRef = useRef<number | null>(null);
@@ -253,6 +263,8 @@ function App() {
             setStatus("COMPLETE");
             setProgressMessage("完了");
             setProgressPercent(100);
+            setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
+            setMeasureCount((c) => c + 1);
             console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
             console.error(e);
@@ -340,19 +352,6 @@ function App() {
       return;
     }
 
-    const azim = 20;
-    const elev = 10;
-
-    const az = (azim * Math.PI) / 180;
-    const el = (elev * Math.PI) / 180;
-    const cam = {
-      eye: {
-        x: 2.0 * Math.cos(az) * Math.cos(el),
-        y: 2.0 * Math.sin(az) * Math.cos(el),
-        z: 2.0 * Math.sin(el) + 0.5,
-      },
-    };
-
     // 左右反転時はX座標を反転
     const xData = flipX
       ? (() => {
@@ -361,65 +360,102 @@ function App() {
         })()
       : cloud.x;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any[] = [
-      {
-        type: "scatter3d",
-        mode: "markers",
-        x: xData,
-        y: cloud.y,
-        z: cloud.z,
-        marker: {
-          size: 1,
-          opacity: 0.08,
-          color: cloud.c,
-          colorscale: "Viridis",
-          showscale: true,
-          colorbar: { title: "Z (flipped)", x: 1.02, thickness: 18, len: 0.75 },
-        },
-      },
-    ];
+    const titleText = `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const layout: any = {
-      title: {
-        text: `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`,
-        font: { color: "#ffffff" },
-      },
-      autosize: true,
-      margin: { l: 0, r: 0, t: 30, b: 0 },
-      paper_bgcolor: "#000000",
-      scene: {
-        bgcolor: "#000000",
-        xaxis: {
-          title: axisVisible ? "X" : "",
-          visible: axisVisible,
-          showgrid: axisVisible,
-          zeroline: axisVisible,
-          color: "#ffffff",
-          gridcolor: "#333333",
+    let data: any[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let layout: any;
+
+    {
+      const cam =
+        viewMode === "2D-camera"
+          ? { eye: { x: 3.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
+          : (() => {
+              const azim = 20;
+              const elev = 10;
+              const az = (azim * Math.PI) / 180;
+              const el = (elev * Math.PI) / 180;
+              return {
+                eye: {
+                  x: 2.0 * Math.cos(az) * Math.cos(el),
+                  y: 2.0 * Math.sin(az) * Math.cos(el),
+                  z: 2.0 * Math.sin(el) + 0.5,
+                },
+              };
+            })();
+
+      data = [
+        {
+          type: "scatter3d",
+          mode: "markers",
+          x: xData,
+          y: cloud.y,
+          z: cloud.z,
+          marker: {
+            size: viewMode === "2D-camera" ? 1.5 : 1,
+            opacity: viewMode === "2D-camera" ? 0.15 : 0.08,
+            color: viewMode === "2D-camera" ? xData : cloud.c,
+            colorscale: [
+              [0, "#0000ff"],
+              [0.25, "#00bfff"],
+              [0.5, "#00ff00"],
+              [0.75, "#ffbf00"],
+              [1, "#ff0000"],
+            ],
+            showscale: true,
+            colorbar: {
+              title: viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)",
+              x: -0.05,
+              thickness: 18,
+              len: 0.75,
+            },
+          },
         },
-        yaxis: {
-          title: axisVisible ? "Y" : "",
-          visible: axisVisible,
-          showgrid: axisVisible,
-          zeroline: axisVisible,
-          color: "#ffffff",
-          gridcolor: "#333333",
+      ];
+
+      layout = {
+        title: {
+          text: `${titleText}  [${viewMode}]`,
+          font: { color: "#ffffff" },
         },
-        zaxis: {
-          title: axisVisible ? "Z (flipped)" : "",
-          visible: axisVisible,
-          showgrid: axisVisible,
-          zeroline: axisVisible,
-          color: "#ffffff",
-          gridcolor: "#333333",
+        autosize: true,
+        margin: { l: 0, r: 0, t: 30, b: 0 },
+        paper_bgcolor: "#000000",
+        scene: {
+          bgcolor: "#000000",
+          xaxis: {
+            title: axisVisible ? "X" : "",
+            visible: viewMode === "3D" && axisVisible,
+            showgrid: viewMode === "3D" && axisVisible,
+            zeroline: viewMode === "3D" && axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          yaxis: {
+            title: axisVisible ? "Y" : "",
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          zaxis: {
+            title: axisVisible ? "Z (flipped)" : "",
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          aspectmode: "manual",
+          aspectratio: { x: viewMode === "2D-camera" ? 0.01 : 1, y: 1, z: 1.0 },
+          camera: cam,
+          // 2D-cameraではドラッグ回転を無効化
+          ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
-        aspectmode: "manual",
-        aspectratio: { x: 1, y: 1, z: 1.0 },
-        camera: cam,
-      },
-    };
+      };
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false };
@@ -429,7 +465,7 @@ function App() {
     return () => {
       Plotly.purge(plotEl);
     };
-  }, [showPlot, axisVisible, cloud, flipX]);
+  }, [showPlot, axisVisible, cloud, flipX, viewMode]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
@@ -551,13 +587,6 @@ function App() {
         const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
         downloadCSV(fallback, "surface.csv");
       }
-    } else if (confirmMode === "close") {
-      // バックエンドにシャットダウンリクエストを送信してからブラウザを閉じる
-      fetch("http://localhost:8000/shutdown", { method: "POST" }).catch(() => {
-        // エラーは無視（サーバーが先に終了する可能性があるため）
-      });
-      // ブラウザウィンドウを閉じる
-      window.close();
     }
 
     setShowConfirm(false);
@@ -588,6 +617,8 @@ function App() {
 
       setCloud(newCloud);
       setStatus("COMPLETE");
+      setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
+      setMeasureCount((c) => c + 1);
       console.log("AI点群生成完了", { points: newCloud.x.length });
     } catch (e) {
       console.error(e);
@@ -688,7 +719,70 @@ function App() {
               gap: "12px",
             }}
           >
+            {/* 表示モード切替 */}
+            <div
+              style={{
+                display: "flex",
+                borderRadius: "4px",
+                overflow: "hidden",
+                border: `1px solid ${colors.border}`,
+                height: "28px",
+              }}
+            >
+              {(
+                [
+                  { key: "3D", label: "3D" },
+                  { key: "2D-camera", label: "2D" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  style={{
+                    padding: "0 10px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    fontFamily,
+                    border: "none",
+                    borderRight: `1px solid ${colors.border}`,
+                    cursor: "pointer",
+                    backgroundColor: viewMode === key ? colors.primary : colors.bgDark,
+                    color: viewMode === key ? "#fff" : colors.textMuted,
+                    transition: "background-color 0.15s, color 0.15s",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             <StatusBadge status={status} />
+
+            {lastMeasuredAt && (
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: colors.textDim,
+                  textAlign: "right",
+                  lineHeight: 1.3,
+                }}
+              >
+                <div>{lastMeasuredAt.split(" ")[0]}</div>
+                <div>{lastMeasuredAt.split(" ")[1]}</div>
+              </div>
+            )}
+
+            <div
+              style={{
+                fontSize: "11px",
+                color: colors.textDim,
+                textAlign: "right",
+                lineHeight: 1.3,
+              }}
+            >
+              <div>測定回数</div>
+              <div>{measureCount}</div>
+            </div>
 
             <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.1.0</div>
           </div>
@@ -730,7 +824,7 @@ function App() {
                       fontSize: "15px",
                     }}
                   >
-                    右側の「START（CPU）」または「START（GPU）」ボタンから
+                    右側の「▶ CPU」または「▶ GPU」ボタンから
                     <br />
                     3次元形状計測を開始してください。
                   </div>
@@ -899,44 +993,6 @@ function App() {
               }}
             />
 
-            {/* STARTボタン（CPU/GPU） */}
-            <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-              <button
-                disabled={status === "RUNNING"}
-                style={{
-                  ...buttonPrimaryStyle,
-                  flex: 1,
-                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
-                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
-                  opacity: status === "RUNNING" ? 0.7 : 1,
-                }}
-                onClick={() => {
-                  setUseGpu(false);
-                  setConfirmMode("plot");
-                  setShowConfirm(true);
-                }}
-              >
-                {status === "RUNNING" ? "処理中..." : "START（CPU）"}
-              </button>
-              <button
-                disabled={status === "RUNNING"}
-                style={{
-                  ...buttonPrimaryStyle,
-                  flex: 1,
-                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.success,
-                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
-                  opacity: status === "RUNNING" ? 0.7 : 1,
-                }}
-                onClick={() => {
-                  setUseGpu(true);
-                  setConfirmMode("plot");
-                  setShowConfirm(true);
-                }}
-              >
-                {status === "RUNNING" ? "処理中..." : "START（GPU）"}
-              </button>
-            </div>
-
             {/* AIでの結果を表示ボタン */}
             <button
               disabled={status === "RUNNING" || isLoadingAI}
@@ -1046,22 +1102,43 @@ function App() {
 
             <div style={{ flexGrow: 1 }} />
 
-            {/* 終了ボタン */}
-            <button
-              style={{
-                ...buttonSecondaryStyle,
-                height: "42px",
-                backgroundColor: colors.danger,
-                border: "none",
-                color: colors.text,
-              }}
-              onClick={() => {
-                setConfirmMode("close");
-                setShowConfirm(true);
-              }}
-            >
-              終了
-            </button>
+            {/* STARTボタン（CPU/GPU） */}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                disabled={status === "RUNNING"}
+                style={{
+                  ...buttonPrimaryStyle,
+                  flex: 1,
+                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.primary,
+                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
+                  opacity: status === "RUNNING" ? 0.7 : 1,
+                }}
+                onClick={() => {
+                  setUseGpu(false);
+                  setConfirmMode("plot");
+                  setShowConfirm(true);
+                }}
+              >
+                {status === "RUNNING" ? "処理中..." : "▶ CPU"}
+              </button>
+              <button
+                disabled={status === "RUNNING"}
+                style={{
+                  ...buttonPrimaryStyle,
+                  flex: 1,
+                  backgroundColor: status === "RUNNING" ? colors.borderLight : colors.success,
+                  cursor: status === "RUNNING" ? "not-allowed" : "pointer",
+                  opacity: status === "RUNNING" ? 0.7 : 1,
+                }}
+                onClick={() => {
+                  setUseGpu(true);
+                  setConfirmMode("plot");
+                  setShowConfirm(true);
+                }}
+              >
+                {status === "RUNNING" ? "処理中..." : "▶ GPU"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1100,9 +1177,7 @@ function App() {
             >
               {confirmMode === "csv"
                 ? "csvファイルを出力しますか？"
-                : confirmMode === "close"
-                  ? "アプリケーションを終了しますか？"
-                  : `3次元形状計測を開始しますか？（${useGpu ? "GPU" : "CPU"}モード）`}
+                : `3次元形状計測を開始しますか？（${useGpu ? "GPU" : "CPU"}モード）`}
             </div>
             <div
               style={{
