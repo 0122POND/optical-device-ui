@@ -160,7 +160,7 @@ def run_preprocess(
 
     for i, fname in enumerate(image_files):
         base_name = os.path.splitext(fname)[0]
-        save_name = f"{base_name}_gausswin_stackblur_contrast_peak.bmp"
+        save_name = f"{base_name}_gausswin_stackblur_contrast_peak.png"
         save_path = os.path.join(result_path, save_name)
         save_args.append((save_path, peak_result[i]))
         output_files.append(save_name)
