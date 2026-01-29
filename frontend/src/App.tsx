@@ -457,15 +457,61 @@ function App() {
       };
     }
 
+    // 2Dモード + 断層表示時、Z=targetZの位置に横の赤い直線を描画
+    if (viewMode === "2D-camera" && showSlice && cloud) {
+      let minY = cloud.y[0];
+      let maxY = cloud.y[0];
+      let minZ = cloud.z[0];
+      let maxZ = cloud.z[0];
+      for (let i = 1; i < cloud.y.length; i++) {
+        if (cloud.y[i] < minY) minY = cloud.y[i];
+        if (cloud.y[i] > maxY) maxY = cloud.y[i];
+        if (cloud.z[i] < minZ) minZ = cloud.z[i];
+        if (cloud.z[i] > maxZ) maxZ = cloud.z[i];
+      }
+      const targetZ = minZ + (maxZ - minZ) * (sliceYPercent / 100);
+
+      data.push({
+        type: "scatter3d",
+        mode: "lines",
+        x: [0, 0],
+        y: [minY, maxY],
+        z: [targetZ, targetZ],
+        line: { color: "#ff4444", width: 3 },
+        showlegend: false,
+        hoverinfo: "skip",
+      });
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false };
 
     Plotly.newPlot(plotEl, data, layout, config);
 
+    // 2Dモード + 断層表示時、クリックで断層位置を変更
+    if (viewMode === "2D-camera" && showSlice && cloud) {
+      let minZ = cloud.z[0];
+      let maxZ = cloud.z[0];
+      for (let i = 1; i < cloud.z.length; i++) {
+        if (cloud.z[i] < minZ) minZ = cloud.z[i];
+        if (cloud.z[i] > maxZ) maxZ = cloud.z[i];
+      }
+      const range = maxZ - minZ;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_click", (eventData: any) => {
+        if (eventData.points && eventData.points.length > 0) {
+          const clickedZ = eventData.points[0].z as number;
+          const pct = Math.round(((clickedZ - minZ) / range) * 100);
+          setSliceYPercent(Math.max(0, Math.min(100, pct)));
+        }
+      });
+    }
+
     return () => {
       Plotly.purge(plotEl);
     };
-  }, [showPlot, axisVisible, cloud, flipX, viewMode]);
+  }, [showPlot, axisVisible, cloud, flipX, viewMode, showSlice, sliceYPercent]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
@@ -477,35 +523,35 @@ function App() {
       return;
     }
 
-    // Y値の範囲を計算（大きな配列ではスプレッド演算子が使えないためループで計算）
-    let minY = cloud.y[0];
-    let maxY = cloud.y[0];
-    for (let i = 1; i < cloud.y.length; i++) {
-      if (cloud.y[i] < minY) minY = cloud.y[i];
-      if (cloud.y[i] > maxY) maxY = cloud.y[i];
+    // Z値の範囲を計算（大きな配列ではスプレッド演算子が使えないためループで計算）
+    let minZ = cloud.z[0];
+    let maxZ = cloud.z[0];
+    for (let i = 1; i < cloud.z.length; i++) {
+      if (cloud.z[i] < minZ) minZ = cloud.z[i];
+      if (cloud.z[i] > maxZ) maxZ = cloud.z[i];
     }
-    const targetY = minY + (maxY - minY) * (sliceYPercent / 100);
-    const tolerance = (maxY - minY) * 0.02; // Y範囲の2%を許容誤差とする
+    const targetZ = minZ + (maxZ - minZ) * (sliceYPercent / 100);
+    const tolerance = (maxZ - minZ) * 0.02; // Z範囲の2%を許容誤差とする
 
-    // 指定Y位置周辺の点を抽出
-    const slicePoints: { x: number; z: number }[] = [];
-    for (let i = 0; i < cloud.y.length; i++) {
-      if (Math.abs(cloud.y[i] - targetY) <= tolerance) {
-        slicePoints.push({ x: cloud.x[i], z: cloud.z[i] });
+    // 指定Z位置周辺の点を抽出
+    const slicePoints: { x: number; y: number }[] = [];
+    for (let i = 0; i < cloud.z.length; i++) {
+      if (Math.abs(cloud.z[i] - targetZ) <= tolerance) {
+        slicePoints.push({ x: cloud.x[i], y: cloud.y[i] });
       }
     }
 
-    // X座標でソート
-    slicePoints.sort((a, b) => a.x - b.x);
+    // Y座標でソート
+    slicePoints.sort((a, b) => a.y - b.y);
 
+    const yData = slicePoints.map((p) => p.y);
     const xData = slicePoints.map((p) => p.x);
-    const zData = slicePoints.map((p) => p.z);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[] = [
       {
-        x: xData,
-        y: zData,
+        x: yData,
+        y: xData,
         type: "scatter",
         mode: "markers",
         marker: {
@@ -518,10 +564,10 @@ function App() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
-      title: `断層（Y = ${targetY.toFixed(1)}、${slicePoints.length} points）`,
+      title: `断層（Z = ${targetZ.toFixed(1)}、${slicePoints.length} points）`,
       margin: { l: 50, r: 20, t: 40, b: 50 },
-      xaxis: { title: "X", color: colors.text, gridcolor: colors.border },
-      yaxis: { title: "Z", color: colors.text, gridcolor: colors.border },
+      xaxis: { title: "Y", color: colors.text, gridcolor: colors.border },
+      yaxis: { title: "X (depth)", color: colors.text, gridcolor: colors.border },
       height: 250,
       paper_bgcolor: colors.bgDark,
       plot_bgcolor: colors.bgDark,
@@ -1098,27 +1144,6 @@ function App() {
             >
               {showSlice ? "断層出力を停止" : "断層画像を出力"}
             </button>
-
-            {/* 断層位置スライダー */}
-            {showSlice && cloud && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                  断層位置（Y）: {sliceYPercent}%
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={sliceYPercent}
-                  onChange={(e) => setSliceYPercent(Number(e.target.value))}
-                  style={{
-                    width: "100%",
-                    cursor: "pointer",
-                    accentColor: colors.primary,
-                  }}
-                />
-              </div>
-            )}
 
             <div style={{ flexGrow: 1 }} />
 
