@@ -155,7 +155,7 @@ function App() {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
 
   // サイドパネルのタブ
-  type SideTab = "settings" | "actions";
+  type SideTab = "settings" | "actions" | "result";
   const [sideTab, setSideTab] = useState<SideTab>("actions");
 
   // About Usポップアップ表示フラグ
@@ -368,8 +368,6 @@ function App() {
         })()
       : cloud.x;
 
-    const titleText = `Point cloud (thr>128, points=${cloud.x.length.toLocaleString()})`;
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -472,10 +470,7 @@ function App() {
       ];
 
       layout = {
-        title: {
-          text: `${titleText}  [${viewMode}]`,
-          font: { color: "#ffffff" },
-        },
+        title: "",
         autosize: true,
         margin: { l: 0, r: 0, t: 30, b: 0 },
         paper_bgcolor: "#000000",
@@ -1100,6 +1095,7 @@ function App() {
               {[
                 { key: "settings" as const, label: "設定" },
                 { key: "actions" as const, label: "操作" },
+                { key: "result" as const, label: "測定結果" },
               ].map(({ key, label }) => (
                 <button
                   key={key}
@@ -1308,6 +1304,45 @@ function App() {
                 >
                   {showSlice ? "断層出力を停止" : "断層画像を出力"}
                 </button>
+              </>
+            )}
+
+            {/* 測定結果タブ */}
+            {sideTab === "result" && (
+              <>
+                {cloud ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}
+                    >
+                      <span style={{ color: colors.textMuted }}>点数</span>
+                      <span>{cloud.x.length.toLocaleString()} pts</span>
+                    </div>
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}
+                    >
+                      <span style={{ color: colors.textMuted }}>閾値</span>
+                      <span>{">"} 128</span>
+                    </div>
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}
+                    >
+                      <span style={{ color: colors.textMuted }}>表示モード</span>
+                      <span>{viewMode === "3D" ? "3D" : "2D"}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: colors.textMuted,
+                      textAlign: "center",
+                      marginTop: "20px",
+                    }}
+                  >
+                    計測データがありません
+                  </div>
+                )}
               </>
             )}
 
