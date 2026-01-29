@@ -158,6 +158,10 @@ function App() {
   type SideTab = "settings" | "actions" | "result";
   const [sideTab, setSideTab] = useState<SideTab>("actions");
 
+  // ドラッグモード（pan / turntable / orbit）
+  type DragMode = "pan" | "turntable" | "orbit";
+  const [dragMode, setDragMode] = useState<DragMode>("turntable");
+
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
 
@@ -542,7 +546,7 @@ function App() {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = { responsive: true, displaylogo: false };
+    const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
     Plotly.newPlot(plotEl, data, layout, config);
 
@@ -979,6 +983,259 @@ function App() {
                 </button>
               ))}
             </div>
+
+            {/* セパレータ */}
+            <div
+              style={{
+                width: "1px",
+                height: "18px",
+                backgroundColor: "#7a8290",
+                margin: "0 4px",
+              }}
+            />
+
+            {/* Plotlyツールバーボタン群 */}
+            {(() => {
+              const tbBtnStyle = (active?: boolean): React.CSSProperties => ({
+                width: "26px",
+                height: "24px",
+                padding: 0,
+                border: "none",
+                borderRadius: "3px",
+                backgroundColor: active ? colors.primary : "transparent",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background-color 0.15s",
+              });
+              const svgColor = "#2d3139";
+              const activeColor = "#ffffff";
+
+              const handleZoom = (factor: number) => {
+                const el = plotRef.current;
+                if (!el) return;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const scene = (el as any)._fullLayout?.scene?._scene;
+                const camera = scene?.getCamera?.();
+                if (camera) {
+                  const eye = camera.eye;
+                  Plotly.relayout(el, {
+                    "scene.camera.eye": {
+                      x: eye.x * factor,
+                      y: eye.y * factor,
+                      z: eye.z * factor,
+                    },
+                  });
+                }
+              };
+
+              const handleDragMode = (mode: DragMode) => {
+                const el = plotRef.current;
+                if (!el) return;
+                setDragMode(mode);
+                Plotly.relayout(el, { "scene.dragmode": mode });
+              };
+
+              const handleReset = () => {
+                const el = plotRef.current;
+                if (!el) return;
+                const cam =
+                  viewMode === "2D-camera"
+                    ? { eye: { x: 2.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
+                    : (() => {
+                        const azim = 20;
+                        const elev = 10;
+                        const az = (azim * Math.PI) / 180;
+                        const el2 = (elev * Math.PI) / 180;
+                        return {
+                          eye: {
+                            x: 2.0 * Math.cos(az) * Math.cos(el2),
+                            y: 2.0 * Math.sin(az) * Math.cos(el2),
+                            z: 2.0 * Math.sin(el2) + 0.5,
+                          },
+                        };
+                      })();
+                Plotly.relayout(el, { "scene.camera": cam });
+              };
+
+              const handleDownload = () => {
+                const el = plotRef.current;
+                if (!el) return;
+                Plotly.downloadImage(el, {
+                  format: "png",
+                  width: 1920,
+                  height: 1080,
+                  filename: "surface_plot",
+                });
+              };
+
+              return (
+                <>
+                  {/* 画像保存 */}
+                  <button title="画像保存" style={tbBtnStyle()} onClick={handleDownload}>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                  </button>
+
+                  {/* ズームイン */}
+                  <button title="ズームイン" style={tbBtnStyle()} onClick={() => handleZoom(0.8)}>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      <line x1="11" y1="8" x2="11" y2="14" />
+                      <line x1="8" y1="11" x2="14" y2="11" />
+                    </svg>
+                  </button>
+
+                  {/* ズームアウト */}
+                  <button
+                    title="ズームアウト"
+                    style={tbBtnStyle()}
+                    onClick={() => handleZoom(1.25)}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      <line x1="8" y1="11" x2="14" y2="11" />
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
+                  {/* パン */}
+                  <button
+                    title="パン"
+                    style={tbBtnStyle(dragMode === "pan")}
+                    onClick={() => handleDragMode("pan")}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={dragMode === "pan" ? activeColor : svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 11V6a2 2 0 0 0-4 0v5" />
+                      <path d="M14 10V4a2 2 0 0 0-4 0v6" />
+                      <path d="M10 10.5V6a2 2 0 0 0-4 0v8" />
+                      <path d="M18 11a2 2 0 0 1 4 0v5a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.6L3.3 17.8a2 2 0 0 1 3-2.6L8 18" />
+                    </svg>
+                  </button>
+
+                  {/* 回転(Turntable) */}
+                  <button
+                    title="回転 (Turntable)"
+                    style={tbBtnStyle(dragMode === "turntable")}
+                    onClick={() => handleDragMode("turntable")}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={dragMode === "turntable" ? activeColor : svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 12a9 9 0 1 1-9-9" />
+                      <polyline points="21 3 21 12 12 12" />
+                    </svg>
+                  </button>
+
+                  {/* 回転(Orbital) */}
+                  <button
+                    title="回転 (Orbital)"
+                    style={tbBtnStyle(dragMode === "orbit")}
+                    onClick={() => handleDragMode("orbit")}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={dragMode === "orbit" ? activeColor : svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <ellipse cx="12" cy="12" rx="10" ry="4" />
+                      <line x1="12" y1="2" x2="12" y2="22" />
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
+                  {/* リセット */}
+                  <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                  </button>
+                </>
+              );
+            })()}
           </div>
           <div style={{ backgroundColor: colors.bgLight }} />
         </div>
