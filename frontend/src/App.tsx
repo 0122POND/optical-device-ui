@@ -7,6 +7,9 @@ import "./App.css";
 
 const WS_URL = "ws://localhost:8000/ws";
 
+// 1ピクセルあたりのµm換算係数
+const UM_PER_PIXEL = 20;
+
 // カラーパレット（モダングレー）
 const colors = {
   bg: "#3a3f47",
@@ -150,6 +153,10 @@ function App() {
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
+
+  // サイドパネルのタブ
+  type SideTab = "settings" | "actions";
+  const [sideTab, setSideTab] = useState<SideTab>("actions");
 
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
@@ -534,9 +541,20 @@ function App() {
       return;
     }
 
-    // 直線ベクトル
-    const dy = sliceLineEnd.y - sliceLineStart.y;
-    const dz = sliceLineEnd.z - sliceLineStart.z;
+    // Z軸の換算係数: 掃引間隔 × スライスインデックス → µm
+    const sweepVal = parseFloat(sweepInterval);
+    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+    const zUmPerSlice = hasSweep ? (sweepIntervalUnit === "mm" ? sweepVal * 1000 : sweepVal) : 1; // 未入力時はスライスインデックスをそのまま使用
+
+    // 物理座標に変換した始点・終点（Y/X: µm、Z: hasSweep ? µm : index）
+    const startYum = sliceLineStart.y * UM_PER_PIXEL;
+    const startZum = sliceLineStart.z * zUmPerSlice;
+    const endYum = sliceLineEnd.y * UM_PER_PIXEL;
+    const endZum = sliceLineEnd.z * zUmPerSlice;
+
+    // 直線ベクトル（µm空間）
+    const dy = endYum - startYum;
+    const dz = endZum - startZum;
     const lineLen = Math.sqrt(dy * dy + dz * dz);
 
     if (lineLen < 1e-6) {
@@ -544,18 +562,20 @@ function App() {
       return;
     }
 
-    // Y/Z範囲を計算して許容誤差を決定
-    let minY = cloud.y[0];
-    let maxY = cloud.y[0];
-    let minZ = cloud.z[0];
-    let maxZ = cloud.z[0];
+    // Y/Z範囲を計算して許容誤差を決定（µm空間）
+    let minY = cloud.y[0] * UM_PER_PIXEL;
+    let maxY = minY;
+    let minZ = cloud.z[0] * zUmPerSlice;
+    let maxZ = minZ;
     for (let i = 1; i < cloud.y.length; i++) {
-      if (cloud.y[i] < minY) minY = cloud.y[i];
-      if (cloud.y[i] > maxY) maxY = cloud.y[i];
+      const yum = cloud.y[i] * UM_PER_PIXEL;
+      if (yum < minY) minY = yum;
+      if (yum > maxY) maxY = yum;
     }
     for (let i = 1; i < cloud.z.length; i++) {
-      if (cloud.z[i] < minZ) minZ = cloud.z[i];
-      if (cloud.z[i] > maxZ) maxZ = cloud.z[i];
+      const zum = cloud.z[i] * zUmPerSlice;
+      if (zum < minZ) minZ = zum;
+      if (zum > maxZ) maxZ = zum;
     }
     const rangeY = maxY - minY;
     const rangeZ = maxZ - minZ;
@@ -565,17 +585,17 @@ function App() {
     const uy = dy / lineLen;
     const uz = dz / lineLen;
 
-    // 各点について直線への距離と射影位置を計算
+    // 各点について直線への距離と射影位置を計算（µm空間）
     const slicePoints: { t: number; x: number }[] = [];
     for (let i = 0; i < cloud.y.length; i++) {
-      const py = cloud.y[i] - sliceLineStart.y;
-      const pz = cloud.z[i] - sliceLineStart.z;
-      // 射影位置（始点からの距離）
+      const py = cloud.y[i] * UM_PER_PIXEL - startYum;
+      const pz = cloud.z[i] * zUmPerSlice - startZum;
+      // 射影位置（始点からの距離 µm）
       const t = py * uy + pz * uz;
       // 直線からの距離
       const dist = Math.abs(py * uz - pz * uy);
       if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
-        slicePoints.push({ t, x: cloud.x[i] });
+        slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL });
       }
     }
 
@@ -600,16 +620,20 @@ function App() {
       },
     ];
 
-    const titleText =
-      `断層 (${sliceLineStart.y.toFixed(1)},${sliceLineStart.z.toFixed(1)})→` +
-      `(${sliceLineEnd.y.toFixed(1)},${sliceLineEnd.z.toFixed(1)})  ${slicePoints.length} pts`;
+    const titleText = hasSweep
+      ? `断層 (${startYum.toFixed(0)},${startZum.toFixed(0)})→` +
+        `(${endYum.toFixed(0)},${endZum.toFixed(0)}) µm  ${slicePoints.length} pts`
+      : `断層 (${startYum.toFixed(0)}µm,z=${sliceLineStart.z.toFixed(0)})→` +
+        `(${endYum.toFixed(0)}µm,z=${sliceLineEnd.z.toFixed(0)})  ${slicePoints.length} pts`;
+
+    const distLabel = hasSweep ? "距離 (µm)" : "距離 (µm/slice混合)";
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
       title: titleText,
       margin: { l: 50, r: 20, t: 40, b: 50 },
-      xaxis: { title: "距離", color: colors.text, gridcolor: colors.border },
-      yaxis: { title: "X (depth)", color: colors.text, gridcolor: colors.border },
+      xaxis: { title: distLabel, color: colors.text, gridcolor: colors.border },
+      yaxis: { title: "深さ (µm)", color: colors.text, gridcolor: colors.border },
       height: 250,
       paper_bgcolor: colors.bgDark,
       plot_bgcolor: colors.bgDark,
@@ -624,7 +648,7 @@ function App() {
     return () => {
       Plotly.purge(sliceEl);
     };
-  }, [showSlice, cloud, sliceLineStart, sliceLineEnd]);
+  }, [showSlice, cloud, sliceLineStart, sliceLineEnd, sweepInterval, sweepIntervalUnit]);
 
   const handleConfirmOk = () => {
     if (confirmMode === "plot") {
@@ -740,7 +764,7 @@ function App() {
             display: "flex",
             alignItems: "center",
             padding: "0 16px",
-            backgroundColor: colors.bgLight,
+            backgroundColor: "#565d68",
             borderBottom: `1px solid ${colors.border}`,
             boxSizing: "border-box",
             gap: "10px",
@@ -766,26 +790,33 @@ function App() {
                   left: "0",
                   width: "280px",
                   padding: "16px",
-                  backgroundColor: colors.bgLight,
-                  border: `1px solid ${colors.border}`,
+                  backgroundColor: "#565d68",
+                  border: `1px solid ${colors.borderLight}`,
                   borderRadius: "8px",
                   boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
                   zIndex: 100,
                 }}
               >
-                <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "10px" }}>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    marginBottom: "10px",
+                    color: "#ffffff",
+                  }}
+                >
                   About Us
                 </div>
-                <div style={{ fontSize: "12px", color: colors.textMuted, lineHeight: 1.6 }}>
+                <div style={{ fontSize: "12px", color: "#ffffff", lineHeight: 1.6 }}>
                   光学デバイスから取得した3次元面形状をブラウザで可視化するWebアプリケーションです。
                 </div>
                 <div
                   style={{
                     marginTop: "12px",
                     paddingTop: "10px",
-                    borderTop: `1px solid ${colors.border}`,
+                    borderTop: `1px solid ${colors.borderLight}`,
                     fontSize: "11px",
-                    color: colors.textDim,
+                    color: "#ffffffcc",
                   }}
                 >
                   <div>Version: 0.1.0</div>
@@ -807,26 +838,24 @@ function App() {
               gap: "12px",
             }}
           >
-            <StatusBadge status={status} />
-
             {lastMeasuredAt && (
               <div
                 style={{
                   fontSize: "11px",
-                  color: colors.textDim,
+                  color: "#ffffff",
                   textAlign: "right",
                   lineHeight: 1.3,
                 }}
               >
-                <div>{lastMeasuredAt.split(" ")[0]}</div>
-                <div>{lastMeasuredAt.split(" ")[1]}</div>
+                <div>最新撮影日時</div>
+                <div>{lastMeasuredAt}</div>
               </div>
             )}
 
             <div
               style={{
                 fontSize: "11px",
-                color: colors.textDim,
+                color: "#ffffff",
                 textAlign: "right",
                 lineHeight: 1.3,
               }}
@@ -835,7 +864,7 @@ function App() {
               <div>{measureCount}</div>
             </div>
 
-            <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.1.0</div>
+            <StatusBadge status={status} />
           </div>
         </div>
 
@@ -854,7 +883,7 @@ function App() {
               alignItems: "center",
               gap: "8px",
               padding: "0 12px",
-              backgroundColor: colors.bgDark,
+              backgroundColor: "#9aa2ae",
             }}
           >
             <div
@@ -928,7 +957,7 @@ function App() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: colors.textDim,
+                      color: "#ffffff",
                       fontSize: "15px",
                     }}
                   >
@@ -1011,192 +1040,228 @@ function App() {
               borderLeft: `1px solid ${colors.border}`,
             }}
           >
-            <div style={{ fontSize: "15px", fontWeight: 600, letterSpacing: "0.3px" }}>
-              スキャン設定
-            </div>
-
-            {/* 掃引間隔 */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引間隔</label>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="入力してください"
-                  value={sweepInterval}
-                  onChange={(e) => setSweepInterval(e.target.value)}
-                  style={{
-                    ...inputStyle,
-                    flex: 1,
-                  }}
-                />
-                <select
-                  value={sweepIntervalUnit}
-                  onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
-                  style={unitSelectStyle}
-                >
-                  <option value="um">µm</option>
-                  <option value="mm">mm</option>
-                </select>
-              </div>
-            </div>
-
-            {/* 掃引範囲 */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引範囲</label>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="入力してください"
-                  value={sweepRange}
-                  onChange={(e) => setSweepRange(e.target.value)}
-                  style={{
-                    ...inputStyle,
-                    flex: 1,
-                  }}
-                />
-                <select
-                  value={sweepRangeUnit}
-                  onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
-                  style={unitSelectStyle}
-                >
-                  <option value="um">µm</option>
-                  <option value="mm">mm</option>
-                </select>
-              </div>
-            </div>
-
-            {/* 次の掃引までの時間間隔 */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                次の掃引までの時間間隔
-              </label>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="入力してください"
-                  value={sweepTimeInterval}
-                  onChange={(e) => setSweepTimeInterval(e.target.value)}
-                  style={{
-                    ...inputStyle,
-                    flex: 1,
-                    minWidth: 0,
-                  }}
-                />
-                <select
-                  value={sweepTimeUnit}
-                  onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
-                  style={unitSelectStyle}
-                >
-                  <option value="ms">ms</option>
-                  <option value="s">s</option>
-                </select>
-              </div>
-            </div>
-
+            {/* タブヘッダー */}
             <div
               style={{
-                height: "1px",
-                backgroundColor: colors.border,
-                margin: "8px 0",
-              }}
-            />
-
-            {/* AIでの結果を表示ボタン */}
-            <button
-              disabled={status === "RUNNING" || isLoadingAI}
-              style={{
-                ...buttonSecondaryStyle,
-                height: "42px",
-                backgroundColor: colors.success,
-                border: "none",
-                cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
-                opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
-              }}
-              onClick={handleShowAIResult}
-            >
-              {isLoadingAI ? "読み込み中..." : "AIでの結果を表示"}
-            </button>
-
-            {/* 軸トグルボタン */}
-            <button
-              disabled={!showPlot}
-              onClick={() => {
-                if (!showPlot) return;
-                setAxisVisible((v) => !v);
-              }}
-              style={{
-                ...buttonSecondaryStyle,
-                backgroundColor: axisVisible ? colors.borderLight : colors.bgDark,
-                cursor: showPlot ? "pointer" : "not-allowed",
-                opacity: showPlot ? 1 : 0.5,
+                display: "flex",
+                borderBottom: `1px solid ${colors.border}`,
+                marginBottom: "4px",
               }}
             >
-              {axisVisible ? "軸を非表示" : "軸を表示"}
-            </button>
+              {[
+                { key: "settings" as const, label: "設定" },
+                { key: "actions" as const, label: "操作" },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setSideTab(key)}
+                  style={{
+                    padding: "6px 16px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    fontFamily,
+                    color: sideTab === key ? colors.primary : colors.textMuted,
+                    borderBottom:
+                      sideTab === key ? `2px solid ${colors.primary}` : "2px solid transparent",
+                    background: "none",
+                    border: "none",
+                    borderBottomWidth: "2px",
+                    borderBottomStyle: "solid",
+                    borderBottomColor: sideTab === key ? colors.primary : "transparent",
+                    cursor: "pointer",
+                    letterSpacing: "0.3px",
+                    transition: "color 0.15s, border-color 0.15s",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-            {/* 左右反転トグルボタン */}
-            <button
-              disabled={!showPlot}
-              onClick={() => {
-                if (!showPlot) return;
-                setFlipX((v) => !v);
-              }}
-              style={{
-                ...buttonSecondaryStyle,
-                backgroundColor: flipX ? colors.borderLight : colors.bgDark,
-                cursor: showPlot ? "pointer" : "not-allowed",
-                opacity: showPlot ? 1 : 0.5,
-              }}
-            >
-              {flipX ? "左右反転: ON" : "左右反転: OFF"}
-            </button>
+            {/* 設定タブ */}
+            {sideTab === "settings" && (
+              <>
+                {/* 掃引間隔 */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引間隔</label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder="入力してください"
+                      value={sweepInterval}
+                      onChange={(e) => setSweepInterval(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        flex: 1,
+                      }}
+                    />
+                    <select
+                      value={sweepIntervalUnit}
+                      onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
+                      style={unitSelectStyle}
+                    >
+                      <option value="um">µm</option>
+                      <option value="mm">mm</option>
+                    </select>
+                  </div>
+                </div>
 
-            {/* CSV出力ボタン */}
-            <button
-              style={{
-                ...buttonSecondaryStyle,
-                height: "42px",
-                backgroundColor: colors.bgDark,
-                marginTop: "8px",
-              }}
-              onClick={() => {
-                setConfirmMode("csv");
-                setShowConfirm(true);
-              }}
-            >
-              CSVファイルを出力
-            </button>
+                {/* 掃引範囲 */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引範囲</label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder="入力してください"
+                      value={sweepRange}
+                      onChange={(e) => setSweepRange(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        flex: 1,
+                      }}
+                    />
+                    <select
+                      value={sweepRangeUnit}
+                      onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
+                      style={unitSelectStyle}
+                    >
+                      <option value="um">µm</option>
+                      <option value="mm">mm</option>
+                    </select>
+                  </div>
+                </div>
 
-            {/* 断層 出力/停止 トグルボタン */}
-            <button
-              disabled={!cloud}
-              style={{
-                ...buttonSecondaryStyle,
-                height: "42px",
-                border: "none",
-                backgroundColor: showSlice ? colors.danger : colors.secondary,
-                cursor: cloud ? "pointer" : "not-allowed",
-                opacity: cloud ? 1 : 0.5,
-                marginTop: "8px",
-              }}
-              onClick={() => {
-                if (!cloud) return;
-                setShowSlice((v) => {
-                  if (!v) {
-                    // ON にする時、ラインをリセット
-                    setSliceLineStart(null);
-                    setSliceLineEnd(null);
-                  }
-                  return !v;
-                });
-              }}
-            >
-              {showSlice ? "断層出力を停止" : "断層画像を出力"}
-            </button>
+                {/* 次の掃引までの時間間隔 */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                    次の掃引までの時間間隔
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder="入力してください"
+                      value={sweepTimeInterval}
+                      onChange={(e) => setSweepTimeInterval(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    />
+                    <select
+                      value={sweepTimeUnit}
+                      onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
+                      style={unitSelectStyle}
+                    >
+                      <option value="ms">ms</option>
+                      <option value="s">s</option>
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* 操作タブ */}
+            {sideTab === "actions" && (
+              <>
+                {/* AIでの結果を表示ボタン */}
+                <button
+                  disabled={status === "RUNNING" || isLoadingAI}
+                  style={{
+                    ...buttonSecondaryStyle,
+                    height: "42px",
+                    backgroundColor: colors.success,
+                    border: "none",
+                    cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
+                    opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
+                  }}
+                  onClick={handleShowAIResult}
+                >
+                  {isLoadingAI ? "読み込み中..." : "AIでの結果を表示"}
+                </button>
+
+                {/* 軸トグルボタン */}
+                <button
+                  disabled={!showPlot}
+                  onClick={() => {
+                    if (!showPlot) return;
+                    setAxisVisible((v) => !v);
+                  }}
+                  style={{
+                    ...buttonSecondaryStyle,
+                    backgroundColor: axisVisible ? colors.borderLight : colors.bgDark,
+                    cursor: showPlot ? "pointer" : "not-allowed",
+                    opacity: showPlot ? 1 : 0.5,
+                  }}
+                >
+                  {axisVisible ? "軸を非表示" : "軸を表示"}
+                </button>
+
+                {/* 左右反転トグルボタン */}
+                <button
+                  disabled={!showPlot}
+                  onClick={() => {
+                    if (!showPlot) return;
+                    setFlipX((v) => !v);
+                  }}
+                  style={{
+                    ...buttonSecondaryStyle,
+                    backgroundColor: flipX ? colors.borderLight : colors.bgDark,
+                    cursor: showPlot ? "pointer" : "not-allowed",
+                    opacity: showPlot ? 1 : 0.5,
+                  }}
+                >
+                  {flipX ? "左右反転: ON" : "左右反転: OFF"}
+                </button>
+
+                {/* CSV出力ボタン */}
+                <button
+                  style={{
+                    ...buttonSecondaryStyle,
+                    height: "42px",
+                    backgroundColor: colors.bgDark,
+                    marginTop: "8px",
+                  }}
+                  onClick={() => {
+                    setConfirmMode("csv");
+                    setShowConfirm(true);
+                  }}
+                >
+                  CSVファイルを出力
+                </button>
+
+                {/* 断層 出力/停止 トグルボタン */}
+                <button
+                  disabled={!cloud}
+                  style={{
+                    ...buttonSecondaryStyle,
+                    height: "42px",
+                    border: "none",
+                    backgroundColor: showSlice ? colors.danger : colors.secondary,
+                    cursor: cloud ? "pointer" : "not-allowed",
+                    opacity: cloud ? 1 : 0.5,
+                    marginTop: "8px",
+                  }}
+                  onClick={() => {
+                    if (!cloud) return;
+                    setShowSlice((v) => {
+                      if (!v) {
+                        // ON にする時、ラインをリセット
+                        setSliceLineStart(null);
+                        setSliceLineEnd(null);
+                      }
+                      return !v;
+                    });
+                  }}
+                >
+                  {showSlice ? "断層出力を停止" : "断層画像を出力"}
+                </button>
+              </>
+            )}
 
             <div style={{ flexGrow: 1 }} />
 
-            {/* STARTボタン（CPU/GPU） */}
+            {/* STARTボタン（CPU/GPU）- タブ外で常時表示 */}
             <div style={{ display: "flex", gap: "8px" }}>
               <button
                 disabled={status === "RUNNING"}
