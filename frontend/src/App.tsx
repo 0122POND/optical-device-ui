@@ -370,7 +370,7 @@ function App() {
     {
       const cam =
         viewMode === "2D-camera"
-          ? { eye: { x: 3.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
+          ? { eye: { x: 2.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
           : (() => {
               const azim = 20;
               const elev = 10;
@@ -449,7 +449,7 @@ function App() {
             gridcolor: "#333333",
           },
           aspectmode: "manual",
-          aspectratio: { x: viewMode === "2D-camera" ? 0.01 : 1, y: 1, z: 1.0 },
+          aspectratio: { x: viewMode === "2D-camera" ? 0.01 : 1, y: 1.2, z: 1.2 },
           camera: cam,
           // 2D-cameraではドラッグ回転を無効化
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
@@ -637,7 +637,7 @@ function App() {
           width: "100vw",
           height: "100vh",
           display: "grid",
-          gridTemplateRows: "56px 1fr",
+          gridTemplateRows: "56px 32px 1fr",
           backgroundColor: colors.bg,
           color: colors.text,
           fontFamily: fontFamily,
@@ -719,43 +719,6 @@ function App() {
               gap: "12px",
             }}
           >
-            {/* 表示モード切替 */}
-            <div
-              style={{
-                display: "flex",
-                borderRadius: "4px",
-                overflow: "hidden",
-                border: `1px solid ${colors.border}`,
-                height: "28px",
-              }}
-            >
-              {(
-                [
-                  { key: "3D", label: "3D" },
-                  { key: "2D-camera", label: "2D" },
-                ] as const
-              ).map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setViewMode(key)}
-                  style={{
-                    padding: "0 10px",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    fontFamily,
-                    border: "none",
-                    borderRight: `1px solid ${colors.border}`,
-                    cursor: "pointer",
-                    backgroundColor: viewMode === key ? colors.primary : colors.bgDark,
-                    color: viewMode === key ? "#fff" : colors.textMuted,
-                    transition: "background-color 0.15s, color 0.15s",
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
             <StatusBadge status={status} />
 
             {lastMeasuredAt && (
@@ -786,6 +749,63 @@ function App() {
 
             <div style={{ fontSize: "12px", color: colors.textMuted }}>Ver. 0.1.0</div>
           </div>
+        </div>
+
+        {/* ツールバー */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 280px",
+            height: "100%",
+            borderBottom: `1px solid ${colors.border}`,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "0 12px",
+              backgroundColor: colors.bgDark,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                borderRadius: "4px",
+                overflow: "hidden",
+                border: `1px solid ${colors.border}`,
+                height: "24px",
+              }}
+            >
+              {(
+                [
+                  { key: "3D", label: "3D" },
+                  { key: "2D-camera", label: "2D" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  style={{
+                    padding: "0 10px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    fontFamily,
+                    border: "none",
+                    borderRight: `1px solid ${colors.border}`,
+                    cursor: "pointer",
+                    backgroundColor: viewMode === key ? colors.primary : colors.bgDark,
+                    color: viewMode === key ? "#fff" : colors.textMuted,
+                    transition: "background-color 0.15s, color 0.15s",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ backgroundColor: colors.bgLight }} />
         </div>
 
         {/* メインエリア */}
