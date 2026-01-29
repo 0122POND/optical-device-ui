@@ -1090,6 +1090,16 @@ function App() {
                     </svg>
                   </button>
 
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
                   {/* ズームイン */}
                   <button title="ズームイン" style={tbBtnStyle()} onClick={() => handleZoom(0.8)}>
                     <svg
@@ -1108,6 +1118,16 @@ function App() {
                       <line x1="8" y1="11" x2="14" y2="11" />
                     </svg>
                   </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
 
                   {/* ズームアウト */}
                   <button
@@ -1164,6 +1184,16 @@ function App() {
                     </svg>
                   </button>
 
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
                   {/* 回転(Turntable) */}
                   <button
                     title="回転 (Turntable)"
@@ -1184,6 +1214,16 @@ function App() {
                       <polyline points="21 3 21 12 12 12" />
                     </svg>
                   </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "18px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
 
                   {/* 回転(Orbital) */}
                   <button
