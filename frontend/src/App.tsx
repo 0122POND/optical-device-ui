@@ -454,13 +454,10 @@ function App() {
             ],
             showscale: true,
             colorbar: {
-              title: {
-                text: viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)",
-                font: { color: "#ffffff" },
-              },
               x: -0.05,
               thickness: 18,
-              len: 0.75,
+              len: 0.9,
+              ypad: 10,
               tickfont: { color: "#ffffff" },
               tickvals,
               ticktext,
@@ -941,10 +938,10 @@ function App() {
             >
               {(
                 [
-                  { key: "3D", label: "3D" },
-                  { key: "2D-camera", label: "2D" },
+                  { key: "3D", label: "3D", icon: "/icons/3d.png" },
+                  { key: "2D-camera", label: "2D", icon: "/icons/2d.png" },
                 ] as const
-              ).map(({ key, label }) => (
+              ).map(({ key, label, icon }) => (
                 <button
                   key={key}
                   onClick={() => setViewMode(key)}
@@ -959,8 +956,25 @@ function App() {
                     backgroundColor: viewMode === key ? colors.primary : colors.bgDark,
                     color: viewMode === key ? "#fff" : colors.textMuted,
                     transition: "background-color 0.15s, color 0.15s",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
                   }}
                 >
+                  {icon && (
+                    <img
+                      src={icon}
+                      alt=""
+                      style={{
+                        height: "14px",
+                        width: "14px",
+                        objectFit: "cover",
+                        opacity: viewMode === key ? 1 : 0.6,
+                        border: "1px solid #fff",
+                        borderRadius: "2px",
+                      }}
+                    />
+                  )}
                   {label}
                 </button>
               ))}
@@ -1329,6 +1343,12 @@ function App() {
                     >
                       <span style={{ color: colors.textMuted }}>表示モード</span>
                       <span>{viewMode === "3D" ? "3D" : "2D"}</span>
+                    </div>
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}
+                    >
+                      <span style={{ color: colors.textMuted }}>カラー軸</span>
+                      <span>{viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)"}</span>
                     </div>
                   </div>
                 ) : (
