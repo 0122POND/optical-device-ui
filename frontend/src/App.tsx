@@ -142,6 +142,10 @@ function App() {
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
+  // 測定履歴（最大3件）
+  type CloudHistoryEntry = { cloud: PointCloud; measuredAt: string; points: number };
+  const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
+
   // 進捗表示用
   const [progressStep, setProgressStep] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
@@ -289,8 +293,12 @@ function App() {
             setStatus("COMPLETE");
             setProgressMessage("完了");
             setProgressPercent(100);
-            setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
+            const now = new Date().toLocaleString("ja-JP");
+            setLastMeasuredAt(now);
             setMeasureCount((c) => c + 1);
+            setCloudHistory((prev) =>
+              [{ cloud: newCloud, measuredAt: now, points: newCloud.x.length }, ...prev].slice(0, 3)
+            );
             console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
             console.error(e);
@@ -962,7 +970,10 @@ function App() {
               ).map(({ key, label, icon }) => (
                 <button
                   key={key}
-                  onClick={() => setViewMode(key)}
+                  onClick={() => {
+                    setViewMode(key);
+                    if (key === "3D") setShowSlice(false);
+                  }}
                   style={{
                     padding: "0 14px",
                     fontSize: "13px",
@@ -1742,6 +1753,88 @@ function App() {
                     }}
                   >
                     計測データがありません
+                  </div>
+                )}
+
+                {/* 測定履歴 */}
+                {cloudHistory.length > 0 && (
+                  <div style={{ marginTop: "16px" }}>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: colors.textMuted,
+                        marginBottom: "8px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      測定履歴（最新3件）
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {cloudHistory.map((entry, i) => {
+                        const isCurrent = cloud === entry.cloud;
+                        return (
+                          <div
+                            key={entry.measuredAt + i}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "8px 10px",
+                              borderRadius: "6px",
+                              backgroundColor: isCurrent ? colors.primary + "22" : colors.bgDark,
+                              border: isCurrent
+                                ? `1px solid ${colors.primary}`
+                                : `1px solid ${colors.border}`,
+                            }}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: 600 }}>
+                                #{cloudHistory.length - i}
+                              </span>
+                              <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                {entry.measuredAt}
+                              </span>
+                              <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                {entry.points.toLocaleString()} pts
+                              </span>
+                            </div>
+                            {isCurrent ? (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: colors.primary,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                表示中
+                              </span>
+                            ) : (
+                              <button
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  fontFamily,
+                                  border: `1px solid ${colors.primary}`,
+                                  borderRadius: "4px",
+                                  backgroundColor: "transparent",
+                                  color: colors.primary,
+                                  cursor: "pointer",
+                                }}
+                                onClick={() => {
+                                  setCloud(entry.cloud);
+                                  setShowPlot(true);
+                                }}
+                              >
+                                復元
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </>
