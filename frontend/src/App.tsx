@@ -188,8 +188,8 @@ function App() {
   const acquireTimerRef = useRef<number | null>(null);
 
   const inputStyle: React.CSSProperties = {
-    height: "36px",
-    padding: "6px 12px",
+    height: "44px",
+    padding: "8px 12px",
     borderRadius: "6px",
     border: `1px solid ${colors.border}`,
     backgroundColor: colors.bgDark,
@@ -201,7 +201,7 @@ function App() {
   };
 
   const unitSelectStyle: React.CSSProperties = {
-    height: "36px",
+    height: "44px",
     padding: "0 12px",
     borderRadius: "6px",
     border: `1px solid ${colors.border}`,
@@ -214,7 +214,7 @@ function App() {
   };
 
   const buttonPrimaryStyle: React.CSSProperties = {
-    height: "42px",
+    height: "44px",
     borderRadius: "8px",
     border: "none",
     backgroundColor: colors.primary,
@@ -232,7 +232,7 @@ function App() {
   };
 
   const buttonSecondaryStyle: React.CSSProperties = {
-    height: "38px",
+    height: "44px",
     borderRadius: "6px",
     border: `1px solid ${colors.border}`,
     backgroundColor: colors.bgDark,
@@ -708,7 +708,7 @@ function App() {
     };
   }, [showSlice, cloud, sliceLineStart, sliceLineEnd, sweepInterval, sweepIntervalUnit]);
 
-  const handleConfirmOk = () => {
+  const handleConfirmOk = async () => {
     if (confirmMode === "plot") {
       if (acquireTimerRef.current != null) {
         window.clearTimeout(acquireTimerRef.current);
@@ -752,10 +752,10 @@ function App() {
       sendCommand();
     } else if (confirmMode === "csv") {
       if (zData) {
-        downloadCSV(zData, "surface.csv");
+        await downloadCSV(zData, "surface.csv");
       } else {
         const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
-        downloadCSV(fallback, "surface.csv");
+        await downloadCSV(fallback, "surface.csv");
       }
     }
 
@@ -807,7 +807,7 @@ function App() {
           width: "100vw",
           height: "100vh",
           display: "grid",
-          gridTemplateRows: "56px 40px 1fr",
+          gridTemplateRows: "56px 52px 1fr",
           backgroundColor: colors.bg,
           color: colors.text,
           fontFamily: fontFamily,
@@ -930,7 +930,7 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 280px",
+            gridTemplateColumns: "1fr 320px",
             height: "100%",
             borderBottom: `1px solid ${colors.border}`,
           }}
@@ -947,10 +947,10 @@ function App() {
             <div
               style={{
                 display: "flex",
-                borderRadius: "4px",
+                borderRadius: "6px",
                 overflow: "hidden",
                 border: `1px solid ${colors.border}`,
-                height: "24px",
+                height: "44px",
               }}
             >
               {(
@@ -963,8 +963,8 @@ function App() {
                   key={key}
                   onClick={() => setViewMode(key)}
                   style={{
-                    padding: "0 10px",
-                    fontSize: "11px",
+                    padding: "0 14px",
+                    fontSize: "13px",
                     fontWeight: 600,
                     fontFamily,
                     border: "none",
@@ -975,7 +975,7 @@ function App() {
                     transition: "background-color 0.15s, color 0.15s",
                     display: "flex",
                     alignItems: "center",
-                    gap: "4px",
+                    gap: "6px",
                   }}
                 >
                   {icon && (
@@ -983,8 +983,8 @@ function App() {
                       src={icon}
                       alt=""
                       style={{
-                        height: "14px",
-                        width: "14px",
+                        height: "18px",
+                        width: "18px",
                         objectFit: "cover",
                         opacity: viewMode === key ? 1 : 0.6,
                         border: "1px solid #fff",
@@ -1001,7 +1001,7 @@ function App() {
             <div
               style={{
                 width: "1px",
-                height: "18px",
+                height: "28px",
                 backgroundColor: "#7a8290",
                 margin: "0 4px",
               }}
@@ -1010,11 +1010,11 @@ function App() {
             {/* Plotlyツールバーボタン群 */}
             {(() => {
               const tbBtnStyle = (active?: boolean): React.CSSProperties => ({
-                width: "26px",
-                height: "24px",
+                width: "44px",
+                height: "44px",
                 padding: 0,
                 border: "none",
-                borderRadius: "3px",
+                borderRadius: "6px",
                 backgroundColor: active ? colors.primary : "transparent",
                 cursor: "pointer",
                 display: "flex",
@@ -1088,8 +1088,8 @@ function App() {
                   {/* 画像保存 */}
                   <button title="画像保存" style={tbBtnStyle()} onClick={handleDownload}>
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={svgColor}
@@ -1107,7 +1107,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1116,8 +1116,8 @@ function App() {
                   {/* ズームイン */}
                   <button title="ズームイン" style={tbBtnStyle()} onClick={() => handleZoom(0.8)}>
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={svgColor}
@@ -1136,7 +1136,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1149,8 +1149,8 @@ function App() {
                     onClick={() => handleZoom(1.25)}
                   >
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={svgColor}
@@ -1168,7 +1168,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1181,8 +1181,8 @@ function App() {
                     onClick={() => handleDragMode("pan")}
                   >
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={dragMode === "pan" ? activeColor : svgColor}
@@ -1201,7 +1201,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1214,8 +1214,8 @@ function App() {
                     onClick={() => handleDragMode("turntable")}
                   >
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={dragMode === "turntable" ? activeColor : svgColor}
@@ -1232,7 +1232,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1245,8 +1245,8 @@ function App() {
                     onClick={() => handleDragMode("orbit")}
                   >
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={dragMode === "orbit" ? activeColor : svgColor}
@@ -1264,7 +1264,7 @@ function App() {
                   <div
                     style={{
                       width: "1px",
-                      height: "18px",
+                      height: "28px",
                       backgroundColor: "#7a8290",
                       margin: "0 2px",
                     }}
@@ -1273,8 +1273,8 @@ function App() {
                   {/* リセット */}
                   <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
                     <svg
-                      width="16"
-                      height="16"
+                      width="22"
+                      height="22"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke={svgColor}
@@ -1297,7 +1297,7 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 280px",
+            gridTemplateColumns: "1fr 320px",
             height: "100%",
             overflow: "hidden",
           }}
@@ -1425,7 +1425,8 @@ function App() {
                   key={key}
                   onClick={() => setSideTab(key)}
                   style={{
-                    padding: "6px 16px",
+                    height: "44px",
+                    padding: "0 16px",
                     fontSize: "13px",
                     fontWeight: 600,
                     fontFamily,
@@ -1538,7 +1539,6 @@ function App() {
                   disabled={status === "RUNNING" || isLoadingAI}
                   style={{
                     ...buttonSecondaryStyle,
-                    height: "42px",
                     backgroundColor: colors.success,
                     border: "none",
                     cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
@@ -1589,7 +1589,6 @@ function App() {
                 <button
                   style={{
                     ...buttonSecondaryStyle,
-                    height: "42px",
                     backgroundColor: "#1e2d42",
                     border: `1px solid #3a5068`,
                     marginTop: "8px",
@@ -1607,7 +1606,6 @@ function App() {
                   disabled={!cloud}
                   style={{
                     ...buttonSecondaryStyle,
-                    height: "42px",
                     border: "none",
                     backgroundColor: showSlice ? colors.danger : "#3d5a80",
                     cursor: cloud ? "pointer" : "not-allowed",
@@ -1785,7 +1783,8 @@ function App() {
             >
               <button
                 style={{
-                  padding: "8px 18px",
+                  height: "44px",
+                  padding: "0 18px",
                   borderRadius: "6px",
                   border: "none",
                   backgroundColor: colors.secondary,
@@ -1802,7 +1801,8 @@ function App() {
               </button>
               <button
                 style={{
-                  padding: "8px 18px",
+                  height: "44px",
+                  padding: "0 18px",
                   borderRadius: "6px",
                   border: "none",
                   backgroundColor: colors.primary,
