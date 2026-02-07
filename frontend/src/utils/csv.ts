@@ -9,8 +9,23 @@ declare global {
   }
 }
 
+/** CSVテキストをパースして2Dグリッドに変換（-9999.9 と空セルは null） */
+export function parseCSV(text: string): (number | null)[][] {
+  return text
+    .trim()
+    .split("\n")
+    .map((line) =>
+      line.split(",").map((cell) => {
+        const s = cell.trim();
+        if (s === "" || s === "-9999.9") return null;
+        const n = Number(s);
+        return isNaN(n) ? null : n;
+      })
+    );
+}
+
 export async function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {
-  const rows = zData.map((row) => row.map((v) => (v == null ? "" : v.toString())).join(","));
+  const rows = zData.map((row) => row.map((v) => (v == null ? "-9999.9" : v.toString())).join(","));
   const csv = rows.join("\n");
 
   // File System Access API 対応ブラウザの場合

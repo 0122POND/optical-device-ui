@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
-import { downloadCSV } from "./utils/csv";
+import { downloadCSV, parseCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import "./App.css";
 
-const WS_URL = "ws://localhost:8000/ws";
+const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
 // 1ピクセルあたりのµm換算係数
 const UM_PER_PIXEL = 20;
@@ -94,6 +94,7 @@ function App() {
   const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
@@ -852,6 +853,58 @@ function App() {
   const handleConfirmCancel = () => {
     setShowConfirm(false);
     setConfirmMode(null);
+  };
+
+  // CSV読み込み処理
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      const grid = parseCSV(text);
+      if (grid.length === 0) {
+        alert("CSVデータが空です");
+        return;
+      }
+      // 2Dグリッド → PointCloud 変換
+      const xArr: number[] = [];
+      const yArr: number[] = [];
+      const zArr: number[] = [];
+      const cArr: number[] = [];
+      for (let row = 0; row < grid.length; row++) {
+        for (let col = 0; col < grid[row].length; col++) {
+          const v = grid[row][col];
+          if (v == null) continue;
+          xArr.push(v);
+          yArr.push(col);
+          zArr.push(row);
+          cArr.push(v);
+        }
+      }
+      if (xArr.length === 0) {
+        alert("有効なデータがありません");
+        return;
+      }
+      const newCloud = { x: xArr, y: yArr, z: zArr, c: cArr };
+      setZData(grid);
+      setCloud(newCloud);
+      setShowPlot(true);
+      setStatus("COMPLETE");
+      const now = new Date().toLocaleString("ja-JP");
+      setLastMeasuredAt(now);
+      setMeasureCount((c) => c + 1);
+      const thumb = generateThumbnail(newCloud);
+      setCloudHistory((prev) =>
+        [
+          { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
+          ...prev,
+        ].slice(0, 3)
+      );
+    };
+    reader.readAsText(file);
+    // 同じファイルを再選択できるようにリセット
+    e.target.value = "";
   };
 
   // AI結果を表示する処理
@@ -1785,6 +1838,40 @@ function App() {
                     <line x1="2" y1="12" x2="22" y2="12" />
                   </svg>
                   {showSlice ? "断層出力を停止" : "断層画像を出力"}
+                </button>
+
+                {/* CSV読み込みボタン */}
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv"
+                  style={{ display: "none" }}
+                  onChange={handleImportCSV}
+                />
+                <button
+                  style={{
+                    ...buttonSecondaryStyle,
+                    backgroundColor: "#1e2d42",
+                    border: `1px solid #3a5068`,
+                    marginTop: "8px",
+                  }}
+                  onClick={() => csvInputRef.current?.click()}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  CSVファイルを読み込み
                 </button>
               </>
             )}
