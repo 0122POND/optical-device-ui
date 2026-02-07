@@ -151,6 +151,7 @@ function App() {
     thumbnail: string;
   };
   const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
+  const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
 
   // 点群から2Dサムネイル（data URL）を生成
   const generateThumbnail = (pc: PointCloud, size = 64): string => {
@@ -1976,37 +1977,55 @@ function App() {
                                 </span>
                               </div>
                             </div>
-                            {isCurrent ? (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: colors.primary,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                表示中
-                              </span>
-                            ) : (
+                            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                              {isCurrent ? (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    color: colors.primary,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  表示中
+                                </span>
+                              ) : (
+                                <button
+                                  style={{
+                                    padding: "4px 10px",
+                                    fontSize: "11px",
+                                    fontWeight: 600,
+                                    fontFamily,
+                                    border: `1px solid ${colors.primary}`,
+                                    borderRadius: "4px",
+                                    backgroundColor: "transparent",
+                                    color: colors.primary,
+                                    cursor: "pointer",
+                                  }}
+                                  onClick={() => {
+                                    setCloud(entry.cloud);
+                                    setShowPlot(true);
+                                  }}
+                                >
+                                  復元
+                                </button>
+                              )}
                               <button
                                 style={{
                                   padding: "4px 10px",
                                   fontSize: "11px",
                                   fontWeight: 600,
                                   fontFamily,
-                                  border: `1px solid ${colors.primary}`,
+                                  border: `1px solid ${colors.danger}`,
                                   borderRadius: "4px",
                                   backgroundColor: "transparent",
-                                  color: colors.primary,
+                                  color: colors.danger,
                                   cursor: "pointer",
                                 }}
-                                onClick={() => {
-                                  setCloud(entry.cloud);
-                                  setShowPlot(true);
-                                }}
+                                onClick={() => setDeleteConfirmIdx(i)}
                               >
-                                復元
+                                削除
                               </button>
-                            )}
+                            </div>
                           </div>
                         );
                       })}
@@ -2158,6 +2177,74 @@ function App() {
                 onClick={handleConfirmOk}
               >
                 はい
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteConfirmIdx !== null && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+          }}
+          onClick={() => setDeleteConfirmIdx(null)}
+        >
+          <div
+            style={{
+              backgroundColor: colors.bgLight,
+              border: `1px solid ${colors.border}`,
+              borderRadius: "8px",
+              padding: "24px",
+              minWidth: "280px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+              textAlign: "center",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p style={{ margin: "0 0 16px", fontSize: "14px", color: colors.text }}>
+              この測定履歴を削除しますか？
+            </p>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+              <button
+                style={{
+                  padding: "6px 20px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  fontFamily,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: "4px",
+                  backgroundColor: "transparent",
+                  color: colors.text,
+                  cursor: "pointer",
+                }}
+                onClick={() => setDeleteConfirmIdx(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                style={{
+                  padding: "6px 20px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  fontFamily,
+                  border: "none",
+                  borderRadius: "4px",
+                  backgroundColor: colors.danger,
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setCloudHistory((prev) => prev.filter((_, j) => j !== deleteConfirmIdx));
+                  setDeleteConfirmIdx(null);
+                }}
+              >
+                削除
               </button>
             </div>
           </div>
