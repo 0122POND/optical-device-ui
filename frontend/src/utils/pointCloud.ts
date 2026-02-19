@@ -72,6 +72,7 @@ export async function buildPointCloudFromFolder(options: {
   manifestName?: string; // 例: "manifest.json"
   threshold: number; // 例: 128
   samplePerSlice: number; // 例: 4000
+  maxTotalPoints?: number; // 総点数の上限（デフォルト: 500000）
   flipZ?: boolean; // 例: true
   colorMode?: "z" | "intensity";
 }): Promise<{ cloud: PointCloud; width: number; height: number; depth: number }> {
@@ -80,6 +81,7 @@ export async function buildPointCloudFromFolder(options: {
     manifestName = "manifest.json",
     threshold,
     samplePerSlice,
+    maxTotalPoints = 500_000,
     flipZ = true,
     colorMode = "z",
   } = options;
@@ -93,6 +95,9 @@ export async function buildPointCloudFromFolder(options: {
   if (files.length === 0) throw new Error("manifest.json に files がありません");
 
   const D = files.length;
+
+  // スライス枚数に応じて1枚あたりのサンプル数を自動調整
+  const effectiveSamplePerSlice = Math.min(samplePerSlice, Math.floor(maxTotalPoints / D));
 
   const x: number[] = [];
   const y: number[] = [];
@@ -116,7 +121,7 @@ export async function buildPointCloudFromFolder(options: {
       imgData.height,
       zi,
       threshold,
-      samplePerSlice
+      effectiveSamplePerSlice
     );
 
     // Z反転（Python版と同じ）
