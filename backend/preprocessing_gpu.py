@@ -90,22 +90,25 @@ def run_preprocess(
 
     # Step 2: 中央値画像の計算
     report(2, "背景画像を計算中...")
-    bg_image = cp.median(images, axis=0)
+    bg_image = cp.median(images, axis=0).astype(cp.float32)
 
     # Step 3: 背景差分 & クリップ
     report(3, "背景差分を計算中...")
     sub_bg = cp.maximum(images - bg_image, 0)
+    del images, bg_image
 
     # Step 4: 横方向差分 & 強調
     report(4, "横方向差分と強調処理中...")
     diff_x = cp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
+    del sub_bg
 
     max_val = float(diff_x.max())
     if max_val == 0:
         max_val = 1.0
 
-    inv_max = 1.0 / max_val
-    enhanced = cp.power(diff_x * inv_max, 0.7) * 255
+    inv_max = cp.float32(1.0 / max_val)
+    enhanced = cp.power(diff_x * inv_max, cp.float32(0.7)) * 255
+    del diff_x
 
     # Step 5: ガウス窓の適用
     report(5, "ガウス窓を適用中...")
@@ -113,15 +116,18 @@ def run_preprocess(
     gauss_window = create_gauss_window(h, w_diff, sigma_scale=6)
 
     gausswin = cp.minimum(enhanced * gauss_window, 255)
+    del enhanced
 
     # Step 6: スタックブラー（3次元ガウスフィルタ）
     report(6, "3次元スタックブラーを適用中...")
     blurred_stack = gaussian_filter(gausswin, sigma=(1, 7, 7))
+    del gausswin
 
     # コントラスト正規化
     max_vals = cp.max(blurred_stack, axis=(1, 2), keepdims=True)
     max_vals = cp.where(max_vals == 0, 1, max_vals)
     contrast = blurred_stack / max_vals * 255
+    del blurred_stack
 
     # Step 7: ピーク検出
     report(7, "ピーク検出を実行中...")
