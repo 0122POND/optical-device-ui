@@ -72,7 +72,7 @@ export async function buildPointCloudFromFolder(options: {
   manifestName?: string; // 例: "manifest.json"
   threshold: number; // 例: 128
   samplePerSlice: number; // 例: 4000
-  maxTotalPoints?: number; // 総点数の上限（デフォルト: 500000）
+  maxTotalPoints?: number; // 総点数の上限（デフォルト: 100000）
   flipZ?: boolean; // 例: true
   colorMode?: "z" | "intensity";
 }): Promise<{ cloud: PointCloud; width: number; height: number; depth: number }> {
@@ -81,7 +81,7 @@ export async function buildPointCloudFromFolder(options: {
     manifestName = "manifest.json",
     threshold,
     samplePerSlice,
-    maxTotalPoints = 500_000,
+    maxTotalPoints = 100_000,
     flipZ = true,
     colorMode = "z",
   } = options;
@@ -133,6 +133,30 @@ export async function buildPointCloudFromFolder(options: {
       z.push(zz);
       c.push(colorMode === "z" ? zz : sampled.cs[i]);
     }
+  }
+
+  // 総点数が上限を超えた場合、ランダムサンプリングで間引く
+  if (x.length > maxTotalPoints) {
+    const indices = Array.from({ length: x.length }, (_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    indices.length = maxTotalPoints;
+    indices.sort((a, b) => a - b);
+
+    const sx = new Array(maxTotalPoints);
+    const sy = new Array(maxTotalPoints);
+    const sz = new Array(maxTotalPoints);
+    const sc = new Array(maxTotalPoints);
+    for (let i = 0; i < maxTotalPoints; i++) {
+      const idx = indices[i];
+      sx[i] = x[idx];
+      sy[i] = y[idx];
+      sz[i] = z[idx];
+      sc[i] = c[idx];
+    }
+    return { cloud: { x: sx, y: sy, z: sz, c: sc }, width, height, depth: D };
   }
 
   return { cloud: { x, y, z, c }, width, height, depth: D };
