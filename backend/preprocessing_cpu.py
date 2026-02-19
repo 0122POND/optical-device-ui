@@ -75,7 +75,7 @@ def run_preprocess(
 
     # Step 1: 画像の並列読み込み
     report(1, "画像を読み込み中...")
-    image_files = sorted([f for f in os.listdir(data_path) if f.lower().endswith('.bmp')])
+    image_files = sorted([f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))])
 
     if not image_files:
         raise ValueError("画像が見つかりません")
