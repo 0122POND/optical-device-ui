@@ -354,7 +354,7 @@ function App() {
           console.log("画像処理完了:", data.count, "files");
           // 処理完了後、点群を読み込み
           try {
-            const { cloud: newCloud } = await buildPointCloudFromFolder({
+            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
@@ -363,6 +363,7 @@ function App() {
             });
 
             setCloud(newCloud);
+            setZData(newGrid);
             setIsAcquiring(false);
             setStatus("COMPLETE");
             setProgressMessage("完了");
@@ -981,7 +982,7 @@ function App() {
     setStatus("RUNNING");
 
     try {
-      const { cloud: newCloud } = await buildPointCloudFromFolder({
+      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
         folderUrl: "/data/result_coin_ai_masked",
         threshold: 128,
         samplePerSlice: 4000,
@@ -990,6 +991,7 @@ function App() {
       });
 
       setCloud(newCloud);
+      setZData(newGrid);
       setStatus("COMPLETE");
       setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
       setMeasureCount((c) => c + 1);
