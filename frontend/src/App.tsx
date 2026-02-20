@@ -716,44 +716,96 @@ function App() {
     const xData: number[] = [];
 
     if (zData && zData.length > 0) {
-      // --- グリッドベースの断面抽出（バイリニア補間） ---
+      // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
       const numRows = zData.length;
       const numCols = zData[0].length;
+      const dyPx = y1 - y0;
+      const dzPx = z1 - z0;
 
-      // サンプル数: ピクセル座標での直線長に比例
-      const pixelLen = Math.sqrt((y1 - y0) ** 2 + (z1 - z0) ** 2);
-      const numSamples = Math.max(Math.round(pixelLen * 2), 2);
+      // 直線がグリッド線と交差する全ての点を収集
+      const crossings: { frac: number }[] = [];
 
-      for (let s = 0; s < numSamples; s++) {
-        const frac = s / (numSamples - 1);
-        // ピクセル座標上の位置
-        const py = y0 + (y1 - y0) * frac;
-        const pz = z0 + (z1 - z0) * frac;
+      // 始点・終点を追加
+      crossings.push({ frac: 0 });
+      crossings.push({ frac: 1 });
 
-        // バイリニア補間: グリッドから深度値を取得
-        const col = py;
-        const row = pz;
-        const c0 = Math.floor(col);
-        const c1 = c0 + 1;
-        const r0 = Math.floor(row);
-        const r1 = r0 + 1;
+      // 整数y（列境界）との交点
+      if (Math.abs(dyPx) > 1e-9) {
+        const yMin = Math.max(0, Math.min(Math.ceil(Math.min(y0, y1)), numCols - 1));
+        const yMax = Math.min(numCols - 1, Math.max(Math.floor(Math.max(y0, y1)), 0));
+        for (let yInt = yMin; yInt <= yMax; yInt++) {
+          const f = (yInt - y0) / dyPx;
+          if (f > 0 && f < 1) crossings.push({ frac: f });
+        }
+      }
 
-        if (c0 < 0 || r0 < 0 || c1 >= numCols || r1 >= numRows) continue;
+      // 整数z（行境界）との交点
+      if (Math.abs(dzPx) > 1e-9) {
+        const zMin = Math.max(0, Math.min(Math.ceil(Math.min(z0, z1)), numRows - 1));
+        const zMax = Math.min(numRows - 1, Math.max(Math.floor(Math.max(z0, z1)), 0));
+        for (let zInt = zMin; zInt <= zMax; zInt++) {
+          const f = (zInt - z0) / dzPx;
+          if (f > 0 && f < 1) crossings.push({ frac: f });
+        }
+      }
 
-        const v00 = zData[r0]?.[c0];
-        const v01 = zData[r0]?.[c1];
-        const v10 = zData[r1]?.[c0];
-        const v11 = zData[r1]?.[c1];
-        if (v00 == null || v01 == null || v10 == null || v11 == null) continue;
+      // frac順にソート
+      crossings.sort((a, b) => a.frac - b.frac);
 
-        const fc = col - c0;
-        const fr = row - r0;
-        const val =
-          v00 * (1 - fc) * (1 - fr) + v01 * fc * (1 - fr) + v10 * (1 - fc) * fr + v11 * fc * fr;
+      // 各交点で線形補間して深度値を取得
+      for (const { frac } of crossings) {
+        const py = y0 + dyPx * frac;
+        const pz = z0 + dzPx * frac;
+        const col = Math.round(py);
+        const row = Math.round(pz);
 
-        const t = lineLen * frac;
-        tData.push(t);
-        xData.push(val * UM_PER_PIXEL);
+        // 直線の主方向に応じて補間方向を決定
+        if (Math.abs(dyPx) >= Math.abs(dzPx)) {
+          // y方向が主 → 同じrow内でcol間を線形補間
+          const c0 = Math.floor(py);
+          const c1 = c0 + 1;
+          const r = Math.min(Math.max(Math.round(pz), 0), numRows - 1);
+          if (c0 >= 0 && c1 < numCols) {
+            const v0 = zData[r]?.[c0];
+            const v1 = zData[r]?.[c1];
+            if (v0 != null && v1 != null) {
+              const val = v0 + (v1 - v0) * (py - c0);
+              tData.push(lineLen * frac);
+              xData.push(val * UM_PER_PIXEL);
+              continue;
+            }
+          }
+          // 端点はそのまま
+          if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
+            const v = zData[row]?.[col];
+            if (v != null) {
+              tData.push(lineLen * frac);
+              xData.push(v * UM_PER_PIXEL);
+            }
+          }
+        } else {
+          // z方向が主 → 同じcol内でrow間を線形補間
+          const r0 = Math.floor(pz);
+          const r1 = r0 + 1;
+          const c = Math.min(Math.max(Math.round(py), 0), numCols - 1);
+          if (r0 >= 0 && r1 < numRows) {
+            const v0 = zData[r0]?.[c];
+            const v1 = zData[r1]?.[c];
+            if (v0 != null && v1 != null) {
+              const val = v0 + (v1 - v0) * (pz - r0);
+              tData.push(lineLen * frac);
+              xData.push(val * UM_PER_PIXEL);
+              continue;
+            }
+          }
+          if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
+            const v = zData[row]?.[col];
+            if (v != null) {
+              tData.push(lineLen * frac);
+              xData.push(v * UM_PER_PIXEL);
+            }
+          }
+        }
       }
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出 ---
