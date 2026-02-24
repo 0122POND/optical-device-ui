@@ -6,7 +6,32 @@ export type PointCloud = {
   c: number[]; // color (0-255 or z)
 };
 
+export type DepthGrid = (number | null)[][];
+
 type Manifest = { files: string[] };
+
+// 1枚のスライス画像から各y列の深度（輝度加重x重心）を算出
+function buildGridRowFromImageData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold: number
+): (number | null)[] {
+  const row: (number | null)[] = new Array(height);
+  for (let yy = 0; yy < height; yy++) {
+    let sumX = 0;
+    let sumW = 0;
+    for (let xx = 0; xx < width; xx++) {
+      const i = (yy * width + xx) * 4;
+      const v = data[i]; // R
+      if (v <= threshold) continue;
+      sumX += xx * v;
+      sumW += v;
+    }
+    row[yy] = sumW > 0 ? sumX / sumW : null;
+  }
+  return row;
+}
 
 // 1枚の画像から「threshold超え」の点を最大 samplePerSlice 個だけ取る（reservoir sampling）
 function samplePointsFromImageData(
@@ -75,7 +100,7 @@ export async function buildPointCloudFromFolder(options: {
   maxTotalPoints?: number; // 総点数の上限（デフォルト: 100000）
   flipZ?: boolean; // 例: true
   colorMode?: "z" | "intensity";
-}): Promise<{ cloud: PointCloud; width: number; height: number; depth: number }> {
+}): Promise<{ cloud: PointCloud; grid: DepthGrid; width: number; height: number; depth: number }> {
   const {
     folderUrl,
     manifestName = "manifest.json",
@@ -107,6 +132,9 @@ export async function buildPointCloudFromFolder(options: {
   let width = 0;
   let height = 0;
 
+  // グリッド: grid[z][y] = 輝度加重x重心（断面プロファイル用）
+  const gridRows: (number | null)[][] = [];
+
   for (let zi = 0; zi < D; zi++) {
     const file = files[zi];
     const url = `${folderUrl}/${file}`;
@@ -114,6 +142,9 @@ export async function buildPointCloudFromFolder(options: {
     const imgData = await loadImageAsImageData(url);
     width = imgData.width;
     height = imgData.height;
+
+    // グリッド行を構築（サンプリング前の全ピクセルから）
+    gridRows.push(buildGridRowFromImageData(imgData.data, width, height, threshold));
 
     const sampled = samplePointsFromImageData(
       imgData.data,
@@ -134,6 +165,9 @@ export async function buildPointCloudFromFolder(options: {
       c.push(colorMode === "z" ? zz : sampled.cs[i]);
     }
   }
+
+  // flipZ時はグリッド行も反転
+  const grid: DepthGrid = flipZ ? gridRows.reverse() : gridRows;
 
   // 総点数が上限を超えた場合、ランダムサンプリングで間引く
   if (x.length > maxTotalPoints) {
@@ -156,8 +190,8 @@ export async function buildPointCloudFromFolder(options: {
       sz[i] = z[idx];
       sc[i] = c[idx];
     }
-    return { cloud: { x: sx, y: sy, z: sz, c: sc }, width, height, depth: D };
+    return { cloud: { x: sx, y: sy, z: sz, c: sc }, grid, width, height, depth: D };
   }
 
-  return { cloud: { x, y, z, c }, width, height, depth: D };
+  return { cloud: { x, y, z, c }, grid, width, height, depth: D };
 }
