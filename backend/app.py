@@ -6,12 +6,15 @@ import json
 import math
 import random
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import cv2
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 # 同一ディレクトリのモジュールをインポートできるようにパスを追加
@@ -39,6 +42,29 @@ app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 # スレッドプール（画像処理用）
 executor = ThreadPoolExecutor(max_workers=2)
+
+# ピーク結果のインメモリキャッシュ（PNG encoded bytes）
+_result_cache: Dict[str, bytes] = {}
+_result_cache_lock = threading.Lock()
+
+
+@app.get("/data/result/{filename}")
+async def serve_cached_result(filename: str):
+    """メモリキャッシュから結果画像を配信（キャッシュミス時はディスクフォールバック）"""
+    with _result_cache_lock:
+        data = _result_cache.get(filename)
+    if data is not None:
+        media_type = "application/json" if filename.endswith(".json") else "image/png"
+        return Response(content=data, media_type=media_type)
+
+    # ディスクフォールバック
+    file_path = DATA_DIR / "result" / filename
+    if file_path.exists():
+        content = file_path.read_bytes()
+        media_type = "application/json" if filename.endswith(".json") else "image/png"
+        return Response(content=content, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
 
 # -----------------------------
@@ -139,24 +165,33 @@ async def ws_endpoint(ws: WebSocket):
                 {"step": step, "total": total, "message": message}
             )
 
-        def blocking_preprocess():
-            data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
-            result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
-            peak_threshold = int(params.get("peak_threshold", 10))
-            use_gpu = params.get("use_gpu", True)
+        data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
+        result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
+        peak_threshold = int(params.get("peak_threshold", 10))
+        use_gpu = params.get("use_gpu", True)
 
+        def blocking_preprocess():
             # use_gpu に応じて適切なモジュールを動的にインポート
             if use_gpu:
                 from preprocessing_gpu import run_preprocess
             else:
                 from preprocessing_cpu import run_preprocess
 
-            return run_preprocess(
+            result = run_preprocess(
                 data_path=data_path,
                 result_path=result_path,
                 peak_threshold=peak_threshold,
                 progress_callback=progress_callback,
             )
+
+            # メモリ上でPNGエンコード（ワーカースレッド内で実行）
+            encoded = {}
+            for i, save_name in enumerate(result["output_files"]):
+                _, buf = cv2.imencode('.png', result["peak_data"][i])
+                encoded[save_name] = buf.tobytes()
+
+            result["encoded"] = encoded
+            return result
 
         # 別スレッドで画像処理を実行
         future = loop.run_in_executor(executor, blocking_preprocess)
@@ -187,13 +222,38 @@ async def ws_endpoint(ws: WebSocket):
             }))
 
         # 結果を取得
-        output_files = await asyncio.wrap_future(future)
+        result = await asyncio.wrap_future(future)
+        output_files = result["output_files"]
 
+        # インメモリキャッシュに格納（フロントエンドが即座にフェッチ可能に）
+        manifest_json = json.dumps({"files": output_files}).encode()
+        with _result_cache_lock:
+            _result_cache.clear()
+            _result_cache["manifest.json"] = manifest_json
+            for name, data in result["encoded"].items():
+                _result_cache[name] = data
+
+        # フロントエンドに即座に完了通知（ディスク保存を待たない）
         await ws.send_text(json.dumps({
             "type": "preprocess_complete",
             "files": output_files,
             "count": len(output_files)
         }))
+
+        # バックグラウンドでディスクに保存（キャッシュは保存完了後にクリア）
+        peak_data = result["peak_data"]
+        image_files = result["image_files"]
+
+        def background_save():
+            if use_gpu:
+                from preprocessing_gpu import save_peak_results
+            else:
+                from preprocessing_cpu import save_peak_results
+            save_peak_results(peak_data, image_files, result_path)
+            # キャッシュクリアは次回の処理実行時に行う
+            # （フロントエンドがまだフェッチ中の可能性があるため）
+
+        loop.run_in_executor(executor, background_save)
 
     try:
         await ws.send_text(json.dumps({"type": "status", "value": "READY"}))

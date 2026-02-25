@@ -84,21 +84,21 @@ def run_preprocess(
     peak_threshold: int = DEFAULT_PEAK_THRESHOLD,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     use_gpu: bool = True
-) -> List[str]:
+) -> dict:
     """
     画像処理を実行する（GPU/CPU自動切り替え版）
 
     Args:
         data_path: 入力ディレクトリ
-        result_path: 出力ディレクトリ
+        result_path: 出力ディレクトリ（save_peak_results用、この関数では未使用）
         peak_threshold: ピーク検出の閾値
         progress_callback: 進捗コールバック (current_step, total_steps, message)
         use_gpu: GPUを使用するかどうか（Trueでも利用不可なら自動でCPUにフォールバック）
 
     Returns:
-        生成されたファイル名のリスト
+        {"peak_data": np.ndarray, "image_files": list, "output_files": list}
     """
-    total_steps = 8
+    total_steps = 7
 
     # 使用する配列モジュールを決定
     xp = get_array_module(use_gpu)
@@ -108,8 +108,6 @@ def run_preprocess(
         if progress_callback:
             device = "GPU" if using_gpu else "CPU"
             progress_callback(step, total_steps, f"[{device}] {message}")
-
-    os.makedirs(result_path, exist_ok=True)
 
     # Step 1: 画像の並列読み込み（OpenCV + ThreadPoolExecutor）
     report(1, "画像を読み込み中...")
@@ -183,25 +181,44 @@ def run_preprocess(
     peak_result[valid_img, valid_row, valid_col] = 255
     peak_result[:, :, :-1] |= peak_result[:, :, 1:]
 
-    # GPUからCPUに転送（保存のため）
+    # GPUからCPUに転送
     peak_result_cpu = to_cpu(peak_result)
 
-    # Step 8: 並列保存
-    report(8, "結果を保存中...")
+    # 出力ファイル名リストを生成（保存は呼び出し側で行う）
+    output_files = []
+    for fname in image_files:
+        base_name = os.path.splitext(fname)[0]
+        save_name = f"{base_name}_gausswin_stackblur_contrast_peak.png"
+        output_files.append(save_name)
+
+    return {
+        "peak_data": peak_result_cpu,
+        "image_files": image_files,
+        "output_files": output_files,
+    }
+
+
+def save_peak_results(
+    peak_data: np.ndarray,
+    image_files: List[str],
+    result_path: str = DEFAULT_RESULT_PATH,
+) -> List[str]:
+    """ピーク検出結果をディスクに保存する"""
+    os.makedirs(result_path, exist_ok=True)
+
     save_args = []
     output_files = []
-
     for i, fname in enumerate(image_files):
         base_name = os.path.splitext(fname)[0]
         save_name = f"{base_name}_gausswin_stackblur_contrast_peak.png"
         save_path = os.path.join(result_path, save_name)
-        save_args.append((save_path, peak_result_cpu[i]))
+        save_args.append((save_path, peak_data[i]))
         output_files.append(save_name)
 
-    with ThreadPoolExecutor() as executor:
+    max_workers = min(32, len(save_args))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(_save_image, save_args))
 
-    # manifest.json を生成
     manifest_path = os.path.join(result_path, "manifest.json")
     with open(manifest_path, "w") as f:
         json.dump({"files": output_files}, f, indent=2)
@@ -244,5 +261,6 @@ if __name__ == "__main__":
     else:
         print(f"GPU未検出: {gpu_info.get('message', 'CPU mode')}")
 
-    run_preprocess(progress_callback=print_progress)
+    result = run_preprocess(progress_callback=print_progress)
+    save_peak_results(result["peak_data"], result["image_files"])
     print("完了しました")
