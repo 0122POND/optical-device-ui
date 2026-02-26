@@ -627,15 +627,15 @@ function App() {
           aspectmode: "manual",
           aspectratio: (() => {
             if (viewMode === "2D-camera") return { x: 0.01, y: 1.2, z: 1.2 };
+            // X/Yは表示上の長さを揃え、Zは実寸比で調整
             const xRange = xUmMax - xUmMin || 1;
             const yRange = yUmMax - yUmMin || 1;
             const zRange = zUmMax - zUmMin || 1;
-            const maxRange = Math.max(xRange, yRange, zRange);
-            const MIN_RATIO = 0.15;
+            const xyMax = Math.max(xRange, yRange);
             return {
-              x: Math.max(xRange / maxRange, MIN_RATIO),
-              y: Math.max(yRange / maxRange, MIN_RATIO),
-              z: Math.max(zRange / maxRange, MIN_RATIO),
+              x: 1,
+              y: 1,
+              z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
           camera: cam,
