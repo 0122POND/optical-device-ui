@@ -1390,6 +1390,13 @@ function App() {
                   width: 1920,
                   height: 1080,
                   filename: "surface_plot",
+                }).then(() => {
+                  // WebGL 3Dプロットのキャンバスが白くなる問題を回避: 再描画
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const p = el as any;
+                  if (p.data && p.layout) {
+                    Plotly.react(el, p.data, p.layout);
+                  }
                 });
               };
 
