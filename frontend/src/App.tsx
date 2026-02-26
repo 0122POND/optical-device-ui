@@ -601,7 +601,7 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? "X [µm]" : "",
+            title: axisVisible ? { text: "X [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
@@ -609,7 +609,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? "Y [µm]" : "",
+            title: axisVisible ? { text: "Y [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -617,7 +617,12 @@ function App() {
             gridcolor: "#333333",
           },
           zaxis: {
-            title: axisVisible ? (hasSweep ? "Z [µm]" : "Z (仮定値)") : "",
+            title: axisVisible
+              ? {
+                  text: hasSweep ? "Z [µm]" : "Z (仮定値)",
+                  font: { size: 12, color: "#ffffff" },
+                }
+              : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
