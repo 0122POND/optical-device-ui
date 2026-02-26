@@ -7,8 +7,9 @@ import "./App.css";
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
-// 1ピクセルあたりのµm換算係数
-const UM_PER_PIXEL = 20;
+// 1ピクセルあたりのµm換算係数（軸ごとに異なる）
+const UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
+const UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
 
 // カラーパレット（モダングレー）
 const colors = {
@@ -473,18 +474,18 @@ function App() {
         })()
       : cloud.x;
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL;
+      : UM_PER_PIXEL_Y;
 
     // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * UM_PER_PIXEL);
-    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL);
+    const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
+    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL_Y);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -726,14 +727,14 @@ function App() {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL;
+      : UM_PER_PIXEL_Y;
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -759,9 +760,9 @@ function App() {
       const numRows = zData.length;
       const numCols = zData[0].length;
       // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = y0 / UM_PER_PIXEL;
+      const y0Px = y0 / UM_PER_PIXEL_Y;
       const z0Px = z0 / zUmPerSlice;
-      const y1Px = y1 / UM_PER_PIXEL;
+      const y1Px = y1 / UM_PER_PIXEL_Y;
       const z1Px = z1 / zUmPerSlice;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
@@ -815,7 +816,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (py - c0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL);
+              xData.push(val * UM_PER_PIXEL_X);
               continue;
             }
           }
@@ -824,7 +825,7 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL);
+              xData.push(v * UM_PER_PIXEL_X);
             }
           }
         } else {
@@ -838,7 +839,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (pz - r0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL);
+              xData.push(val * UM_PER_PIXEL_X);
               continue;
             }
           }
@@ -846,19 +847,19 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL);
+              xData.push(v * UM_PER_PIXEL_X);
             }
           }
         }
       }
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出 ---
-      let minY = cloud.y[0] * UM_PER_PIXEL;
+      let minY = cloud.y[0] * UM_PER_PIXEL_Y;
       let maxY = minY;
       let minZ = cloud.z[0] * zUmPerSlice;
       let maxZ = minZ;
       for (let i = 1; i < cloud.y.length; i++) {
-        const yum = cloud.y[i] * UM_PER_PIXEL;
+        const yum = cloud.y[i] * UM_PER_PIXEL_Y;
         if (yum < minY) minY = yum;
         if (yum > maxY) maxY = yum;
       }
@@ -874,12 +875,12 @@ function App() {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * UM_PER_PIXEL - y0;
+        const py = cloud.y[i] * UM_PER_PIXEL_Y - y0;
         const pz = cloud.z[i] * zUmPerSlice - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
         if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
-          slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL });
+          slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL_X });
         }
       }
       slicePoints.sort((a, b) => a.t - b.t);
