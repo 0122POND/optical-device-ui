@@ -497,7 +497,7 @@ function App() {
             })();
 
       // カラーバーのカスタムtick（最大値のみ単位表示）
-      const colorData = viewMode === "2D-camera" ? xData : cloud.c;
+      const colorData = xData;
       let cMin = colorData[0];
       let cMax = colorData[0];
       for (let i = 1; i < colorData.length; i++) {
