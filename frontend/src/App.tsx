@@ -631,10 +631,11 @@ function App() {
             const yRange = yUmMax - yUmMin || 1;
             const zRange = zUmMax - zUmMin || 1;
             const maxRange = Math.max(xRange, yRange, zRange);
+            const MIN_RATIO = 0.15;
             return {
-              x: xRange / maxRange,
-              y: yRange / maxRange,
-              z: zRange / maxRange,
+              x: Math.max(xRange / maxRange, MIN_RATIO),
+              y: Math.max(yRange / maxRange, MIN_RATIO),
+              z: Math.max(zRange / maxRange, MIN_RATIO),
             };
           })(),
           camera: cam,
