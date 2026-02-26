@@ -473,6 +473,36 @@ function App() {
         })()
       : cloud.x;
 
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
+    const sweepVal = parseFloat(sweepInterval);
+    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+    const zUmPerSlice = hasSweep
+      ? sweepIntervalUnit === "mm"
+        ? sweepVal * 1000
+        : sweepVal
+      : UM_PER_PIXEL;
+
+    // 物理単位（µm）に変換
+    const xDataUm = xData.map((v) => v * UM_PER_PIXEL);
+    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL);
+    const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
+
+    // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
+    let xUmMin = xDataUm[0],
+      xUmMax = xDataUm[0];
+    let yUmMin = yDataUm[0],
+      yUmMax = yDataUm[0];
+    let zUmMin = zDataUm[0],
+      zUmMax = zDataUm[0];
+    for (let i = 1; i < xDataUm.length; i++) {
+      if (xDataUm[i] < xUmMin) xUmMin = xDataUm[i];
+      if (xDataUm[i] > xUmMax) xUmMax = xDataUm[i];
+      if (yDataUm[i] < yUmMin) yUmMin = yDataUm[i];
+      if (yDataUm[i] > yUmMax) yUmMax = yDataUm[i];
+      if (zDataUm[i] < zUmMin) zUmMin = zDataUm[i];
+      if (zDataUm[i] > zUmMax) zUmMax = zDataUm[i];
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -496,23 +526,14 @@ function App() {
               };
             })();
 
-      // カラーバーのカスタムtick（最大値のみ単位表示）
-      const colorData = xData;
-      let cMin = colorData[0];
-      let cMax = colorData[0];
-      for (let i = 1; i < colorData.length; i++) {
-        if (colorData[i] < cMin) cMin = colorData[i];
-        if (colorData[i] > cMax) cMax = colorData[i];
-      }
-      // µm換算
-      const cMaxUm = cMax * UM_PER_PIXEL;
+      // カラーバーのカスタムtick（最大値のみ単位表示、colorDataはµm単位）
+      const colorData = xDataUm;
+      const cMin = xUmMin;
+      const cMax = xUmMax;
       // mm超えたらmm表示
-      const useMillimeter = cMaxUm >= 1000;
+      const useMillimeter = cMax >= 1000;
       const unitLabel = useMillimeter ? "mm" : "µm";
-      const toUnit = (px: number) => {
-        const um = px * UM_PER_PIXEL;
-        return useMillimeter ? um / 1000 : um;
-      };
+      const toUnit = (um: number) => (useMillimeter ? um / 1000 : um);
       // キリの良い数値でtickを生成
       const rangeUnit = toUnit(cMax) - toUnit(cMin);
       const rawStep = rangeUnit / 5;
@@ -529,9 +550,9 @@ function App() {
       const decimals = niceStep >= 1 ? 0 : Math.max(0, Math.ceil(-Math.log10(niceStep)));
       const fmt = Math.max(decimals, 3);
       for (let v = niceStart; v <= maxUnit + niceStep * 0.01; v += niceStep) {
-        // ピクセル値に逆換算
-        const px = useMillimeter ? (v * 1000) / UM_PER_PIXEL : v / UM_PER_PIXEL;
-        tickvals.push(px);
+        // µm値（colorDataがµm単位のため直接使用）
+        const umVal = useMillimeter ? v * 1000 : v;
+        tickvals.push(umVal);
         ticktext.push(v.toFixed(fmt));
       }
       // 最大tickにのみ単位を付与
@@ -543,9 +564,9 @@ function App() {
         {
           type: "scatter3d",
           mode: "markers",
-          x: xData,
-          y: cloud.y,
-          z: cloud.z,
+          x: xDataUm,
+          y: yDataUm,
+          z: zDataUm,
           marker: {
             size: viewMode === "2D-camera" ? 1.5 : 1,
             opacity: viewMode === "2D-camera" ? 0.15 : 0.08,
@@ -579,7 +600,7 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? "X" : "",
+            title: axisVisible ? "X (µm)" : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
@@ -587,7 +608,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? "Y" : "",
+            title: axisVisible ? "Y (µm)" : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -595,7 +616,7 @@ function App() {
             gridcolor: "#333333",
           },
           zaxis: {
-            title: axisVisible ? "Z (flipped)" : "",
+            title: axisVisible ? (hasSweep ? "Z (µm)" : "Z (仮定値)") : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -603,7 +624,18 @@ function App() {
             gridcolor: "#333333",
           },
           aspectmode: "manual",
-          aspectratio: { x: viewMode === "2D-camera" ? 0.01 : 1, y: 1.2, z: 1.2 },
+          aspectratio: (() => {
+            if (viewMode === "2D-camera") return { x: 0.01, y: 1.2, z: 1.2 };
+            const xRange = xUmMax - xUmMin || 1;
+            const yRange = yUmMax - yUmMin || 1;
+            const zRange = zUmMax - zUmMin || 1;
+            const maxRange = Math.max(xRange, yRange, zRange);
+            return {
+              x: xRange / maxRange,
+              y: yRange / maxRange,
+              z: zRange / maxRange,
+            };
+          })(),
           camera: cam,
           // 2D-cameraではドラッグ回転を無効化
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
@@ -614,11 +646,7 @@ function App() {
     // 2Dモード + 断層表示時、クリックで決めた始点・終点のラインを描画
     // X座標を点群の最大値より手前（カメラ側）に配置して常に前面に表示
     if (viewMode === "2D-camera" && showSlice && cloud) {
-      let maxXVal = cloud.x[0];
-      for (let i = 1; i < cloud.x.length; i++) {
-        if (cloud.x[i] > maxXVal) maxXVal = cloud.x[i];
-      }
-      const frontX = maxXVal + 1;
+      const frontX = xUmMax + (xUmMax - xUmMin) * 0.01;
 
       if (sliceLineStart && sliceLineEnd) {
         data.push({
@@ -675,7 +703,18 @@ function App() {
     return () => {
       Plotly.purge(plotEl);
     };
-  }, [showPlot, axisVisible, cloud, flipX, viewMode, showSlice, sliceLineStart, sliceLineEnd]);
+  }, [
+    showPlot,
+    axisVisible,
+    cloud,
+    flipX,
+    viewMode,
+    showSlice,
+    sliceLineStart,
+    sliceLineEnd,
+    sweepInterval,
+    sweepIntervalUnit,
+  ]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
@@ -687,24 +726,24 @@ function App() {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 × スライスインデックス → µm
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep ? (sweepIntervalUnit === "mm" ? sweepVal * 1000 : sweepVal) : 1;
+    const zUmPerSlice = hasSweep
+      ? sweepIntervalUnit === "mm"
+        ? sweepVal * 1000
+        : sweepVal
+      : UM_PER_PIXEL;
 
-    // 始点・終点（ピクセル/スライス座標）
+    // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
     const z0 = sliceLineStart.z;
     const y1 = sliceLineEnd.y;
     const z1 = sliceLineEnd.z;
 
-    // 物理座標（µm）
-    const startYum = y0 * UM_PER_PIXEL;
-    const startZum = z0 * zUmPerSlice;
-    const endYum = y1 * UM_PER_PIXEL;
-    const endZum = z1 * zUmPerSlice;
-    const dy = endYum - startYum;
-    const dz = endZum - startZum;
+    // すでにµm単位のためそのまま使用
+    const dy = y1 - y0;
+    const dz = z1 - z0;
     const lineLen = Math.sqrt(dy * dy + dz * dz);
 
     if (lineLen < 1e-6) {
@@ -719,8 +758,13 @@ function App() {
       // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
       const numRows = zData.length;
       const numCols = zData[0].length;
-      const dyPx = y1 - y0;
-      const dzPx = z1 - z0;
+      // µm→生インデックスへ逆変換（グリッドアクセス用）
+      const y0Px = y0 / UM_PER_PIXEL;
+      const z0Px = z0 / zUmPerSlice;
+      const y1Px = y1 / UM_PER_PIXEL;
+      const z1Px = z1 / zUmPerSlice;
+      const dyPx = y1Px - y0Px;
+      const dzPx = z1Px - z0Px;
 
       // 直線がグリッド線と交差する全ての点を収集
       const crossings: { frac: number }[] = [];
@@ -731,20 +775,20 @@ function App() {
 
       // 整数y（列境界）との交点
       if (Math.abs(dyPx) > 1e-9) {
-        const yMin = Math.max(0, Math.min(Math.ceil(Math.min(y0, y1)), numCols - 1));
-        const yMax = Math.min(numCols - 1, Math.max(Math.floor(Math.max(y0, y1)), 0));
+        const yMin = Math.max(0, Math.min(Math.ceil(Math.min(y0Px, y1Px)), numCols - 1));
+        const yMax = Math.min(numCols - 1, Math.max(Math.floor(Math.max(y0Px, y1Px)), 0));
         for (let yInt = yMin; yInt <= yMax; yInt++) {
-          const f = (yInt - y0) / dyPx;
+          const f = (yInt - y0Px) / dyPx;
           if (f > 0 && f < 1) crossings.push({ frac: f });
         }
       }
 
       // 整数z（行境界）との交点
       if (Math.abs(dzPx) > 1e-9) {
-        const zMin = Math.max(0, Math.min(Math.ceil(Math.min(z0, z1)), numRows - 1));
-        const zMax = Math.min(numRows - 1, Math.max(Math.floor(Math.max(z0, z1)), 0));
+        const zMin = Math.max(0, Math.min(Math.ceil(Math.min(z0Px, z1Px)), numRows - 1));
+        const zMax = Math.min(numRows - 1, Math.max(Math.floor(Math.max(z0Px, z1Px)), 0));
         for (let zInt = zMin; zInt <= zMax; zInt++) {
-          const f = (zInt - z0) / dzPx;
+          const f = (zInt - z0Px) / dzPx;
           if (f > 0 && f < 1) crossings.push({ frac: f });
         }
       }
@@ -754,8 +798,8 @@ function App() {
 
       // 各交点で線形補間して深度値を取得
       for (const { frac } of crossings) {
-        const py = y0 + dyPx * frac;
-        const pz = z0 + dzPx * frac;
+        const py = y0Px + dyPx * frac;
+        const pz = z0Px + dzPx * frac;
         const col = Math.round(py);
         const row = Math.round(pz);
 
@@ -830,8 +874,8 @@ function App() {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * UM_PER_PIXEL - startYum;
-        const pz = cloud.z[i] * zUmPerSlice - startZum;
+        const py = cloud.y[i] * UM_PER_PIXEL - y0;
+        const pz = cloud.z[i] * zUmPerSlice - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
         if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
@@ -883,13 +927,11 @@ function App() {
       },
     ];
 
-    const titleText = hasSweep
-      ? `断層 (${startYum.toFixed(0)},${startZum.toFixed(0)})→` +
-        `(${endYum.toFixed(0)},${endZum.toFixed(0)}) µm  ${tData.length} pts`
-      : `断層 (${startYum.toFixed(0)}µm,z=${z0.toFixed(0)})→` +
-        `(${endYum.toFixed(0)}µm,z=${z1.toFixed(0)})  ${tData.length} pts`;
+    const titleText =
+      `断層 (${y0.toFixed(0)},${z0.toFixed(0)})→` +
+      `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ${tData.length} pts`;
 
-    const distLabel = hasSweep ? "距離 (µm)" : "距離 (µm/slice混合)";
+    const distLabel = "距離 (µm)";
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
