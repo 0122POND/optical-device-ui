@@ -15,6 +15,23 @@ DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
 DEFAULT_RESULT_PATH = str(_DATA_DIR / "result") + "/"
 DEFAULT_PEAK_THRESHOLD = 10
 
+# --- バッチ処理設定 ---
+_BLUR_OVERLAP = 4  # 3Dガウスブラー（sigma=1）に必要なオーバーラップ枚数
+
+
+def _auto_batch_size(h: int, w: int) -> int:
+    """GPUのVRAM空き容量に基づいてバッチサイズを自動決定"""
+    try:
+        free_mem, _ = cp.cuda.Device().mem_info
+        # 空きVRAMの40%を使用（フラグメンテーションとオーバーヘッドを考慮）
+        usable = free_mem * 0.4
+        bytes_per_image = h * w * 4  # float32
+        # ピーク時は同時に2つの大きな配列が存在する（入力+出力）
+        batch = int(usable / (3 * bytes_per_image))
+        return max(1, min(batch, 512))
+    except Exception:
+        return 256
+
 
 def create_gauss_window(h, w, sigma_scale=6):
     """ガウス窓を作成（GPU版）"""
@@ -55,7 +72,15 @@ def run_preprocess(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> dict:
     """
-    画像処理を実行する（GPU版）
+    画像処理を実行する（GPU版・バッチ処理対応）
+
+    大量の画像をバッチに分割してGPU処理し、VRAMの使用量を抑える。
+    処理フロー:
+      1. 画像をCPUに読み込み
+      2. 背景（中央値）をCPUで計算
+      3. diff_xのグローバル最大値を軽量バッチで計算
+      4-5. 背景差分→横方向差分→強調→ガウス窓をバッチ処理し、CPUに退避
+      6-7. 3Dガウスブラー→コントラスト正規化→ピーク検出をオーバーラップ付きバッチ処理
 
     Args:
         data_path: 入力ディレクトリ
@@ -72,9 +97,11 @@ def run_preprocess(
         if progress_callback:
             progress_callback(step, total_steps, f"[GPU] {message}")
 
-    # Step 1: 画像の並列読み込み（CPUで読み込み後、GPUに転送）
+    # Step 1: 画像の並列読み込み（CPUで読み込み）
     report(1, "画像を読み込み中...")
-    image_files = sorted([f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))])
+    image_files = sorted(
+        [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))]
+    )
 
     if not image_files:
         raise ValueError("画像が見つかりません")
@@ -83,73 +110,133 @@ def run_preprocess(
     with ThreadPoolExecutor() as executor:
         img_list = list(executor.map(_load_image, paths))
 
-    # CPUで読み込んだ後、GPUに転送
-    images = cp.stack([cp.asarray(img) for img in img_list])
+    n_images = len(img_list)
+    h, w = img_list[0].shape
+    w_diff = w - 1
 
-    # Step 2: 中央値画像の計算
+    # バッチサイズを自動決定
+    batch_size = _auto_batch_size(h, w)
+
+    # Step 2: 背景画像（中央値）をCPUで省メモリ計算
+    # 全画像をスタックせず、行チャンク単位で中央値を求める
     report(2, "背景画像を計算中...")
-    bg_image = cp.median(images, axis=0).astype(cp.float32)
+    bg_image_cpu = np.empty((h, w), dtype=np.float32)
+    ROW_CHUNK = 64
+    for row_start in range(0, h, ROW_CHUNK):
+        row_end = min(row_start + ROW_CHUNK, h)
+        row_data = np.stack([img[row_start:row_end] for img in img_list])
+        bg_image_cpu[row_start:row_end] = np.median(row_data, axis=0).astype(
+            np.float32
+        )
+        del row_data
+    bg_gpu = cp.asarray(bg_image_cpu)
+    del bg_image_cpu
 
-    # Step 3: 背景差分 & クリップ
-    report(3, "背景差分を計算中...")
-    sub_bg = cp.maximum(images - bg_image, 0)
-    del images, bg_image
+    # Step 3: diff_xのグローバル最大値を計算（軽量バッチパス）
+    # 強調処理のガンマ補正に全画像共通の正規化係数が必要
+    report(3, "前処理パラメータを計算中...")
+    global_max = 0.0
+    for i in range(0, n_images, batch_size):
+        end = min(i + batch_size, n_images)
+        batch = cp.stack([cp.asarray(img) for img in img_list[i:end]])
+        sub_bg = cp.maximum(batch - bg_gpu, 0)
+        del batch
+        diff_x = cp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
+        del sub_bg
+        batch_max = float(diff_x.max())
+        global_max = max(global_max, batch_max)
+        del diff_x
+        cp.get_default_memory_pool().free_all_blocks()
 
-    # Step 4: 横方向差分 & 強調
-    report(4, "横方向差分と強調処理中...")
-    diff_x = cp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
-    del sub_bg
+    if global_max == 0:
+        global_max = 1.0
+    inv_max = cp.float32(1.0 / global_max)
 
-    max_val = float(diff_x.max())
-    if max_val == 0:
-        max_val = 1.0
-
-    inv_max = cp.float32(1.0 / max_val)
-    enhanced = cp.power(diff_x * inv_max, cp.float32(0.7)) * 255
-    del diff_x
-
-    # Step 5: ガウス窓の適用
-    report(5, "ガウス窓を適用中...")
-    _, h, w_diff = enhanced.shape
+    # Step 4-5: 背景差分→横方向差分→強調→ガウス窓をバッチ処理
+    # 結果はCPU RAMに退避
     gauss_window = create_gauss_window(h, w_diff, sigma_scale=6)
+    gausswin_cpu = np.empty((n_images, h, w_diff), dtype=np.float32)
 
-    gausswin = cp.minimum(enhanced * gauss_window, 255)
-    del enhanced
+    for i in range(0, n_images, batch_size):
+        end = min(i + batch_size, n_images)
+        report(4, f"横方向差分と強調処理中... ({end}/{n_images})")
 
-    # Step 6: スタックブラー（3次元ガウスフィルタ）
-    report(6, "3次元スタックブラーを適用中...")
-    blurred_stack = gaussian_filter(gausswin, sigma=(1, 7, 7))
-    del gausswin
+        batch = cp.stack([cp.asarray(img) for img in img_list[i:end]])
+        sub_bg = cp.maximum(batch - bg_gpu, 0)
+        del batch
 
-    # コントラスト正規化
-    max_vals = cp.max(blurred_stack, axis=(1, 2), keepdims=True)
-    max_vals = cp.where(max_vals == 0, 1, max_vals)
-    contrast = blurred_stack / max_vals * 255
-    del blurred_stack
+        diff_x = cp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
+        del sub_bg
 
-    # Step 7: ピーク検出
-    report(7, "ピーク検出を実行中...")
-    n_img, h_img, w_img = contrast.shape
+        enhanced = cp.power(diff_x * inv_max, cp.float32(0.7)) * 255
+        del diff_x
 
-    # argmaxとmaxを効率的に計算
-    max_indices = cp.argmax(contrast, axis=2)
-    max_values = cp.take_along_axis(contrast, max_indices[:, :, cp.newaxis], axis=2).squeeze(axis=2)
+        report(5, f"ガウス窓を適用中... ({end}/{n_images})")
+        gausswin_batch = cp.minimum(enhanced * gauss_window, 255)
+        del enhanced
 
-    peak_result = cp.zeros((n_img, h_img, w_img), dtype=cp.uint8)
-    valid_mask = max_values >= peak_threshold
+        gausswin_cpu[i:end] = cp.asnumpy(gausswin_batch)
+        del gausswin_batch
+        cp.get_default_memory_pool().free_all_blocks()
 
-    # インデックス配列を効率的に生成
-    img_idx, row_idx = cp.mgrid[:n_img, :h_img]
+    # ここまでで不要になったデータを解放
+    del gauss_window, bg_gpu, img_list
+    cp.get_default_memory_pool().free_all_blocks()
 
-    valid_img = img_idx[valid_mask]
-    valid_row = row_idx[valid_mask]
-    valid_col = max_indices[valid_mask]
+    # Step 6-7: 3Dガウスブラー→コントラスト正規化→ピーク検出
+    # オーバーラップ付きバッチ処理（sigma=1のスタック方向ブラーのため隣接画像が必要）
+    peak_result_cpu = np.zeros((n_images, h, w_diff), dtype=np.uint8)
 
-    peak_result[valid_img, valid_row, valid_col] = 255
-    peak_result[:, :, :-1] |= peak_result[:, :, 1:]
+    for i in range(0, n_images, batch_size):
+        end = min(i + batch_size, n_images)
+        report(6, f"3次元スタックブラーを適用中... ({end}/{n_images})")
 
-    # GPUからCPUに転送
-    peak_result_cpu = cp.asnumpy(peak_result)
+        # オーバーラップ付きでロード（ブラー境界のアーティファクト防止）
+        load_start = max(0, i - _BLUR_OVERLAP)
+        load_end = min(n_images, end + _BLUR_OVERLAP)
+        chunk = cp.asarray(gausswin_cpu[load_start:load_end])
+
+        # 3Dガウスフィルタ（sigma=(1,7,7): スタック方向1, 空間方向7）
+        blurred = gaussian_filter(chunk, sigma=(1, 7, 7))
+        del chunk
+
+        # オーバーラップを除去してコア部分を取得
+        trim_start = i - load_start
+        trim_end = trim_start + (end - i)
+        core = blurred[trim_start:trim_end]
+        del blurred
+
+        # コントラスト正規化（画像ごと）
+        max_vals = cp.max(core, axis=(1, 2), keepdims=True)
+        max_vals = cp.where(max_vals == 0, 1, max_vals)
+        contrast = core / max_vals * 255
+        del core
+
+        # ピーク検出
+        report(7, f"ピーク検出を実行中... ({end}/{n_images})")
+        bn, bh, bw = contrast.shape
+
+        max_indices = cp.argmax(contrast, axis=2)
+        max_values = cp.take_along_axis(
+            contrast, max_indices[:, :, cp.newaxis], axis=2
+        ).squeeze(axis=2)
+
+        peak_batch = cp.zeros((bn, bh, bw), dtype=cp.uint8)
+        valid_mask = max_values >= peak_threshold
+
+        img_idx, row_idx = cp.mgrid[:bn, :bh]
+        valid_img = img_idx[valid_mask]
+        valid_row = row_idx[valid_mask]
+        valid_col = max_indices[valid_mask]
+
+        peak_batch[valid_img, valid_row, valid_col] = 255
+        peak_batch[:, :, :-1] |= peak_batch[:, :, 1:]
+
+        peak_result_cpu[i:end] = cp.asnumpy(peak_batch)
+        del contrast, max_indices, max_values, peak_batch
+        cp.get_default_memory_pool().free_all_blocks()
+
+    del gausswin_cpu
 
     # 出力ファイル名リストを生成（保存は呼び出し側で行う）
     output_files = []
