@@ -7,8 +7,9 @@ import "./App.css";
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
-// 1ピクセルあたりのµm換算係数
-const UM_PER_PIXEL = 20;
+// 1ピクセルあたりのµm換算係数（軸ごとに異なる）
+const UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
+const UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
 
 // カラーパレット（モダングレー）
 const colors = {
@@ -131,7 +132,7 @@ function App() {
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引関連の入力値 & 単位
-  const [sweepInterval, setSweepInterval] = useState("");
+  const [sweepInterval, setSweepInterval] = useState("100");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
   const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
@@ -473,18 +474,18 @@ function App() {
         })()
       : cloud.x;
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL;
+      : UM_PER_PIXEL_Y;
 
     // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * UM_PER_PIXEL);
-    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL);
+    const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
+    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL_Y);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -600,7 +601,7 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? "X (µm)" : "",
+            title: axisVisible ? { text: "X [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
@@ -608,7 +609,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? "Y (µm)" : "",
+            title: axisVisible ? { text: "Y [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -616,7 +617,12 @@ function App() {
             gridcolor: "#333333",
           },
           zaxis: {
-            title: axisVisible ? (hasSweep ? "Z (µm)" : "Z (仮定値)") : "",
+            title: axisVisible
+              ? {
+                  text: hasSweep ? "Z [µm]" : "Z (仮定値)",
+                  font: { size: 12, color: "#ffffff" },
+                }
+              : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -626,14 +632,15 @@ function App() {
           aspectmode: "manual",
           aspectratio: (() => {
             if (viewMode === "2D-camera") return { x: 0.01, y: 1.2, z: 1.2 };
+            // X/Yは表示上の長さを揃え、Zは実寸比で調整
             const xRange = xUmMax - xUmMin || 1;
             const yRange = yUmMax - yUmMin || 1;
             const zRange = zUmMax - zUmMin || 1;
-            const maxRange = Math.max(xRange, yRange, zRange);
+            const xyMax = Math.max(xRange, yRange);
             return {
-              x: xRange / maxRange,
-              y: yRange / maxRange,
-              z: zRange / maxRange,
+              x: 1,
+              y: 1,
+              z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
           camera: cam,
@@ -726,14 +733,14 @@ function App() {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL;
+      : UM_PER_PIXEL_Y;
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -759,9 +766,9 @@ function App() {
       const numRows = zData.length;
       const numCols = zData[0].length;
       // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = y0 / UM_PER_PIXEL;
+      const y0Px = y0 / UM_PER_PIXEL_Y;
       const z0Px = z0 / zUmPerSlice;
-      const y1Px = y1 / UM_PER_PIXEL;
+      const y1Px = y1 / UM_PER_PIXEL_Y;
       const z1Px = z1 / zUmPerSlice;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
@@ -815,7 +822,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (py - c0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL);
+              xData.push(val * UM_PER_PIXEL_X);
               continue;
             }
           }
@@ -824,7 +831,7 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL);
+              xData.push(v * UM_PER_PIXEL_X);
             }
           }
         } else {
@@ -838,7 +845,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (pz - r0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL);
+              xData.push(val * UM_PER_PIXEL_X);
               continue;
             }
           }
@@ -846,19 +853,19 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL);
+              xData.push(v * UM_PER_PIXEL_X);
             }
           }
         }
       }
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出 ---
-      let minY = cloud.y[0] * UM_PER_PIXEL;
+      let minY = cloud.y[0] * UM_PER_PIXEL_Y;
       let maxY = minY;
       let minZ = cloud.z[0] * zUmPerSlice;
       let maxZ = minZ;
       for (let i = 1; i < cloud.y.length; i++) {
-        const yum = cloud.y[i] * UM_PER_PIXEL;
+        const yum = cloud.y[i] * UM_PER_PIXEL_Y;
         if (yum < minY) minY = yum;
         if (yum > maxY) maxY = yum;
       }
@@ -874,12 +881,12 @@ function App() {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * UM_PER_PIXEL - y0;
+        const py = cloud.y[i] * UM_PER_PIXEL_Y - y0;
         const pz = cloud.z[i] * zUmPerSlice - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
         if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
-          slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL });
+          slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL_X });
         }
       }
       slicePoints.sort((a, b) => a.t - b.t);
@@ -1383,6 +1390,13 @@ function App() {
                   width: 1920,
                   height: 1080,
                   filename: "surface_plot",
+                }).then(() => {
+                  // WebGL 3Dプロットのキャンバスが白くなる問題を回避: 再描画
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const p = el as any;
+                  if (p.data && p.layout) {
+                    Plotly.react(el, p.data, p.layout);
+                  }
                 });
               };
 
