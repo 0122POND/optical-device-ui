@@ -132,7 +132,7 @@ function App() {
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引関連の入力値 & 単位
-  const [sweepInterval, setSweepInterval] = useState("");
+  const [sweepInterval, setSweepInterval] = useState("100");
   const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
   const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
@@ -601,7 +601,7 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? "X (µm)" : "",
+            title: axisVisible ? "X [µm]" : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
@@ -609,7 +609,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? "Y (µm)" : "",
+            title: axisVisible ? "Y [µm]" : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -617,7 +617,7 @@ function App() {
             gridcolor: "#333333",
           },
           zaxis: {
-            title: axisVisible ? (hasSweep ? "Z (µm)" : "Z (仮定値)") : "",
+            title: axisVisible ? (hasSweep ? "Z [µm]" : "Z (仮定値)") : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
