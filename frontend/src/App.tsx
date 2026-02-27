@@ -130,6 +130,7 @@ function App() {
   const [sliceLineEnd, setSliceLineEnd] = useState<{ y: number; z: number } | null>(null);
 
   // 断層グラフ上の計測マーカー（距離計測用）
+  const [sliceMeasureMode, setSliceMeasureMode] = useState(false);
   const [sliceMeasure, setSliceMeasure] = useState<{
     a: number | null;
     b: number | null;
@@ -1007,21 +1008,21 @@ function App() {
 
     Plotly.newPlot(sliceEl, data, layout, config);
 
-    // 断層グラフ上のクリックで計測マーカーを設定
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (sliceEl as any).on("plotly_click", (eventData: any) => {
-      if (eventData.points && eventData.points.length > 0) {
-        const clickX = eventData.points[0].x as number;
-        setSliceMeasure((prev) => {
-          if (prev.a == null || (prev.a != null && prev.b != null)) {
-            // まだ始点なし or 両方セット済み → リセットして始点のみ
-            return { a: clickX, b: null };
-          }
-          // 始点あり・終点なし → 終点を設定
-          return { a: prev.a, b: clickX };
-        });
-      }
-    });
+    // 距離計測モードON時のみ、クリックで計測マーカーを設定
+    if (sliceMeasureMode) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sliceEl as any).on("plotly_click", (eventData: any) => {
+        if (eventData.points && eventData.points.length > 0) {
+          const clickX = eventData.points[0].x as number;
+          setSliceMeasure((prev) => {
+            if (prev.a == null || (prev.a != null && prev.b != null)) {
+              return { a: clickX, b: null };
+            }
+            return { a: prev.a, b: clickX };
+          });
+        }
+      });
+    }
 
     return () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1037,6 +1038,7 @@ function App() {
     sweepInterval,
     sweepIntervalUnit,
     flipX,
+    sliceMeasureMode,
     sliceMeasure,
   ]);
 
@@ -1784,8 +1786,61 @@ function App() {
 
             {/* 下：2D 断層グラフ */}
             {showSlice && (
-              <div style={{ height: "260px", flexShrink: 0 }}>
-                <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
+              <div style={{ flexShrink: 0 }}>
+                {/* 距離計測トグルボタン */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "4px 8px",
+                    backgroundColor: colors.bgDark,
+                    borderTop: `1px solid ${colors.border}`,
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      setSliceMeasureMode((v) => {
+                        if (!v) setSliceMeasure({ a: null, b: null });
+                        return !v;
+                      });
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      fontSize: "12px",
+                      padding: "3px 10px",
+                      border: "none",
+                      backgroundColor: sliceMeasureMode ? colors.danger : "#3d5a80",
+                    }}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M2 12h5l2-9 4 18 3-9h6" />
+                    </svg>
+                    {sliceMeasureMode ? "距離計測を終了" : "距離計測"}
+                  </button>
+                  {sliceMeasureMode && (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color: colors.textMuted,
+                      }}
+                    >
+                      グラフ上を2回クリックして距離を計測
+                    </span>
+                  )}
+                </div>
+                <div style={{ height: "250px" }}>
+                  <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
+                </div>
               </div>
             )}
           </div>
@@ -2073,6 +2128,7 @@ function App() {
                         // ON にする時、ラインと計測マーカーをリセット
                         setSliceLineStart(null);
                         setSliceLineEnd(null);
+                        setSliceMeasureMode(false);
                         setSliceMeasure({ a: null, b: null });
                       }
                       return !v;
