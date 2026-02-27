@@ -943,14 +943,12 @@ function App() {
       `断層 (${y0.toFixed(0)},${z0.toFixed(0)})→` +
       `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ${tData.length} pts`;
 
-    const distLabel = "距離 (µm)";
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
       title: titleText,
       margin: { l: 50, r: 20, t: 40, b: 50 },
-      xaxis: { title: distLabel, color: colors.text, gridcolor: colors.border },
-      yaxis: { title: "深さ (µm)", color: colors.text, gridcolor: colors.border },
+      xaxis: { title: { text: "距離 [µm]" }, color: colors.text, gridcolor: colors.border },
+      yaxis: { title: { text: "深さ [µm]" }, color: colors.text, gridcolor: colors.border },
       height: 250,
       paper_bgcolor: colors.bgDark,
       plot_bgcolor: colors.bgDark,
