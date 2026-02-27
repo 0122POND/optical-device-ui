@@ -981,6 +981,7 @@ function App() {
       }
 
       // 表示初期化
+      setShowSlice(false);
       setShowPlot(true);
       setZData(null);
       setCloud(null);
@@ -1067,6 +1068,7 @@ function App() {
         return;
       }
       const newCloud = { x: xArr, y: yArr, z: zArr, c: cArr };
+      setShowSlice(false);
       setZData(grid);
       setCloud(newCloud);
       setShowPlot(true);
@@ -1089,6 +1091,7 @@ function App() {
 
   // AI結果を表示する処理
   const handleShowAIResult = async () => {
+    setShowSlice(false);
     setShowPlot(true);
     setCloud(null);
     setIsLoadingAI(true);
@@ -2189,6 +2192,7 @@ function App() {
                                     cursor: "pointer",
                                   }}
                                   onClick={() => {
+                                    setShowSlice(false);
                                     setCloud(entry.cloud);
                                     setShowPlot(true);
                                   }}
