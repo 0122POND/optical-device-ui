@@ -742,6 +742,11 @@ function App() {
         : sweepVal
       : UM_PER_PIXEL_Y;
 
+    // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
+    const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
+    const depthToUm = (rawVal: number) =>
+      flipX ? (maxRawX - rawVal) * UM_PER_PIXEL_X : rawVal * UM_PER_PIXEL_X;
+
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
     const z0 = sliceLineStart.z;
@@ -822,7 +827,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (py - c0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL_X);
+              xData.push(depthToUm(val));
               continue;
             }
           }
@@ -831,7 +836,7 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL_X);
+              xData.push(depthToUm(v));
             }
           }
         } else {
@@ -845,7 +850,7 @@ function App() {
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (pz - r0);
               tData.push(lineLen * frac);
-              xData.push(val * UM_PER_PIXEL_X);
+              xData.push(depthToUm(val));
               continue;
             }
           }
@@ -853,7 +858,7 @@ function App() {
             const v = zData[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
-              xData.push(v * UM_PER_PIXEL_X);
+              xData.push(depthToUm(v));
             }
           }
         }
@@ -886,7 +891,7 @@ function App() {
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
         if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
-          slicePoints.push({ t, x: cloud.x[i] * UM_PER_PIXEL_X });
+          slicePoints.push({ t, x: depthToUm(cloud.x[i]) });
         }
       }
       slicePoints.sort((a, b) => a.t - b.t);
@@ -960,7 +965,16 @@ function App() {
     return () => {
       Plotly.purge(sliceEl);
     };
-  }, [showSlice, zData, cloud, sliceLineStart, sliceLineEnd, sweepInterval, sweepIntervalUnit]);
+  }, [
+    showSlice,
+    zData,
+    cloud,
+    sliceLineStart,
+    sliceLineEnd,
+    sweepInterval,
+    sweepIntervalUnit,
+    flipX,
+  ]);
 
   const handleConfirmOk = async () => {
     if (confirmMode === "plot") {
