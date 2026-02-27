@@ -129,13 +129,6 @@ function App() {
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
   const [sliceLineEnd, setSliceLineEnd] = useState<{ y: number; z: number } | null>(null);
 
-  // 断層グラフ上の計測マーカー（距離計測用）
-  const [sliceMeasureMode, setSliceMeasureMode] = useState(false);
-  const [sliceMeasure, setSliceMeasure] = useState<{
-    a: number | null;
-    b: number | null;
-  }>({ a: null, b: null });
-
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引関連の入力値 & 単位
@@ -950,45 +943,6 @@ function App() {
       `断層 (${y0.toFixed(0)},${z0.toFixed(0)})→` +
       `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ${tData.length} pts`;
 
-    // 計測マーカーの縦線 & 距離アノテーション
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const shapes: any[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const annotations: any[] = [];
-
-    const yMin = Math.min(...xData);
-    const yMax = Math.max(...xData);
-
-    const markerColors = ["#00e676", "#ff9100"]; // 緑・オレンジ
-    for (const [idx, mv] of [sliceMeasure.a, sliceMeasure.b].entries()) {
-      if (mv != null) {
-        shapes.push({
-          type: "line",
-          x0: mv,
-          x1: mv,
-          y0: yMin,
-          y1: yMax,
-          line: { color: markerColors[idx], width: 2, dash: "dot" },
-        });
-      }
-    }
-
-    if (sliceMeasure.a != null && sliceMeasure.b != null) {
-      const dist = Math.abs(sliceMeasure.b - sliceMeasure.a);
-      const midX = (sliceMeasure.a + sliceMeasure.b) / 2;
-      // mm超えたらmm表示
-      const label = dist >= 1000 ? `${(dist / 1000).toFixed(3)} mm` : `${dist.toFixed(1)} µm`;
-      annotations.push({
-        x: midX,
-        y: yMax,
-        text: `<b>⟵ ${label} ⟶</b>`,
-        showarrow: false,
-        font: { color: "#ffffff", size: 13 },
-        bgcolor: "rgba(0,0,0,0.6)",
-        borderpad: 3,
-      });
-    }
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
       title: titleText,
@@ -999,8 +953,6 @@ function App() {
       paper_bgcolor: colors.bgDark,
       plot_bgcolor: colors.bgDark,
       font: { color: colors.text, family: fontFamily },
-      shapes,
-      annotations,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1008,25 +960,7 @@ function App() {
 
     Plotly.newPlot(sliceEl, data, layout, config);
 
-    // 距離計測モードON時のみ、クリックで計測マーカーを設定
-    if (sliceMeasureMode) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (sliceEl as any).on("plotly_click", (eventData: any) => {
-        if (eventData.points && eventData.points.length > 0) {
-          const clickX = eventData.points[0].x as number;
-          setSliceMeasure((prev) => {
-            if (prev.a == null || (prev.a != null && prev.b != null)) {
-              return { a: clickX, b: null };
-            }
-            return { a: prev.a, b: clickX };
-          });
-        }
-      });
-    }
-
     return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (sliceEl as any).removeAllListeners?.("plotly_click");
       Plotly.purge(sliceEl);
     };
   }, [
@@ -1038,8 +972,6 @@ function App() {
     sweepInterval,
     sweepIntervalUnit,
     flipX,
-    sliceMeasureMode,
-    sliceMeasure,
   ]);
 
   const handleConfirmOk = async () => {
@@ -1786,61 +1718,8 @@ function App() {
 
             {/* 下：2D 断層グラフ */}
             {showSlice && (
-              <div style={{ flexShrink: 0 }}>
-                {/* 距離計測トグルボタン */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "4px 8px",
-                    backgroundColor: colors.bgDark,
-                    borderTop: `1px solid ${colors.border}`,
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      setSliceMeasureMode((v) => {
-                        if (!v) setSliceMeasure({ a: null, b: null });
-                        return !v;
-                      });
-                    }}
-                    style={{
-                      ...buttonSecondaryStyle,
-                      fontSize: "12px",
-                      padding: "3px 10px",
-                      border: "none",
-                      backgroundColor: sliceMeasureMode ? colors.danger : "#3d5a80",
-                    }}
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M2 12h5l2-9 4 18 3-9h6" />
-                    </svg>
-                    {sliceMeasureMode ? "距離計測を終了" : "距離計測"}
-                  </button>
-                  {sliceMeasureMode && (
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        color: colors.textMuted,
-                      }}
-                    >
-                      グラフ上を2回クリックして距離を計測
-                    </span>
-                  )}
-                </div>
-                <div style={{ height: "250px" }}>
-                  <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
-                </div>
+              <div style={{ height: "260px", flexShrink: 0 }}>
+                <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
               </div>
             )}
           </div>
@@ -2125,11 +2004,9 @@ function App() {
                     if (!cloud || viewMode !== "2D-camera") return;
                     setShowSlice((v) => {
                       if (!v) {
-                        // ON にする時、ラインと計測マーカーをリセット
+                        // ON にする時、ラインをリセット
                         setSliceLineStart(null);
                         setSliceLineEnd(null);
-                        setSliceMeasureMode(false);
-                        setSliceMeasure({ a: null, b: null });
                       }
                       return !v;
                     });
