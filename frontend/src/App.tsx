@@ -1991,17 +1991,17 @@ function App() {
 
                 {/* 断層 出力/停止 トグルボタン */}
                 <button
-                  disabled={!cloud}
+                  disabled={!cloud || viewMode !== "2D-camera"}
                   style={{
                     ...buttonSecondaryStyle,
                     border: "none",
                     backgroundColor: showSlice ? colors.danger : "#3d5a80",
-                    cursor: cloud ? "pointer" : "not-allowed",
-                    opacity: cloud ? 1 : 0.5,
+                    cursor: cloud && viewMode === "2D-camera" ? "pointer" : "not-allowed",
+                    opacity: cloud && viewMode === "2D-camera" ? 1 : 0.5,
                     marginTop: "8px",
                   }}
                   onClick={() => {
-                    if (!cloud) return;
+                    if (!cloud || viewMode !== "2D-camera") return;
                     setShowSlice((v) => {
                       if (!v) {
                         // ON にする時、ラインをリセット
