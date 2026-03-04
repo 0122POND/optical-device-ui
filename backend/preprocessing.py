@@ -71,6 +71,24 @@ def _load_image(path: str) -> np.ndarray:
     return img.astype(np.float32)
 
 
+def _apply_peak_mask(peak_data: np.ndarray, keep_px: int = 45) -> np.ndarray:
+    """ピーク検出結果にマスクを適用（基準列の左右keep_px以外をゼロに）"""
+    n_images, h, w = peak_data.shape
+
+    # 各画像の列ごとの白画素数 (n_images, w)
+    col_counts = np.count_nonzero(peak_data > 128, axis=1)
+
+    # 各画像の基準列（白画素が最も多い列） (n_images,)
+    x0 = np.argmax(col_counts, axis=1)
+
+    # マスク: 基準列の左右keep_px内のみ保持 (n_images, 1, w)
+    col_idx = np.arange(w)[np.newaxis, :]
+    x0_col = x0[:, np.newaxis]
+    keep_mask = (col_idx >= x0_col - keep_px) & (col_idx <= x0_col + keep_px)
+
+    return np.where(keep_mask[:, np.newaxis, :], peak_data, 0)
+
+
 def _save_image(args: tuple) -> str:
     """画像を保存（並列処理用）"""
     save_path, data = args
@@ -98,7 +116,7 @@ def run_preprocess(
     Returns:
         {"peak_data": np.ndarray, "image_files": list, "output_files": list}
     """
-    total_steps = 7
+    total_steps = 8
 
     # 使用する配列モジュールを決定
     xp = get_array_module(use_gpu)
@@ -183,6 +201,10 @@ def run_preprocess(
 
     # GPUからCPUに転送
     peak_result_cpu = to_cpu(peak_result)
+
+    # Step 8: ピークマスク適用
+    report(8, "ピークマスクを適用中...")
+    peak_result_cpu = _apply_peak_mask(peak_result_cpu)
 
     # 出力ファイル名リストを生成（保存は呼び出し側で行う）
     output_files = []
