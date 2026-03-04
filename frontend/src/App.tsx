@@ -943,14 +943,12 @@ function App() {
       `断層 (${y0.toFixed(0)},${z0.toFixed(0)})→` +
       `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ${tData.length} pts`;
 
-    const distLabel = "距離 (µm)";
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
       title: titleText,
       margin: { l: 50, r: 20, t: 40, b: 50 },
-      xaxis: { title: distLabel, color: colors.text, gridcolor: colors.border },
-      yaxis: { title: "深さ (µm)", color: colors.text, gridcolor: colors.border },
+      xaxis: { title: { text: "距離 [µm]" }, color: colors.text, gridcolor: colors.border },
+      yaxis: { title: { text: "深さ [µm]" }, color: colors.text, gridcolor: colors.border },
       height: 250,
       paper_bgcolor: colors.bgDark,
       plot_bgcolor: colors.bgDark,
@@ -983,6 +981,7 @@ function App() {
       }
 
       // 表示初期化
+      setShowSlice(false);
       setShowPlot(true);
       setZData(null);
       setCloud(null);
@@ -1069,6 +1068,7 @@ function App() {
         return;
       }
       const newCloud = { x: xArr, y: yArr, z: zArr, c: cArr };
+      setShowSlice(false);
       setZData(grid);
       setCloud(newCloud);
       setShowPlot(true);
@@ -1091,6 +1091,7 @@ function App() {
 
   // AI結果を表示する処理
   const handleShowAIResult = async () => {
+    setShowSlice(false);
     setShowPlot(true);
     setCloud(null);
     setIsLoadingAI(true);
@@ -1993,17 +1994,17 @@ function App() {
 
                 {/* 断層 出力/停止 トグルボタン */}
                 <button
-                  disabled={!cloud}
+                  disabled={!cloud || viewMode !== "2D-camera"}
                   style={{
                     ...buttonSecondaryStyle,
                     border: "none",
                     backgroundColor: showSlice ? colors.danger : "#3d5a80",
-                    cursor: cloud ? "pointer" : "not-allowed",
-                    opacity: cloud ? 1 : 0.5,
+                    cursor: cloud && viewMode === "2D-camera" ? "pointer" : "not-allowed",
+                    opacity: cloud && viewMode === "2D-camera" ? 1 : 0.5,
                     marginTop: "8px",
                   }}
                   onClick={() => {
-                    if (!cloud) return;
+                    if (!cloud || viewMode !== "2D-camera") return;
                     setShowSlice((v) => {
                       if (!v) {
                         // ON にする時、ラインをリセット
@@ -2191,6 +2192,7 @@ function App() {
                                     cursor: "pointer",
                                   }}
                                   onClick={() => {
+                                    setShowSlice(false);
                                     setCloud(entry.cloud);
                                     setShowPlot(true);
                                   }}

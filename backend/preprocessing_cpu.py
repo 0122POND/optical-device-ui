@@ -181,6 +181,12 @@ def save_peak_results(
     """ピーク検出結果をディスクに保存する"""
     os.makedirs(result_path, exist_ok=True)
 
+    # 既存の結果ファイルをクリア
+    for old_file in os.listdir(result_path):
+        old_path = os.path.join(result_path, old_file)
+        if os.path.isfile(old_path):
+            os.remove(old_path)
+
     save_args = []
     output_files = []
     for i, fname in enumerate(image_files):
