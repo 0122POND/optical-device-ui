@@ -35,10 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 静的ファイル配信（dataディレクトリ）
 # backendディレクトリから実行されることを想定し、親ディレクトリのdataを参照
 DATA_DIR = Path(__file__).parent.parent / "data"
-app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 # スレッドプール（画像処理用）
 executor = ThreadPoolExecutor(max_workers=2)
@@ -65,6 +63,9 @@ async def serve_cached_result(filename: str):
         return Response(content=content, media_type=media_type)
 
     raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+# 静的ファイル配信（キャッシュルートより後に配置し、/data/result/* はキャッシュ優先）
+app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 
 # -----------------------------

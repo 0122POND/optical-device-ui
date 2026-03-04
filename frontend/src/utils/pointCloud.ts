@@ -111,7 +111,8 @@ export async function buildPointCloudFromFolder(options: {
     colorMode = "z",
   } = options;
 
-  const manifestUrl = `${folderUrl}/${manifestName}`;
+  const cacheKey = Date.now();
+  const manifestUrl = `${folderUrl}/${manifestName}?t=${cacheKey}`;
   const manRes = await fetch(manifestUrl);
   if (!manRes.ok) throw new Error(`manifest.json が読めません: ${manifestUrl}`);
   const manifest = (await manRes.json()) as Manifest;
@@ -137,7 +138,7 @@ export async function buildPointCloudFromFolder(options: {
 
   for (let zi = 0; zi < D; zi++) {
     const file = files[zi];
-    const url = `${folderUrl}/${file}`;
+    const url = `${folderUrl}/${file}?t=${cacheKey}`;
 
     const imgData = await loadImageAsImageData(url);
     width = imgData.width;
