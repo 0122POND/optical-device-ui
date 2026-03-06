@@ -170,13 +170,20 @@ async def ws_endpoint(ws: WebSocket):
         result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
         peak_threshold = int(params.get("peak_threshold", 10))
         use_gpu = params.get("use_gpu", True)
+        algorithm = params.get("algorithm", "coin")
 
         def blocking_preprocess():
-            # use_gpu に応じて適切なモジュールを動的にインポート
-            if use_gpu:
-                from preprocessing_gpu import run_preprocess
+            # use_gpu / algorithm に応じて適切なモジュールを動的にインポート
+            if algorithm == "tgv":
+                if use_gpu:
+                    from preprocessing_tgv_gpu import run_preprocess
+                else:
+                    from preprocessing_tgv import run_preprocess
             else:
-                from preprocessing_cpu import run_preprocess
+                if use_gpu:
+                    from preprocessing_gpu import run_preprocess
+                else:
+                    from preprocessing_cpu import run_preprocess
 
             result = run_preprocess(
                 data_path=data_path,
@@ -246,10 +253,16 @@ async def ws_endpoint(ws: WebSocket):
         image_files = result["image_files"]
 
         def background_save():
-            if use_gpu:
-                from preprocessing_gpu import save_peak_results
+            if algorithm == "tgv":
+                if use_gpu:
+                    from preprocessing_tgv_gpu import save_peak_results
+                else:
+                    from preprocessing_tgv import save_peak_results
             else:
-                from preprocessing_cpu import save_peak_results
+                if use_gpu:
+                    from preprocessing_gpu import save_peak_results
+                else:
+                    from preprocessing_cpu import save_peak_results
             save_peak_results(peak_data, image_files, result_path)
             # キャッシュクリアは次回の処理実行時に行う
             # （フロントエンドがまだフェッチ中の可能性があるため）

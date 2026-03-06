@@ -118,6 +118,7 @@ function App() {
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
+  const [algorithm, setAlgorithm] = useState<"coin" | "tgv">("coin");
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -361,6 +362,7 @@ function App() {
               samplePerSlice: 4000,
               flipZ: true,
               colorMode: "z",
+              ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
             setCloud(newCloud);
@@ -631,11 +633,14 @@ function App() {
           },
           aspectmode: "manual",
           aspectratio: (() => {
-            if (viewMode === "2D-camera") return { x: 0.01, y: 1.2, z: 1.2 };
-            // X/Yは表示上の長さを揃え、Zは実寸比で調整
-            const xRange = xUmMax - xUmMin || 1;
             const yRange = yUmMax - yUmMin || 1;
             const zRange = zUmMax - zUmMin || 1;
+            if (viewMode === "2D-camera") {
+              const yzMax = Math.max(yRange, zRange);
+              return { x: 0.01, y: (yRange / yzMax) * 1.2, z: (zRange / yzMax) * 1.2 };
+            }
+            // X/Yは表示上の長さを揃え、Zは実寸比で調整
+            const xRange = xUmMax - xUmMin || 1;
             const xyMax = Math.max(xRange, yRange);
             return {
               x: 1,
@@ -1008,6 +1013,7 @@ function App() {
               params: {
                 peak_threshold: 10,
                 use_gpu: useGpu,
+                algorithm: algorithm,
               },
             })
           );
@@ -1104,6 +1110,7 @@ function App() {
         samplePerSlice: 4000,
         flipZ: true,
         colorMode: "z",
+        ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
 
       setCloud(newCloud);
@@ -2070,6 +2077,31 @@ function App() {
             {/* 測定結果タブ */}
             {sideTab === "result" && (
               <>
+                {/* アルゴリズム選択 */}
+                <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
+                  {(["coin", "tgv"] as const).map((alg) => (
+                    <button
+                      key={alg}
+                      onClick={() => setAlgorithm(alg)}
+                      style={{
+                        flex: 1,
+                        height: "32px",
+                        borderRadius: "6px",
+                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
+                        color: algorithm === alg ? colors.primary : colors.textMuted,
+                        fontSize: "12px",
+                        fontWeight: algorithm === alg ? 600 : 400,
+                        fontFamily: fontFamily,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {alg === "coin" ? "硬貨" : "TGV"}
+                    </button>
+                  ))}
+                </div>
+
                 {cloud ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div
@@ -2322,7 +2354,7 @@ function App() {
               ) : (
                 <>
                   3次元形状計測を開始しますか？
-                  <br />（{useGpu ? "GPU" : "CPU"}モード）
+                  <br />（{useGpu ? "GPU" : "CPU"}モード / {algorithm === "tgv" ? "TGV" : "硬貨"}）
                 </>
               )}
             </div>
