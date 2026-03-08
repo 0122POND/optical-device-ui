@@ -145,7 +145,7 @@ function App() {
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
-  // 測定履歴（最大3件）
+  // 測定履歴（最大5件）
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
@@ -379,7 +379,7 @@ function App() {
               [
                 { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
                 ...prev,
-              ].slice(0, 3)
+              ].slice(0, 5)
             );
             console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
@@ -1087,7 +1087,7 @@ function App() {
         [
           { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
           ...prev,
-        ].slice(0, 3)
+        ].slice(0, 5)
       );
     };
     reader.readAsText(file);
@@ -2155,7 +2155,7 @@ function App() {
                         letterSpacing: "0.5px",
                       }}
                     >
-                      測定履歴（最新3件）
+                      測定履歴（最新5件）
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                       {cloudHistory.map((entry, i) => {
