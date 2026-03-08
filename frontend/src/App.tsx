@@ -151,9 +151,12 @@ function App() {
     measuredAt: string;
     points: number;
     thumbnail: string;
+    name: string;
   };
   const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
+  const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState("");
 
   // 点群から2Dサムネイル（data URL）を生成
   const generateThumbnail = (pc: PointCloud, size = 64): string => {
@@ -377,7 +380,13 @@ function App() {
             const thumb = generateThumbnail(newCloud);
             setCloudHistory((prev) =>
               [
-                { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
+                {
+                  cloud: newCloud,
+                  measuredAt: now,
+                  points: newCloud.x.length,
+                  thumbnail: thumb,
+                  name: "",
+                },
                 ...prev,
               ].slice(0, 5)
             );
@@ -1085,7 +1094,13 @@ function App() {
       const thumb = generateThumbnail(newCloud);
       setCloudHistory((prev) =>
         [
-          { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
+          {
+            cloud: newCloud,
+            measuredAt: now,
+            points: newCloud.x.length,
+            thumbnail: thumb,
+            name: "",
+          },
           ...prev,
         ].slice(0, 5)
       );
@@ -2188,9 +2203,49 @@ function App() {
                                 }}
                               />
                               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <span style={{ fontSize: "12px", fontWeight: 600 }}>
-                                  #{cloudHistory.length - i}
-                                </span>
+                                {editingNameIdx === i ? (
+                                  <input
+                                    autoFocus
+                                    value={editingNameValue}
+                                    onChange={(e) => setEditingNameValue(e.target.value)}
+                                    onBlur={() => {
+                                      setCloudHistory((prev) =>
+                                        prev.map((h, idx) =>
+                                          idx === i ? { ...h, name: editingNameValue.trim() } : h
+                                        )
+                                      );
+                                      setEditingNameIdx(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                      if (e.key === "Escape") setEditingNameIdx(null);
+                                    }}
+                                    placeholder={`#${cloudHistory.length - i}`}
+                                    style={{
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      fontFamily,
+                                      width: "100px",
+                                      padding: "1px 4px",
+                                      border: `1px solid ${colors.primary}`,
+                                      borderRadius: "3px",
+                                      backgroundColor: colors.bgDark,
+                                      color: colors.text,
+                                      outline: "none",
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    style={{ fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                                    title="クリックで名前を変更"
+                                    onClick={() => {
+                                      setEditingNameIdx(i);
+                                      setEditingNameValue(entry.name);
+                                    }}
+                                  >
+                                    {entry.name || `#${cloudHistory.length - i}`}
+                                  </span>
+                                )}
                                 <span style={{ fontSize: "11px", color: colors.textMuted }}>
                                   {entry.measuredAt}
                                 </span>
