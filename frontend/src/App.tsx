@@ -118,6 +118,7 @@ function App() {
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
+  const [algorithm, setAlgorithm] = useState<"coin" | "tgv">("coin");
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -144,15 +145,18 @@ function App() {
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
-  // 測定履歴（最大3件）
+  // 測定履歴（最大5件）
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
     points: number;
     thumbnail: string;
+    name: string;
   };
   const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
+  const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState("");
 
   // 点群から2Dサムネイル（data URL）を生成
   const generateThumbnail = (pc: PointCloud, size = 64): string => {
@@ -361,6 +365,7 @@ function App() {
               samplePerSlice: 4000,
               flipZ: true,
               colorMode: "z",
+              ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
             setCloud(newCloud);
@@ -375,9 +380,15 @@ function App() {
             const thumb = generateThumbnail(newCloud);
             setCloudHistory((prev) =>
               [
-                { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
+                {
+                  cloud: newCloud,
+                  measuredAt: now,
+                  points: newCloud.x.length,
+                  thumbnail: thumb,
+                  name: "",
+                },
                 ...prev,
-              ].slice(0, 3)
+              ].slice(0, 5)
             );
             console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
@@ -609,7 +620,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? { text: "Y [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: "Z [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -619,7 +630,7 @@ function App() {
           zaxis: {
             title: axisVisible
               ? {
-                  text: hasSweep ? "Z [µm]" : "Z (仮定値)",
+                  text: hasSweep ? "Y [µm]" : "Y (仮定値)",
                   font: { size: 12, color: "#ffffff" },
                 }
               : "",
@@ -631,11 +642,14 @@ function App() {
           },
           aspectmode: "manual",
           aspectratio: (() => {
-            if (viewMode === "2D-camera") return { x: 0.01, y: 1.2, z: 1.2 };
-            // X/Yは表示上の長さを揃え、Zは実寸比で調整
-            const xRange = xUmMax - xUmMin || 1;
             const yRange = yUmMax - yUmMin || 1;
             const zRange = zUmMax - zUmMin || 1;
+            if (viewMode === "2D-camera") {
+              const yzMax = Math.max(yRange, zRange);
+              return { x: 0.01, y: (yRange / yzMax) * 1.2, z: (zRange / yzMax) * 1.2 };
+            }
+            // X/Yは表示上の長さを揃え、Zは実寸比で調整
+            const xRange = xUmMax - xUmMin || 1;
             const xyMax = Math.max(xRange, yRange);
             return {
               x: 1,
@@ -1008,6 +1022,7 @@ function App() {
               params: {
                 peak_threshold: 10,
                 use_gpu: useGpu,
+                algorithm: algorithm,
               },
             })
           );
@@ -1079,9 +1094,15 @@ function App() {
       const thumb = generateThumbnail(newCloud);
       setCloudHistory((prev) =>
         [
-          { cloud: newCloud, measuredAt: now, points: newCloud.x.length, thumbnail: thumb },
+          {
+            cloud: newCloud,
+            measuredAt: now,
+            points: newCloud.x.length,
+            thumbnail: thumb,
+            name: "",
+          },
           ...prev,
-        ].slice(0, 3)
+        ].slice(0, 5)
       );
     };
     reader.readAsText(file);
@@ -1104,6 +1125,7 @@ function App() {
         samplePerSlice: 4000,
         flipZ: true,
         colorMode: "z",
+        ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
 
       setCloud(newCloud);
@@ -2070,6 +2092,31 @@ function App() {
             {/* 測定結果タブ */}
             {sideTab === "result" && (
               <>
+                {/* アルゴリズム選択 */}
+                <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
+                  {(["coin", "tgv"] as const).map((alg) => (
+                    <button
+                      key={alg}
+                      onClick={() => setAlgorithm(alg)}
+                      style={{
+                        flex: 1,
+                        height: "32px",
+                        borderRadius: "6px",
+                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
+                        color: algorithm === alg ? colors.primary : colors.textMuted,
+                        fontSize: "12px",
+                        fontWeight: algorithm === alg ? 600 : 400,
+                        fontFamily: fontFamily,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {alg === "coin" ? "硬貨" : "TGV"}
+                    </button>
+                  ))}
+                </div>
+
                 {cloud ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div
@@ -2123,7 +2170,7 @@ function App() {
                         letterSpacing: "0.5px",
                       }}
                     >
-                      測定履歴（最新3件）
+                      測定履歴（最新5件）
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                       {cloudHistory.map((entry, i) => {
@@ -2156,9 +2203,49 @@ function App() {
                                 }}
                               />
                               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <span style={{ fontSize: "12px", fontWeight: 600 }}>
-                                  #{cloudHistory.length - i}
-                                </span>
+                                {editingNameIdx === i ? (
+                                  <input
+                                    autoFocus
+                                    value={editingNameValue}
+                                    onChange={(e) => setEditingNameValue(e.target.value)}
+                                    onBlur={() => {
+                                      setCloudHistory((prev) =>
+                                        prev.map((h, idx) =>
+                                          idx === i ? { ...h, name: editingNameValue.trim() } : h
+                                        )
+                                      );
+                                      setEditingNameIdx(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                      if (e.key === "Escape") setEditingNameIdx(null);
+                                    }}
+                                    placeholder={`#${cloudHistory.length - i}`}
+                                    style={{
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      fontFamily,
+                                      width: "100px",
+                                      padding: "1px 4px",
+                                      border: `1px solid ${colors.primary}`,
+                                      borderRadius: "3px",
+                                      backgroundColor: colors.bgDark,
+                                      color: colors.text,
+                                      outline: "none",
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    style={{ fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                                    title="クリックで名前を変更"
+                                    onClick={() => {
+                                      setEditingNameIdx(i);
+                                      setEditingNameValue(entry.name);
+                                    }}
+                                  >
+                                    {entry.name || `#${cloudHistory.length - i}`}
+                                  </span>
+                                )}
                                 <span style={{ fontSize: "11px", color: colors.textMuted }}>
                                   {entry.measuredAt}
                                 </span>
@@ -2322,7 +2409,7 @@ function App() {
               ) : (
                 <>
                   3次元形状計測を開始しますか？
-                  <br />（{useGpu ? "GPU" : "CPU"}モード）
+                  <br />（{useGpu ? "GPU" : "CPU"}モード / {algorithm === "tgv" ? "TGV" : "硬貨"}）
                 </>
               )}
             </div>

@@ -106,7 +106,7 @@ export async function buildPointCloudFromFolder(options: {
     manifestName = "manifest.json",
     threshold,
     samplePerSlice,
-    maxTotalPoints = 100_000,
+    maxTotalPoints = 120_000,
     flipZ = true,
     colorMode = "z",
   } = options;
