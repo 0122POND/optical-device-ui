@@ -612,7 +612,7 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? { text: "X [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: "Z [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
@@ -620,7 +620,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? { text: "Z [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: "X [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
