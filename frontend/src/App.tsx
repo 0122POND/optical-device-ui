@@ -620,7 +620,7 @@ function App() {
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? { text: "Y [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: "Z [µm]", font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -630,7 +630,7 @@ function App() {
           zaxis: {
             title: axisVisible
               ? {
-                  text: hasSweep ? "Z [µm]" : "Z (仮定値)",
+                  text: hasSweep ? "Y [µm]" : "Y (仮定値)",
                   font: { size: 12, color: "#ffffff" },
                 }
               : "",
