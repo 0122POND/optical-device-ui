@@ -145,6 +145,10 @@ function App() {
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
+  // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
+  type PlotType = "scatter3d" | "surface";
+  const [plotType, setPlotType] = useState<PlotType>("scatter3d");
+
   // 測定履歴（最大5件）
   type CloudHistoryEntry = {
     cloud: PointCloud;
@@ -370,6 +374,7 @@ function App() {
 
             setCloud(newCloud);
             setZData(newGrid);
+            setPlotType("scatter3d");
             setIsAcquiring(false);
             setStatus("COMPLETE");
             setProgressMessage("完了");
@@ -472,6 +477,128 @@ function App() {
       Plotly.purge(plotEl);
       return;
     }
+
+    // surfaceモード: zDataのグリッドをそのままsurfaceプロットで描画
+    if (plotType === "surface" && zData && zData.length > 0) {
+      const numRows = zData.length;
+      const numCols = zData[0].length;
+
+      // -9999.9 (null) を NaN に変換して Plotly surface に渡す
+      const surfaceZ: (number | null)[][] = zData.map((row) =>
+        row.map((v) => (v == null ? null : v))
+      );
+
+      // X軸・Y軸の座標配列を生成（ピクセル単位）
+      const xCoords = Array.from({ length: numCols }, (_, i) => i);
+      const yCoords = Array.from({ length: numRows }, (_, i) => i);
+
+      // 高さ範囲を計算（null以外）
+      let hMin = Infinity,
+        hMax = -Infinity;
+      for (const row of zData) {
+        for (const v of row) {
+          if (v == null) continue;
+          if (v < hMin) hMin = v;
+          if (v > hMax) hMax = v;
+        }
+      }
+
+      const cam = (() => {
+        const azim = 20;
+        const elev = 10;
+        const az = (azim * Math.PI) / 180;
+        const el = (elev * Math.PI) / 180;
+        return {
+          eye: {
+            x: 2.0 * Math.cos(az) * Math.cos(el),
+            y: 2.0 * Math.sin(az) * Math.cos(el),
+            z: 2.0 * Math.sin(el) + 0.5,
+          },
+        };
+      })();
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const surfData: any[] = [
+        {
+          type: "surface",
+          x: xCoords,
+          y: yCoords,
+          z: surfaceZ,
+          colorscale: [
+            [0, "#0000ff"],
+            [0.25, "#00bfff"],
+            [0.5, "#00ff00"],
+            [0.75, "#ffbf00"],
+            [1, "#ff0000"],
+          ],
+          cmin: hMin,
+          cmax: hMax,
+          showscale: true,
+          colorbar: {
+            x: -0.05,
+            thickness: 18,
+            len: 0.9,
+            ypad: 10,
+            tickfont: { color: "#ffffff" },
+            title: { text: "Height [µm]", font: { color: "#ffffff", size: 11 }, side: "right" },
+          },
+          contours: {
+            z: { show: false },
+          },
+        },
+      ];
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const surfLayout: any = {
+        title: "",
+        autosize: true,
+        margin: { l: 0, r: 0, t: 30, b: 0 },
+        paper_bgcolor: "#000000",
+        scene: {
+          bgcolor: "#000000",
+          xaxis: {
+            title: axisVisible ? { text: "X [pixel]", font: { size: 12, color: "#ffffff" } } : "",
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          yaxis: {
+            title: axisVisible ? { text: "Y [pixel]", font: { size: 12, color: "#ffffff" } } : "",
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          zaxis: {
+            title: axisVisible ? { text: "Height [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: "#ffffff",
+            gridcolor: "#333333",
+          },
+          aspectmode: "manual",
+          aspectratio: {
+            x: 1,
+            y: 1,
+            z: Math.max((hMax - hMin) / Math.max(numCols, numRows), 0.15),
+          },
+          camera: cam,
+        },
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
+      Plotly.newPlot(plotEl, surfData, surfLayout, config);
+
+      return () => {
+        Plotly.purge(plotEl);
+      };
+    }
+
     if (!cloud) {
       Plotly.purge(plotEl);
       return;
@@ -735,6 +862,8 @@ function App() {
     sliceLineEnd,
     sweepInterval,
     sweepIntervalUnit,
+    plotType,
+    zData,
   ]);
 
   // --- 2D 断層グラフ描画 ---
@@ -1086,6 +1215,7 @@ function App() {
       setShowSlice(false);
       setZData(grid);
       setCloud(newCloud);
+      setPlotType("surface");
       setShowPlot(true);
       setStatus("COMPLETE");
       const now = new Date().toLocaleString("ja-JP");
@@ -1130,6 +1260,7 @@ function App() {
 
       setCloud(newCloud);
       setZData(newGrid);
+      setPlotType("scatter3d");
       setStatus("COMPLETE");
       setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
       setMeasureCount((c) => c + 1);
@@ -2086,6 +2217,38 @@ function App() {
                   </svg>
                   CSVファイルを読み込み
                 </button>
+
+                {/* 表示タイプ切替（Surface / Point Cloud） */}
+                {showPlot && zData && zData.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "4px",
+                      marginTop: "8px",
+                    }}
+                  >
+                    {(["surface", "scatter3d"] as const).map((pt) => (
+                      <button
+                        key={pt}
+                        onClick={() => setPlotType(pt)}
+                        style={{
+                          flex: 1,
+                          height: "32px",
+                          borderRadius: "6px",
+                          border: `1px solid ${plotType === pt ? colors.primary : colors.border}`,
+                          backgroundColor: plotType === pt ? colors.primary + "22" : "transparent",
+                          color: plotType === pt ? colors.primary : colors.textMuted,
+                          fontSize: "12px",
+                          fontWeight: plotType === pt ? 600 : 400,
+                          fontFamily: fontFamily,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {pt === "surface" ? "Surface" : "Point Cloud"}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
 
