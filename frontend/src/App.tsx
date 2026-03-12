@@ -528,13 +528,28 @@ function App() {
         // 光学デバイス: 列=Y方向ピクセル→µm, 行=Zスライス→µm, 値=X重心→µm
         surfXCoords = Array.from({ length: numCols }, (_, i) => i * UM_PER_PIXEL_Y);
         surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
-        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+        if (flipX) {
+          // 左右反転: X重心を反転してからµm変換
+          let maxRawX = -Infinity;
+          for (const row of zData) {
+            for (const v of row) {
+              if (v != null && v > maxRawX) maxRawX = v;
+            }
+          }
+          surfaceZ = zData.map((row) =>
+            row.map((v) => (v == null ? null : (maxRawX - v) * UM_PER_PIXEL_X))
+          );
+        } else {
+          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+        }
         xLabel = "X [µm]";
         yLabel = "Y [µm]";
         zLabel = "Z (Depth) [µm]";
       } else {
-        // CSV読み込み（Keyence等）: そのまま表示
-        surfXCoords = Array.from({ length: numCols }, (_, i) => i);
+        // CSV読み込み（Keyence等）: 左右反転時はX座標を逆順に
+        surfXCoords = flipX
+          ? Array.from({ length: numCols }, (_, i) => numCols - 1 - i)
+          : Array.from({ length: numCols }, (_, i) => i);
         surfYCoords = Array.from({ length: numRows }, (_, i) => i);
         surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v)));
         xLabel = "X [pixel]";
