@@ -469,6 +469,19 @@ function App() {
     return () => clearTimeout(timer);
   }, [showPlot, showSlice]);
 
+  // 再描画前のカメラ状態を保存・復元するヘルパー
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const getSavedCamera = (el: HTMLDivElement): any => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const curLayout = (el as any).layout;
+      if (curLayout?.scene?.camera) return curLayout.scene.camera;
+    } catch {
+      /* 初回描画時など */
+    }
+    return null;
+  };
+
   useEffect(() => {
     const plotEl = plotRef.current;
     if (!plotEl) return;
@@ -478,24 +491,61 @@ function App() {
       return;
     }
 
-    // surfaceモード: zDataのグリッドをそのままsurfaceプロットで描画
+    // 再描画前のカメラ状態を保存
+    const savedCamera = getSavedCamera(plotEl);
+
+    // surfaceモード: zDataのグリッドをsurfaceプロットで描画
+    // 光学デバイスのグリッド: grid[zSlice][yPixel] = xCentroid
+    //   → Keyence風に座標変換: X軸=Y方向[µm], Y軸=Z走査方向[µm], Z軸(高さ)=X深度[µm]
+    // CSV読み込み（Keyence等）: grid[row][col] = height → そのまま表示
     if (plotType === "surface" && zData && zData.length > 0) {
       const numRows = zData.length;
       const numCols = zData[0].length;
 
-      // -9999.9 (null) を NaN に変換して Plotly surface に渡す
-      const surfaceZ: (number | null)[][] = zData.map((row) =>
-        row.map((v) => (v == null ? null : v))
-      );
+      // 掃引間隔（µm/スライス）
+      const sweepVal = parseFloat(sweepInterval);
+      const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+      const zUmPerSlice = hasSweep
+        ? sweepIntervalUnit === "mm"
+          ? sweepVal * 1000
+          : sweepVal
+        : UM_PER_PIXEL_Y;
 
-      // X軸・Y軸の座標配列を生成（ピクセル単位）
-      const xCoords = Array.from({ length: numCols }, (_, i) => i);
-      const yCoords = Array.from({ length: numRows }, (_, i) => i);
+      // データソース判定: 値がピクセル座標っぽい（小さい値）なら光学デバイス、大きい値ならCSV（Keyence等）
+      // 光学デバイスのgrid値はX重心(0〜画像幅≒1000px)、KeyenceのCSV値は高さ(µm、数百〜)
+      // cloud が存在する場合は光学デバイス由来と判断
+      const isOpticalDevice = cloud !== null && cloud.x.length > 0;
 
-      // 高さ範囲を計算（null以外）
+      // 座標配列とsurface Z値を生成（µm単位に変換）
+      let surfXCoords: number[];
+      let surfYCoords: number[];
+      let surfaceZ: (number | null)[][];
+      let xLabel: string;
+      let yLabel: string;
+      let zLabel: string;
+
+      if (isOpticalDevice) {
+        // 光学デバイス: 列=Y方向ピクセル→µm, 行=Zスライス→µm, 値=X重心→µm
+        surfXCoords = Array.from({ length: numCols }, (_, i) => i * UM_PER_PIXEL_Y);
+        surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
+        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+        xLabel = "X [µm]";
+        yLabel = "Y [µm]";
+        zLabel = "Z (Depth) [µm]";
+      } else {
+        // CSV読み込み（Keyence等）: そのまま表示
+        surfXCoords = Array.from({ length: numCols }, (_, i) => i);
+        surfYCoords = Array.from({ length: numRows }, (_, i) => i);
+        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v)));
+        xLabel = "X [pixel]";
+        yLabel = "Y [pixel]";
+        zLabel = "Height [µm]";
+      }
+
+      // 高さ範囲を計算（変換後の値から）
       let hMin = Infinity,
         hMax = -Infinity;
-      for (const row of zData) {
+      for (const row of surfaceZ) {
         for (const v of row) {
           if (v == null) continue;
           if (v < hMin) hMin = v;
@@ -503,26 +553,35 @@ function App() {
         }
       }
 
-      const cam = (() => {
-        const azim = 20;
-        const elev = 10;
-        const az = (azim * Math.PI) / 180;
-        const el = (elev * Math.PI) / 180;
-        return {
-          eye: {
-            x: 2.0 * Math.cos(az) * Math.cos(el),
-            y: 2.0 * Math.sin(az) * Math.cos(el),
-            z: 2.0 * Math.sin(el) + 0.5,
-          },
-        };
-      })();
+      // 軸の物理範囲
+      const xRange = surfXCoords[surfXCoords.length - 1] - surfXCoords[0] || 1;
+      const yRange = surfYCoords[surfYCoords.length - 1] - surfYCoords[0] || 1;
+      const hRange = hMax - hMin || 1;
+      const xyMax = Math.max(xRange, yRange);
+
+      const cam =
+        viewMode === "2D-camera"
+          ? { eye: { x: 0, y: 0, z: 2.5 }, up: { x: 0, y: 1, z: 0 } }
+          : (() => {
+              const azim = 20;
+              const elev = 10;
+              const az = (azim * Math.PI) / 180;
+              const el = (elev * Math.PI) / 180;
+              return {
+                eye: {
+                  x: 2.0 * Math.cos(az) * Math.cos(el),
+                  y: 2.0 * Math.sin(az) * Math.cos(el),
+                  z: 2.0 * Math.sin(el) + 0.5,
+                },
+              };
+            })();
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const surfData: any[] = [
         {
           type: "surface",
-          x: xCoords,
-          y: yCoords,
+          x: surfXCoords,
+          y: surfYCoords,
           z: surfaceZ,
           colorscale: [
             [0, "#0000ff"],
@@ -540,7 +599,7 @@ function App() {
             len: 0.9,
             ypad: 10,
             tickfont: { color: "#ffffff" },
-            title: { text: "Height [µm]", font: { color: "#ffffff", size: 11 }, side: "right" },
+            title: { text: zLabel, font: { color: "#ffffff", size: 11 }, side: "right" },
           },
           contours: {
             z: { show: false },
@@ -557,15 +616,15 @@ function App() {
         scene: {
           bgcolor: "#000000",
           xaxis: {
-            title: axisVisible ? { text: "X [pixel]", font: { size: 12, color: "#ffffff" } } : "",
-            visible: axisVisible,
-            showgrid: axisVisible,
-            zeroline: axisVisible,
+            title: axisVisible ? { text: xLabel, font: { size: 12, color: "#ffffff" } } : "",
+            visible: viewMode === "3D" && axisVisible,
+            showgrid: viewMode === "3D" && axisVisible,
+            zeroline: viewMode === "3D" && axisVisible,
             color: "#ffffff",
             gridcolor: "#333333",
           },
           yaxis: {
-            title: axisVisible ? { text: "Y [pixel]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: yLabel, font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -573,7 +632,7 @@ function App() {
             gridcolor: "#333333",
           },
           zaxis: {
-            title: axisVisible ? { text: "Height [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: zLabel, font: { size: 12, color: "#ffffff" } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
@@ -581,18 +640,71 @@ function App() {
             gridcolor: "#333333",
           },
           aspectmode: "manual",
-          aspectratio: {
-            x: 1,
-            y: 1,
-            z: Math.max((hMax - hMin) / Math.max(numCols, numRows), 0.15),
-          },
-          camera: cam,
+          aspectratio:
+            viewMode === "2D-camera"
+              ? { x: xRange / xyMax, y: yRange / xyMax, z: 0.01 }
+              : {
+                  x: xRange / xyMax,
+                  y: yRange / xyMax,
+                  z: Math.max(hRange / xyMax, 0.15),
+                },
+          camera: savedCamera || cam,
+          ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
       };
+
+      // 2Dモード + 断層表示時、クリックで決めた始点・終点のラインを描画
+      if (viewMode === "2D-camera" && showSlice) {
+        const frontZ = hMax + hRange * 0.05;
+
+        if (sliceLineStart && sliceLineEnd) {
+          surfData.push({
+            type: "scatter3d",
+            mode: "lines+markers",
+            x: [sliceLineStart.y, sliceLineEnd.y],
+            y: [sliceLineStart.z, sliceLineEnd.z],
+            z: [frontZ, frontZ],
+            line: { color: "#ff4444", width: 3 },
+            marker: { size: 4, color: "#ff4444" },
+            showlegend: false,
+            hoverinfo: "skip",
+          });
+        } else if (sliceLineStart) {
+          surfData.push({
+            type: "scatter3d",
+            mode: "markers",
+            x: [sliceLineStart.y],
+            y: [sliceLineStart.z],
+            z: [frontZ],
+            marker: { size: 6, color: "#ff4444" },
+            showlegend: false,
+            hoverinfo: "skip",
+          });
+        }
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
       Plotly.newPlot(plotEl, surfData, surfLayout, config);
+
+      // 2Dモード + 断層表示時、クリックで始点・終点を設定
+      if (viewMode === "2D-camera" && showSlice) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_click", (eventData: any) => {
+          if (eventData.points && eventData.points.length > 0) {
+            const pt = {
+              y: eventData.points[0].x as number,
+              z: eventData.points[0].y as number,
+            };
+            if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
+              setSliceLineStart(pt);
+              setSliceLineEnd(null);
+            } else {
+              setSliceLineEnd(pt);
+            }
+          }
+        });
+      }
 
       return () => {
         Plotly.purge(plotEl);
@@ -784,7 +896,7 @@ function App() {
               z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
-          camera: cam,
+          camera: savedCamera || cam,
           // 2D-cameraではドラッグ回転を無効化
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
@@ -887,8 +999,10 @@ function App() {
 
     // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
     const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
+    // surfaceモードかつCSV由来: grid値がすでにµm（高さ）なので変換不要
+    const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
     const depthToUm = (rawVal: number) =>
-      flipX ? (maxRawX - rawVal) * UM_PER_PIXEL_X : rawVal * UM_PER_PIXEL_X;
+      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * UM_PER_PIXEL_X : rawVal * UM_PER_PIXEL_X;
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -913,11 +1027,13 @@ function App() {
       // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
       const numRows = zData.length;
       const numCols = zData[0].length;
+      // surfaceモードかつCSV由来（cloudなし）: クリック座標がピクセル単位なので変換不要
+      const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
       // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = y0 / UM_PER_PIXEL_Y;
-      const z0Px = z0 / zUmPerSlice;
-      const y1Px = y1 / UM_PER_PIXEL_Y;
-      const z1Px = z1 / zUmPerSlice;
+      const y0Px = isSurfaceCSV ? y0 : y0 / UM_PER_PIXEL_Y;
+      const z0Px = isSurfaceCSV ? z0 : z0 / zUmPerSlice;
+      const y1Px = isSurfaceCSV ? y1 : y1 / UM_PER_PIXEL_Y;
+      const z1Px = isSurfaceCSV ? z1 : z1 / zUmPerSlice;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
 
@@ -1115,6 +1231,7 @@ function App() {
     sweepInterval,
     sweepIntervalUnit,
     flipX,
+    plotType,
   ]);
 
   const handleConfirmOk = async () => {
@@ -2147,17 +2264,18 @@ function App() {
 
                 {/* 断層 出力/停止 トグルボタン */}
                 <button
-                  disabled={!cloud || viewMode !== "2D-camera"}
+                  disabled={(!cloud && !zData) || viewMode !== "2D-camera"}
                   style={{
                     ...buttonSecondaryStyle,
                     border: "none",
                     backgroundColor: showSlice ? colors.danger : "#3d5a80",
-                    cursor: cloud && viewMode === "2D-camera" ? "pointer" : "not-allowed",
-                    opacity: cloud && viewMode === "2D-camera" ? 1 : 0.5,
+                    cursor:
+                      (cloud || zData) && viewMode === "2D-camera" ? "pointer" : "not-allowed",
+                    opacity: (cloud || zData) && viewMode === "2D-camera" ? 1 : 0.5,
                     marginTop: "8px",
                   }}
                   onClick={() => {
-                    if (!cloud || viewMode !== "2D-camera") return;
+                    if ((!cloud && !zData) || viewMode !== "2D-camera") return;
                     setShowSlice((v) => {
                       if (!v) {
                         // ON にする時、ラインをリセット
