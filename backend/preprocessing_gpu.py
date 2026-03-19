@@ -10,6 +10,12 @@ import cv2
 import cupy as cp
 from cupyx.scipy.ndimage import gaussian_filter
 
+try:
+    import h5py
+    HDF5_AVAILABLE = True
+except ImportError:
+    HDF5_AVAILABLE = False
+
 # --- デフォルト設定 ---
 _DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
@@ -116,22 +122,36 @@ def run_preprocess(
         if progress_callback:
             progress_callback(step, total_steps, f"[GPU] {message}")
 
-    # Step 1: 画像の並列読み込み（CPUで読み込み）
+    # Step 1: 画像の読み込み（HDF5優先、なければ個別ファイル）
     report(1, "画像を読み込み中...")
-    image_files = sorted(
-        [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
-        key=lambda f: int(re.search(r'img_(\d+)', f).group(1))
-    )
 
-    if not image_files:
-        raise ValueError("画像が見つかりません")
+    data_dir = Path(data_path).resolve()
+    hdf5_path = data_dir.parent / f"{data_dir.name}.h5"
 
-    paths = [os.path.join(data_path, f) for f in image_files]
-    with ThreadPoolExecutor() as executor:
-        img_list = list(executor.map(_load_image, paths))
+    if HDF5_AVAILABLE and hdf5_path.exists():
+        # HDF5: 1ファイルからの一括読み込み（高速）
+        with h5py.File(str(hdf5_path), "r") as f:
+            images_np = f["images"][:]
+            image_files = list(f["filenames"][:])
+            if image_files and isinstance(image_files[0], bytes):
+                image_files = [n.decode() for n in image_files]
+    else:
+        # フォールバック: 個別ファイルの並列読み込み
+        image_files = sorted(
+            [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
+            key=lambda f: int(re.search(r'img_(\d+)', f).group(1))
+        )
 
-    n_images = len(img_list)
-    h, w = img_list[0].shape
+        if not image_files:
+            raise ValueError("画像が見つかりません")
+
+        paths = [os.path.join(data_path, f) for f in image_files]
+        with ThreadPoolExecutor() as executor:
+            img_list = list(executor.map(_load_image, paths))
+        images_np = np.stack(img_list)
+        del img_list
+
+    n_images, h, w = images_np.shape
     w_diff = w - 1
 
     # バッチサイズを自動決定
@@ -144,11 +164,9 @@ def run_preprocess(
     ROW_CHUNK = 64
     for row_start in range(0, h, ROW_CHUNK):
         row_end = min(row_start + ROW_CHUNK, h)
-        row_data = np.stack([img[row_start:row_end] for img in img_list])
-        bg_image_cpu[row_start:row_end] = np.median(row_data, axis=0).astype(
-            np.float32
-        )
-        del row_data
+        bg_image_cpu[row_start:row_end] = np.median(
+            images_np[:, row_start:row_end, :], axis=0
+        ).astype(np.float32)
     bg_gpu = cp.asarray(bg_image_cpu)
     del bg_image_cpu
 
@@ -158,7 +176,7 @@ def run_preprocess(
     global_max = 0.0
     for i in range(0, n_images, batch_size):
         end = min(i + batch_size, n_images)
-        batch = cp.stack([cp.asarray(img) for img in img_list[i:end]])
+        batch = cp.asarray(images_np[i:end])
         sub_bg = cp.maximum(batch - bg_gpu, 0)
         del batch
         diff_x = cp.abs(sub_bg[:, :, 1:] - sub_bg[:, :, :-1])
@@ -181,7 +199,7 @@ def run_preprocess(
         end = min(i + batch_size, n_images)
         report(4, f"横方向差分と強調処理中... ({end}/{n_images})")
 
-        batch = cp.stack([cp.asarray(img) for img in img_list[i:end]])
+        batch = cp.asarray(images_np[i:end])
         sub_bg = cp.maximum(batch - bg_gpu, 0)
         del batch
 
@@ -200,61 +218,81 @@ def run_preprocess(
         cp.get_default_memory_pool().free_all_blocks()
 
     # ここまでで不要になったデータを解放
-    del gauss_window, bg_gpu, img_list
+    del gauss_window, bg_gpu, images_np
     cp.get_default_memory_pool().free_all_blocks()
 
     # Step 6-7: 3Dガウスブラー→コントラスト正規化→ピーク検出
     # オーバーラップ付きバッチ処理（sigma=1のスタック方向ブラーのため隣接画像が必要）
+    # プリフェッチパイプライン: GPU計算中に次バッチのCPU→GPU転送を並行実行
     peak_result_cpu = np.zeros((n_images, h, w_diff), dtype=np.uint8)
 
-    for i in range(0, n_images, batch_size):
-        end = min(i + batch_size, n_images)
-        report(6, f"3次元スタックブラーを適用中... ({end}/{n_images})")
+    def _prefetch_chunk(gausswin_cpu, load_start, load_end):
+        """次のバッチをGPUに転送（バックグラウンドスレッドで実行）"""
+        return cp.asarray(gausswin_cpu[load_start:load_end])
 
-        # オーバーラップ付きでロード（ブラー境界のアーティファクト防止）
-        load_start = max(0, i - _BLUR_OVERLAP)
-        load_end = min(n_images, end + _BLUR_OVERLAP)
-        chunk = cp.asarray(gausswin_cpu[load_start:load_end])
+    def _calc_load_range(batch_start, batch_end):
+        """オーバーラップ付きの読み込み範囲を計算"""
+        return max(0, batch_start - _BLUR_OVERLAP), min(n_images, batch_end + _BLUR_OVERLAP)
 
-        # 3Dガウスフィルタ（sigma=(1,7,7): スタック方向1, 空間方向7）
-        blurred = gaussian_filter(chunk, sigma=(1, 7, 7))
-        del chunk
+    with ThreadPoolExecutor(max_workers=1) as prefetch_pool:
+        # 最初のバッチを先読み
+        first_ls, first_le = _calc_load_range(0, min(batch_size, n_images))
+        next_future = prefetch_pool.submit(_prefetch_chunk, gausswin_cpu, first_ls, first_le)
 
-        # オーバーラップを除去してコア部分を取得
-        trim_start = i - load_start
-        trim_end = trim_start + (end - i)
-        core = blurred[trim_start:trim_end]
-        del blurred
+        for i in range(0, n_images, batch_size):
+            end = min(i + batch_size, n_images)
+            report(6, f"3次元スタックブラーを適用中... ({end}/{n_images})")
 
-        # コントラスト正規化（画像ごと）
-        max_vals = cp.max(core, axis=(1, 2), keepdims=True)
-        max_vals = cp.where(max_vals == 0, 1, max_vals)
-        contrast = core / max_vals * 255
-        del core
+            load_start, _ = _calc_load_range(i, end)
 
-        # ピーク検出
-        report(7, f"ピーク検出を実行中... ({end}/{n_images})")
-        bn, bh, bw = contrast.shape
+            # 先読みしたチャンクを取得（準備完了まで待機）
+            chunk = next_future.result()
 
-        max_indices = cp.argmax(contrast, axis=2)
-        max_values = cp.take_along_axis(
-            contrast, max_indices[:, :, cp.newaxis], axis=2
-        ).squeeze(axis=2)
+            # 次のバッチの先読みを開始（現バッチのGPU計算と並行）
+            if end < n_images:
+                next_end = min(end + batch_size, n_images)
+                next_ls, next_le = _calc_load_range(end, next_end)
+                next_future = prefetch_pool.submit(_prefetch_chunk, gausswin_cpu, next_ls, next_le)
 
-        peak_batch = cp.zeros((bn, bh, bw), dtype=cp.uint8)
-        valid_mask = max_values >= peak_threshold
+            # 3Dガウスフィルタ（sigma=(1,7,7): スタック方向1, 空間方向7）
+            blurred = gaussian_filter(chunk, sigma=(1, 7, 7))
+            del chunk
 
-        img_idx, row_idx = cp.mgrid[:bn, :bh]
-        valid_img = img_idx[valid_mask]
-        valid_row = row_idx[valid_mask]
-        valid_col = max_indices[valid_mask]
+            # オーバーラップを除去してコア部分を取得
+            trim_start = i - load_start
+            trim_end = trim_start + (end - i)
+            core = blurred[trim_start:trim_end]
+            del blurred
 
-        peak_batch[valid_img, valid_row, valid_col] = 255
-        peak_batch[:, :, :-1] |= peak_batch[:, :, 1:]
+            # コントラスト正規化（画像ごと）
+            max_vals = cp.max(core, axis=(1, 2), keepdims=True)
+            max_vals = cp.where(max_vals == 0, 1, max_vals)
+            contrast = core / max_vals * 255
+            del core
 
-        peak_result_cpu[i:end] = cp.asnumpy(peak_batch)
-        del contrast, max_indices, max_values, peak_batch
-        cp.get_default_memory_pool().free_all_blocks()
+            # ピーク検出
+            report(7, f"ピーク検出を実行中... ({end}/{n_images})")
+            bn, bh, bw = contrast.shape
+
+            max_indices = cp.argmax(contrast, axis=2)
+            max_values = cp.take_along_axis(
+                contrast, max_indices[:, :, cp.newaxis], axis=2
+            ).squeeze(axis=2)
+
+            peak_batch = cp.zeros((bn, bh, bw), dtype=cp.uint8)
+            valid_mask = max_values >= peak_threshold
+
+            img_idx, row_idx = cp.mgrid[:bn, :bh]
+            valid_img = img_idx[valid_mask]
+            valid_row = row_idx[valid_mask]
+            valid_col = max_indices[valid_mask]
+
+            peak_batch[valid_img, valid_row, valid_col] = 255
+            peak_batch[:, :, :-1] |= peak_batch[:, :, 1:]
+
+            peak_result_cpu[i:end] = cp.asnumpy(peak_batch)
+            del contrast, max_indices, max_values, peak_batch
+            cp.get_default_memory_pool().free_all_blocks()
 
     del gausswin_cpu
 

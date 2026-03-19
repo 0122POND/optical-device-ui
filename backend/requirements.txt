@@ -6,6 +6,7 @@ fastapi>=0.68.0
 uvicorn>=0.15.0
 websockets>=10.0
 Pillow>=8.0.0
+h5py>=3.0.0
 
 # GPU support (optional)
 # Install CuPy according to your CUDA version:

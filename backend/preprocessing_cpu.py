@@ -9,6 +9,12 @@ from typing import Callable, Optional, List
 import cv2
 from scipy.ndimage import gaussian_filter1d
 
+try:
+    import h5py
+    HDF5_AVAILABLE = True
+except ImportError:
+    HDF5_AVAILABLE = False
+
 # --- デフォルト設定 ---
 _DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
@@ -90,21 +96,35 @@ def run_preprocess(
         if progress_callback:
             progress_callback(step, total_steps, f"[CPU] {message}")
 
-    # Step 1: 画像の並列読み込み
+    # Step 1: 画像の読み込み（HDF5優先、なければ個別ファイル）
     report(1, "画像を読み込み中...")
-    image_files = sorted(
-        [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
-        key=lambda f: int(re.search(r'img_(\d+)', f).group(1))
-    )
 
-    if not image_files:
-        raise ValueError("画像が見つかりません")
+    data_dir = Path(data_path).resolve()
+    hdf5_path = data_dir.parent / f"{data_dir.name}.h5"
 
-    paths = [os.path.join(data_path, f) for f in image_files]
-    with ThreadPoolExecutor() as executor:
-        img_list = list(executor.map(_load_image, paths))
+    if HDF5_AVAILABLE and hdf5_path.exists():
+        # HDF5: 1ファイルからの一括読み込み（高速）
+        with h5py.File(str(hdf5_path), "r") as f:
+            images = f["images"][:]
+            image_files = list(f["filenames"][:])
+            if image_files and isinstance(image_files[0], bytes):
+                image_files = [n.decode() for n in image_files]
+    else:
+        # フォールバック: 個別ファイルの並列読み込み
+        image_files = sorted(
+            [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
+            key=lambda f: int(re.search(r'img_(\d+)', f).group(1))
+        )
 
-    images = np.stack(img_list)
+        if not image_files:
+            raise ValueError("画像が見つかりません")
+
+        paths = [os.path.join(data_path, f) for f in image_files]
+        with ThreadPoolExecutor() as executor:
+            img_list = list(executor.map(_load_image, paths))
+
+        images = np.stack(img_list)
+        del img_list
 
     # Step 2: 中央値画像の計算
     report(2, "背景画像を計算中...")
