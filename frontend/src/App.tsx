@@ -142,6 +142,7 @@ function App() {
     pt1: null,
     pt2: null,
   });
+  const measureLockRef = useRef(false);
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
@@ -705,6 +706,22 @@ function App() {
         }
       }
 
+      // 距離計測マーカー
+      if (measureMode && measurePt1) {
+        const ms = measureStateRef.current;
+        surfData.push({
+          type: "scatter3d",
+          mode: ms.pt2 ? "markers+lines" : "markers",
+          x: ms.pt2 ? [measurePt1.x, ms.pt2.x] : [measurePt1.x],
+          y: ms.pt2 ? [measurePt1.y, ms.pt2.y] : [measurePt1.y],
+          z: ms.pt2 ? [measurePt1.z, ms.pt2.z] : [measurePt1.z],
+          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
+          line: { color: "#ffffff", width: 4, dash: "dash" },
+          showlegend: false,
+          hoverinfo: "skip",
+        });
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
       Plotly.newPlot(plotEl, surfData, surfLayout, config);
@@ -718,6 +735,8 @@ function App() {
         if (measureStateRef.current.mode) {
           const s = measureStateRef.current;
           if (s.pt1 && s.pt2) return;
+          if (measureLockRef.current) return;
+          measureLockRef.current = true;
           const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
           if (!s.pt1) {
             measureStateRef.current = { ...s, pt1: pt3 };
@@ -726,6 +745,9 @@ function App() {
             measureStateRef.current = { ...s, pt2: pt3 };
             setMeasurePt2(pt3);
           }
+          setTimeout(() => {
+            measureLockRef.current = false;
+          }, 300);
           return;
         }
 
@@ -970,6 +992,22 @@ function App() {
       }
     }
 
+    // 距離計測マーカー
+    if (measureMode && measurePt1) {
+      const ms = measureStateRef.current;
+      data.push({
+        type: "scatter3d",
+        mode: ms.pt2 ? "markers+lines" : "markers",
+        x: ms.pt2 ? [measurePt1.x, ms.pt2.x] : [measurePt1.x],
+        y: ms.pt2 ? [measurePt1.y, ms.pt2.y] : [measurePt1.y],
+        z: ms.pt2 ? [measurePt1.z, ms.pt2.z] : [measurePt1.z],
+        marker: { size: 3, color: "#ffffff", symbol: "diamond" },
+        line: { color: "#ffffff", width: 4, dash: "dash" },
+        showlegend: false,
+        hoverinfo: "skip",
+      });
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
@@ -1024,42 +1062,10 @@ function App() {
     sweepIntervalUnit,
     plotType,
     zData,
+    measureMode,
+    measurePt1,
+    measurePt2,
   ]);
-
-  // --- 距離計測マーカー描画（2点揃った時のみ表示） ---
-  useEffect(() => {
-    const el = plotRef.current;
-    if (!el) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const plotData = (el as any).data;
-    if (!plotData) return;
-
-    // 既存のマーカートレースを削除
-    const markerIndices = plotData
-      .map((_: unknown, i: number) => i)
-      .filter((i: number) => plotData[i].name === "__measure_marker__")
-      .reverse();
-    if (markerIndices.length > 0) {
-      Plotly.deleteTraces(el, markerIndices);
-    }
-
-    // 2点揃った時のみマーカー+線を追加（この時点でクリックはrefガードで無視される）
-    if (measureMode && measurePt1 && measurePt2) {
-      Plotly.addTraces(el, {
-        type: "scatter3d",
-        mode: "markers+lines",
-        name: "__measure_marker__",
-        x: [measurePt1.x, measurePt2.x],
-        y: [measurePt1.y, measurePt2.y],
-        z: [measurePt1.z, measurePt2.z],
-        marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-        line: { color: "#ffffff", width: 4, dash: "dash" },
-        showlegend: false,
-        hoverinfo: "skip",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-    }
-  }, [measureMode, measurePt1, measurePt2]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
