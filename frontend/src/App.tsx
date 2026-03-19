@@ -120,7 +120,7 @@ function App() {
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
-  const [algorithm, setAlgorithm] = useState<"coin" | "tgv">("coin");
+  const [algorithm, setAlgorithm] = useState<"coin" | "tgv" | "step">("coin");
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -2340,7 +2340,7 @@ function App() {
                   アルゴリズム
                 </div>
                 <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
-                  {(["coin", "tgv"] as const).map((alg) => (
+                  {(["coin", "tgv", "step"] as const).map((alg) => (
                     <button
                       key={alg}
                       onClick={() => setAlgorithm(alg)}
@@ -2359,7 +2359,7 @@ function App() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "6px",
+                        gap: "4px",
                       }}
                     >
                       {alg === "coin" ? (
@@ -2379,7 +2379,7 @@ function App() {
                           </svg>
                           硬貨
                         </>
-                      ) : (
+                      ) : alg === "tgv" ? (
                         <>
                           <svg
                             width="16"
@@ -2395,6 +2395,22 @@ function App() {
                             <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
                           </svg>
                           TGV
+                        </>
+                      ) : (
+                        <>
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M2 16h8V8h4v8h8" />
+                          </svg>
+                          段差
                         </>
                       )}
                     </button>
@@ -3064,7 +3080,8 @@ function App() {
               ) : (
                 <>
                   3次元形状計測を開始しますか？
-                  <br />（{useGpu ? "GPU" : "CPU"}モード / {algorithm === "tgv" ? "TGV" : "硬貨"}）
+                  <br />（{useGpu ? "GPU" : "CPU"}モード /{" "}
+                  {algorithm === "tgv" ? "TGV" : algorithm === "step" ? "段差マスタ" : "硬貨"}）
                 </>
               )}
             </div>
