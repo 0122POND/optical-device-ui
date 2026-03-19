@@ -96,6 +96,8 @@ function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cameraRef = useRef<any>(null);
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
@@ -483,16 +485,17 @@ function App() {
   }, [showPlot, showSlice]);
 
   // 再描画前のカメラ状態を保存・復元するヘルパー
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const getSavedCamera = (el: HTMLDivElement): any => {
+   
+  const saveCameraState = (el: HTMLDivElement) => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const curLayout = (el as any).layout;
-      if (curLayout?.scene?.camera) return curLayout.scene.camera;
+      if (curLayout?.scene?.camera) {
+        cameraRef.current = curLayout.scene.camera;
+      }
     } catch {
       /* 初回描画時など */
     }
-    return null;
   };
 
   useEffect(() => {
@@ -504,8 +507,7 @@ function App() {
       return;
     }
 
-    // 再描画前のカメラ状態を保存
-    const savedCamera = getSavedCamera(plotEl);
+    const savedCamera = cameraRef.current;
 
     // surfaceモード: zDataのグリッドをsurfaceプロットで描画
     // 光学デバイスのグリッド: grid[zSlice][yPixel] = xCentroid
@@ -711,6 +713,34 @@ function App() {
         }
       }
 
+      // 距離計測マーカー
+      if (measureMode && measurePt1) {
+        if (measurePt2) {
+          surfData.push({
+            type: "scatter3d",
+            mode: "markers+lines",
+            x: [measurePt1.x, measurePt2.x],
+            y: [measurePt1.y, measurePt2.y],
+            z: [measurePt1.z, measurePt2.z],
+            marker: { size: 3, color: "#f59e0b", symbol: "diamond" },
+            line: { color: "#f59e0b", width: 4, dash: "dash" },
+            showlegend: false,
+            hoverinfo: "skip",
+          });
+        } else {
+          surfData.push({
+            type: "scatter3d",
+            mode: "markers",
+            x: [measurePt1.x],
+            y: [measurePt1.y],
+            z: [measurePt1.z],
+            marker: { size: 3, color: "#f59e0b", symbol: "diamond" },
+            showlegend: false,
+            hoverinfo: "skip",
+          });
+        }
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
       Plotly.newPlot(plotEl, surfData, surfLayout, config);
@@ -720,12 +750,12 @@ function App() {
         if (!eventData.points || eventData.points.length === 0) return;
         const p = eventData.points[0];
 
-        // 距離計測モード
+        // 距離計測モード（2点選択済みなら無視）
         if (measureModeRef.current) {
+          if (measurePt1Ref.current && measurePt2Ref.current) return;
           const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-          if (!measurePt1Ref.current || (measurePt1Ref.current && measurePt2Ref.current)) {
+          if (!measurePt1Ref.current) {
             setMeasurePt1(pt3);
-            setMeasurePt2(null);
           } else {
             setMeasurePt2(pt3);
           }
@@ -745,6 +775,7 @@ function App() {
       });
 
       return () => {
+        saveCameraState(plotEl);
         Plotly.purge(plotEl);
       };
     }
@@ -972,6 +1003,34 @@ function App() {
       }
     }
 
+    // 距離計測マーカー
+    if (measureMode && measurePt1) {
+      if (measurePt2) {
+        data.push({
+          type: "scatter3d",
+          mode: "markers+lines",
+          x: [measurePt1.x, measurePt2.x],
+          y: [measurePt1.y, measurePt2.y],
+          z: [measurePt1.z, measurePt2.z],
+          marker: { size: 3, color: "#f59e0b", symbol: "diamond" },
+          line: { color: "#f59e0b", width: 4, dash: "dash" },
+          showlegend: false,
+          hoverinfo: "skip",
+        });
+      } else {
+        data.push({
+          type: "scatter3d",
+          mode: "markers",
+          x: [measurePt1.x],
+          y: [measurePt1.y],
+          z: [measurePt1.z],
+          marker: { size: 3, color: "#f59e0b", symbol: "diamond" },
+          showlegend: false,
+          hoverinfo: "skip",
+        });
+      }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
@@ -982,12 +1041,12 @@ function App() {
       if (!eventData.points || eventData.points.length === 0) return;
       const p = eventData.points[0];
 
-      // 距離計測モード
+      // 距離計測モード（2点選択済みなら無視）
       if (measureModeRef.current) {
+        if (measurePt1Ref.current && measurePt2Ref.current) return;
         const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-        if (!measurePt1Ref.current || (measurePt1Ref.current && measurePt2Ref.current)) {
+        if (!measurePt1Ref.current) {
           setMeasurePt1(pt3);
-          setMeasurePt2(null);
         } else {
           setMeasurePt2(pt3);
         }
@@ -1007,6 +1066,7 @@ function App() {
     });
 
     return () => {
+      saveCameraState(plotEl);
       Plotly.purge(plotEl);
     };
   }, [
@@ -1022,6 +1082,9 @@ function App() {
     sweepIntervalUnit,
     plotType,
     zData,
+    measureMode,
+    measurePt1,
+    measurePt2,
   ]);
 
   // --- 2D 断層グラフ描画 ---
@@ -2477,28 +2540,51 @@ function App() {
                       </span>
                     </div>
                     {measurePt1 && measurePt2 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          borderTop: `1px solid #3a5068`,
-                          paddingTop: "6px",
-                          fontWeight: 600,
-                          color: "#f59e0b",
-                        }}
-                      >
-                        <span>距離</span>
-                        <span>
-                          {(() => {
-                            const d = Math.sqrt(
-                              (measurePt2.x - measurePt1.x) ** 2 +
-                                (measurePt2.y - measurePt1.y) ** 2 +
-                                (measurePt2.z - measurePt1.z) ** 2
-                            );
-                            return d >= 1000 ? `${(d / 1000).toFixed(3)} mm` : `${d.toFixed(2)} µm`;
-                          })()}
-                        </span>
-                      </div>
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            borderTop: `1px solid #3a5068`,
+                            paddingTop: "6px",
+                            fontWeight: 600,
+                            color: "#f59e0b",
+                          }}
+                        >
+                          <span>距離</span>
+                          <span>
+                            {(() => {
+                              const d = Math.sqrt(
+                                (measurePt2.x - measurePt1.x) ** 2 +
+                                  (measurePt2.y - measurePt1.y) ** 2 +
+                                  (measurePt2.z - measurePt1.z) ** 2
+                              );
+                              return d >= 1000
+                                ? `${(d / 1000).toFixed(3)} mm`
+                                : `${d.toFixed(2)} µm`;
+                            })()}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setMeasurePt1(null);
+                            setMeasurePt2(null);
+                          }}
+                          style={{
+                            marginTop: "6px",
+                            padding: "6px 0",
+                            borderRadius: "4px",
+                            border: `1px solid #3a5068`,
+                            backgroundColor: "transparent",
+                            color: colors.textMuted,
+                            fontSize: "11px",
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          再計測
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
