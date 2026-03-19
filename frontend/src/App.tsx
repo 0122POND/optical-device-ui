@@ -2424,7 +2424,7 @@ function App() {
                     disabled={status === "RUNNING" || isLoadingAI}
                     style={{
                       ...buttonSecondaryStyle,
-                      backgroundColor: "#7c3aed",
+                      backgroundColor: "#0d9488",
                       border: "none",
                       cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
                       opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
@@ -2442,9 +2442,17 @@ function App() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
+                      <circle cx="5" cy="6" r="2" />
+                      <circle cx="19" cy="6" r="2" />
+                      <circle cx="5" cy="18" r="2" />
+                      <circle cx="19" cy="18" r="2" />
+                      <circle cx="12" cy="12" r="2.5" />
+                      <line x1="7" y1="7" x2="10" y2="10" />
+                      <line x1="14" y1="10" x2="17" y2="7" />
+                      <line x1="7" y1="17" x2="10" y2="14" />
+                      <line x1="14" y1="14" x2="17" y2="17" />
                     </svg>
-                    {isLoadingAI ? "読込中..." : "AI結果"}
+                    {isLoadingAI ? "読込中..." : "AI"}
                   </button>
 
                   {/* CSV出力ボタン */}
