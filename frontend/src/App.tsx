@@ -713,34 +713,6 @@ function App() {
         }
       }
 
-      // 距離計測マーカー
-      if (measureMode && measurePt1) {
-        if (measurePt2) {
-          surfData.push({
-            type: "scatter3d",
-            mode: "markers+lines",
-            x: [measurePt1.x, measurePt2.x],
-            y: [measurePt1.y, measurePt2.y],
-            z: [measurePt1.z, measurePt2.z],
-            marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-            line: { color: "#ffffff", width: 4, dash: "dash" },
-            showlegend: false,
-            hoverinfo: "skip",
-          });
-        } else {
-          surfData.push({
-            type: "scatter3d",
-            mode: "markers",
-            x: [measurePt1.x],
-            y: [measurePt1.y],
-            z: [measurePt1.z],
-            marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-            showlegend: false,
-            hoverinfo: "skip",
-          });
-        }
-      }
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
       Plotly.newPlot(plotEl, surfData, surfLayout, config);
@@ -1003,34 +975,6 @@ function App() {
       }
     }
 
-    // 距離計測マーカー
-    if (measureMode && measurePt1) {
-      if (measurePt2) {
-        data.push({
-          type: "scatter3d",
-          mode: "markers+lines",
-          x: [measurePt1.x, measurePt2.x],
-          y: [measurePt1.y, measurePt2.y],
-          z: [measurePt1.z, measurePt2.z],
-          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-          line: { color: "#ffffff", width: 4, dash: "dash" },
-          showlegend: false,
-          hoverinfo: "skip",
-        });
-      } else {
-        data.push({
-          type: "scatter3d",
-          mode: "markers",
-          x: [measurePt1.x],
-          y: [measurePt1.y],
-          z: [measurePt1.z],
-          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-          showlegend: false,
-          hoverinfo: "skip",
-        });
-      }
-    }
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
@@ -1082,10 +1026,57 @@ function App() {
     sweepIntervalUnit,
     plotType,
     zData,
-    measureMode,
-    measurePt1,
-    measurePt2,
   ]);
+
+  // --- 距離計測マーカー描画（メインプロットとは独立） ---
+  useEffect(() => {
+    const el = plotRef.current;
+    if (!el) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plotData = (el as any).data;
+    if (!plotData) return;
+
+    // 既存のマーカートレースを削除
+    const markerIndices = plotData
+      .map((_: unknown, i: number) => i)
+      .filter((i: number) => plotData[i].name === "__measure_marker__")
+      .reverse();
+    if (markerIndices.length > 0) {
+      Plotly.deleteTraces(el, markerIndices);
+    }
+
+    // マーカー追加
+    if (measureMode && measurePt1) {
+      if (measurePt2) {
+        Plotly.addTraces(el, {
+          type: "scatter3d",
+          mode: "markers+lines",
+          name: "__measure_marker__",
+          x: [measurePt1.x, measurePt2.x],
+          y: [measurePt1.y, measurePt2.y],
+          z: [measurePt1.z, measurePt2.z],
+          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
+          line: { color: "#ffffff", width: 4, dash: "dash" },
+          showlegend: false,
+          hoverinfo: "skip",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+      } else {
+        Plotly.addTraces(el, {
+          type: "scatter3d",
+          mode: "markers",
+          name: "__measure_marker__",
+          x: [measurePt1.x],
+          y: [measurePt1.y],
+          z: [measurePt1.z],
+          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
+          showlegend: false,
+          hoverinfo: "skip",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+      }
+    }
+  }, [measureMode, measurePt1, measurePt2]);
 
   // --- 2D 断層グラフ描画 ---
   useEffect(() => {
@@ -2323,7 +2314,7 @@ function App() {
                       onChange={(e) => setSweepInterval(e.target.value)}
                       style={{
                         ...inputStyle,
-                        flex: 1,
+                        width: "100px",
                         height: "32px",
                         padding: "4px 10px",
                       }}
@@ -2421,7 +2412,7 @@ function App() {
                       border: "none",
                       cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
                       opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                     onClick={handleShowAIResult}
                   >
@@ -2446,7 +2437,7 @@ function App() {
                       ...buttonSecondaryStyle,
                       backgroundColor: "#1e2d42",
                       border: `1px solid #3a5068`,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                     onClick={() => {
                       setConfirmMode("csv");
@@ -2483,7 +2474,7 @@ function App() {
                       border: `1px solid #3a5068`,
                       cursor: showPlot ? "pointer" : "not-allowed",
                       opacity: showPlot ? 1 : 0.5,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                   >
                     <svg
@@ -2519,7 +2510,7 @@ function App() {
                       border: `1px solid #3a5068`,
                       cursor: showPlot ? "pointer" : "not-allowed",
                       opacity: showPlot ? 1 : 0.5,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                   >
                     <svg
@@ -2559,7 +2550,7 @@ function App() {
                       border: `1px solid ${measureMode ? "#d97706" : "#3a5068"}`,
                       cursor: showPlot ? "pointer" : "not-allowed",
                       opacity: showPlot ? 1 : 0.5,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                   >
                     <svg
@@ -2589,7 +2580,7 @@ function App() {
                       cursor:
                         (cloud || zData) && viewMode === "2D-camera" ? "pointer" : "not-allowed",
                       opacity: (cloud || zData) && viewMode === "2D-camera" ? 1 : 0.5,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                     onClick={() => {
                       if ((!cloud && !zData) || viewMode !== "2D-camera") return;
@@ -2631,7 +2622,7 @@ function App() {
                       ...buttonSecondaryStyle,
                       backgroundColor: "#1e2d42",
                       border: `1px solid #3a5068`,
-                      fontSize: "11px",
+                      fontSize: "12px",
                     }}
                     onClick={() => csvInputRef.current?.click()}
                   >
@@ -2741,34 +2732,39 @@ function App() {
 
                 {/* 表示タイプ切替（Surface / Point Cloud） */}
                 {showPlot && zData && zData.length > 0 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "4px",
-                      marginTop: "8px",
-                    }}
-                  >
-                    {(["surface", "scatter3d"] as const).map((pt) => (
-                      <button
-                        key={pt}
-                        onClick={() => setPlotType(pt)}
-                        style={{
-                          flex: 1,
-                          height: "32px",
-                          borderRadius: "6px",
-                          border: `1px solid ${plotType === pt ? colors.primary : colors.border}`,
-                          backgroundColor: plotType === pt ? colors.primary + "22" : "transparent",
-                          color: plotType === pt ? colors.primary : colors.textMuted,
-                          fontSize: "12px",
-                          fontWeight: plotType === pt ? 600 : 400,
-                          fontFamily: fontFamily,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {pt === "surface" ? "Surface" : "Point Cloud"}
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}>
+                      描画モード
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "4px",
+                      }}
+                    >
+                      {(["surface", "scatter3d"] as const).map((pt) => (
+                        <button
+                          key={pt}
+                          onClick={() => setPlotType(pt)}
+                          style={{
+                            flex: 1,
+                            height: "32px",
+                            borderRadius: "6px",
+                            border: `1px solid ${plotType === pt ? colors.primary : colors.border}`,
+                            backgroundColor:
+                              plotType === pt ? colors.primary + "22" : "transparent",
+                            color: plotType === pt ? colors.primary : colors.textMuted,
+                            fontSize: "12px",
+                            fontWeight: plotType === pt ? 600 : 400,
+                            fontFamily: fontFamily,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {pt === "surface" ? "Surface" : "Point Cloud"}
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </>
             )}
