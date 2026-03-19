@@ -130,17 +130,30 @@ function App() {
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
   const [sliceLineEnd, setSliceLineEnd] = useState<{ y: number; z: number } | null>(null);
 
+  // 距離計測
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measurePt1, setMeasurePt1] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [measurePt2, setMeasurePt2] = useState<{ x: number; y: number; z: number } | null>(null);
+  const measureModeRef = useRef(false);
+  const measurePt1Ref = useRef<{ x: number; y: number; z: number } | null>(null);
+  const measurePt2Ref = useRef<{ x: number; y: number; z: number } | null>(null);
+
+  // refをstateに同期
+  useEffect(() => {
+    measureModeRef.current = measureMode;
+  }, [measureMode]);
+  useEffect(() => {
+    measurePt1Ref.current = measurePt1;
+  }, [measurePt1]);
+  useEffect(() => {
+    measurePt2Ref.current = measurePt2;
+  }, [measurePt2]);
+
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("100");
-  const [sweepRange, setSweepRange] = useState("");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
-  const [sweepRangeUnit, setSweepRangeUnit] = useState<"um" | "mm">("um");
-
-  // 次の掃引までの時間間隔 & 単位 (s / ms)
-  const [sweepTimeInterval, setSweepTimeInterval] = useState("");
-  const [sweepTimeUnit, setSweepTimeUnit] = useState<"s" | "ms">("ms");
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
@@ -702,24 +715,34 @@ function App() {
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
       Plotly.newPlot(plotEl, surfData, surfLayout, config);
 
-      // 2Dモード + 断層表示時、クリックで始点・終点を設定
-      if (viewMode === "2D-camera" && showSlice) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (plotEl as any).on("plotly_click", (eventData: any) => {
-          if (eventData.points && eventData.points.length > 0) {
-            const pt = {
-              y: eventData.points[0].x as number,
-              z: eventData.points[0].y as number,
-            };
-            if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
-              setSliceLineStart(pt);
-              setSliceLineEnd(null);
-            } else {
-              setSliceLineEnd(pt);
-            }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_click", (eventData: any) => {
+        if (!eventData.points || eventData.points.length === 0) return;
+        const p = eventData.points[0];
+
+        // 距離計測モード
+        if (measureModeRef.current) {
+          const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
+          if (!measurePt1Ref.current || (measurePt1Ref.current && measurePt2Ref.current)) {
+            setMeasurePt1(pt3);
+            setMeasurePt2(null);
+          } else {
+            setMeasurePt2(pt3);
           }
-        });
-      }
+          return;
+        }
+
+        // 2Dモード + 断層表示時、クリックで始点・終点を設定
+        if (viewMode === "2D-camera" && showSlice) {
+          const pt = { y: p.x as number, z: p.y as number };
+          if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
+            setSliceLineStart(pt);
+            setSliceLineEnd(null);
+          } else {
+            setSliceLineEnd(pt);
+          }
+        }
+      });
 
       return () => {
         Plotly.purge(plotEl);
@@ -954,26 +977,34 @@ function App() {
 
     Plotly.newPlot(plotEl, data, layout, config);
 
-    // 2Dモード + 断層表示時、クリックで始点・終点を設定
-    if (viewMode === "2D-camera" && showSlice) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (plotEl as any).on("plotly_click", (eventData: any) => {
-        if (eventData.points && eventData.points.length > 0) {
-          const pt = {
-            y: eventData.points[0].y as number,
-            z: eventData.points[0].z as number,
-          };
-          if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
-            // 新しい始点を設定（リセット）
-            setSliceLineStart(pt);
-            setSliceLineEnd(null);
-          } else {
-            // 終点を設定
-            setSliceLineEnd(pt);
-          }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (plotEl as any).on("plotly_click", (eventData: any) => {
+      if (!eventData.points || eventData.points.length === 0) return;
+      const p = eventData.points[0];
+
+      // 距離計測モード
+      if (measureModeRef.current) {
+        const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
+        if (!measurePt1Ref.current || (measurePt1Ref.current && measurePt2Ref.current)) {
+          setMeasurePt1(pt3);
+          setMeasurePt2(null);
+        } else {
+          setMeasurePt2(pt3);
         }
-      });
-    }
+        return;
+      }
+
+      // 2Dモード + 断層表示時、クリックで始点・終点を設定
+      if (viewMode === "2D-camera" && showSlice) {
+        const pt = { y: p.y as number, z: p.z as number };
+        if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
+          setSliceLineStart(pt);
+          setSliceLineEnd(null);
+        } else {
+          setSliceLineEnd(pt);
+        }
+      }
+    });
 
     return () => {
       Plotly.purge(plotEl);
@@ -1887,6 +1918,156 @@ function App() {
                     }}
                   />
 
+                  {/* XY平面ビュー */}
+                  <button
+                    title="XY平面ビュー"
+                    style={tbBtnStyle()}
+                    onClick={() => {
+                      const el = plotRef.current;
+                      if (!el) return;
+                      Plotly.relayout(el, {
+                        "scene.camera": {
+                          eye: { x: 0, y: 0, z: 2.0 },
+                          up: { x: 0, y: 1, z: 0 },
+                        },
+                      });
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <text
+                        x="12"
+                        y="15"
+                        textAnchor="middle"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fill={svgColor}
+                        stroke="none"
+                      >
+                        XY
+                      </text>
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "28px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
+                  {/* XZ平面ビュー */}
+                  <button
+                    title="XZ平面ビュー"
+                    style={tbBtnStyle()}
+                    onClick={() => {
+                      const el = plotRef.current;
+                      if (!el) return;
+                      Plotly.relayout(el, {
+                        "scene.camera": {
+                          eye: { x: 0, y: -2.0, z: 0 },
+                          up: { x: 0, y: 0, z: 1 },
+                        },
+                      });
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <text
+                        x="12"
+                        y="15"
+                        textAnchor="middle"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fill={svgColor}
+                        stroke="none"
+                      >
+                        XZ
+                      </text>
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "28px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
+                  {/* YZ平面ビュー */}
+                  <button
+                    title="YZ平面ビュー"
+                    style={tbBtnStyle()}
+                    onClick={() => {
+                      const el = plotRef.current;
+                      if (!el) return;
+                      Plotly.relayout(el, {
+                        "scene.camera": {
+                          eye: { x: 2.0, y: 0, z: 0 },
+                          up: { x: 0, y: 0, z: 1 },
+                        },
+                      });
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <text
+                        x="12"
+                        y="15"
+                        textAnchor="middle"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fill={svgColor}
+                        stroke="none"
+                      >
+                        YZ
+                      </text>
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "28px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
                   {/* リセット */}
                   <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
                     <svg
@@ -2092,65 +2273,40 @@ function App() {
                     </select>
                   </div>
                 </div>
-
-                {/* 掃引範囲 */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引範囲</label>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input
-                      type="text"
-                      placeholder="入力してください"
-                      value={sweepRange}
-                      onChange={(e) => setSweepRange(e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        flex: 1,
-                      }}
-                    />
-                    <select
-                      value={sweepRangeUnit}
-                      onChange={(e) => setSweepRangeUnit(e.target.value as "um" | "mm")}
-                      style={unitSelectStyle}
-                    >
-                      <option value="um">µm</option>
-                      <option value="mm">mm</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* 次の掃引までの時間間隔 */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                    次の掃引までの時間間隔
-                  </label>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input
-                      type="text"
-                      placeholder="入力してください"
-                      value={sweepTimeInterval}
-                      onChange={(e) => setSweepTimeInterval(e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    />
-                    <select
-                      value={sweepTimeUnit}
-                      onChange={(e) => setSweepTimeUnit(e.target.value as "ms" | "s")}
-                      style={unitSelectStyle}
-                    >
-                      <option value="ms">ms</option>
-                      <option value="s">s</option>
-                    </select>
-                  </div>
-                </div>
               </>
             )}
 
             {/* 操作タブ */}
             {sideTab === "actions" && (
               <>
+                {/* アルゴリズム選択 */}
+                <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}>
+                  アルゴリズム
+                </div>
+                <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
+                  {(["coin", "tgv"] as const).map((alg) => (
+                    <button
+                      key={alg}
+                      onClick={() => setAlgorithm(alg)}
+                      style={{
+                        flex: 1,
+                        height: "32px",
+                        borderRadius: "6px",
+                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
+                        color: algorithm === alg ? colors.primary : colors.textMuted,
+                        fontSize: "12px",
+                        fontWeight: algorithm === alg ? 600 : 400,
+                        fontFamily: fontFamily,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {alg === "coin" ? "硬貨" : "TGV"}
+                    </button>
+                  ))}
+                </div>
+
                 {/* AIでの結果を表示ボタン */}
                 <button
                   disabled={status === "RUNNING" || isLoadingAI}
@@ -2246,6 +2402,106 @@ function App() {
                   </svg>
                   {flipX ? "左右反転: ON" : "左右反転: OFF"}
                 </button>
+
+                {/* 距離計測ボタン */}
+                <button
+                  disabled={!showPlot}
+                  onClick={() => {
+                    if (!showPlot) return;
+                    const next = !measureMode;
+                    setMeasureMode(next);
+                    if (!next) {
+                      setMeasurePt1(null);
+                      setMeasurePt2(null);
+                    }
+                  }}
+                  style={{
+                    ...buttonSecondaryStyle,
+                    backgroundColor: measureMode ? "#b45309" : "#1e2d42",
+                    border: `1px solid ${measureMode ? "#d97706" : "#3a5068"}`,
+                    cursor: showPlot ? "pointer" : "not-allowed",
+                    opacity: showPlot ? 1 : 0.5,
+                  }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M2 12h4l1-3h2l2 6h2l1-3h4" />
+                    <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+                    <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+                  </svg>
+                  {measureMode ? "距離計測: ON" : "距離計測"}
+                </button>
+
+                {/* 距離計測結果 */}
+                {measureMode && (
+                  <div
+                    style={{
+                      padding: "10px",
+                      borderRadius: "6px",
+                      backgroundColor: "#1a2332",
+                      border: `1px solid #3a5068`,
+                      fontSize: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div style={{ color: "#d97706", fontWeight: 600, marginBottom: "2px" }}>
+                      距離計測モード
+                    </div>
+                    <div style={{ color: colors.textMuted, fontSize: "11px" }}>
+                      3Dプロット上の2点をクリックしてください
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: colors.textMuted }}>点1</span>
+                      <span>
+                        {measurePt1
+                          ? `(${measurePt1.x.toFixed(1)}, ${measurePt1.y.toFixed(1)}, ${measurePt1.z.toFixed(1)})`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: colors.textMuted }}>点2</span>
+                      <span>
+                        {measurePt2
+                          ? `(${measurePt2.x.toFixed(1)}, ${measurePt2.y.toFixed(1)}, ${measurePt2.z.toFixed(1)})`
+                          : "—"}
+                      </span>
+                    </div>
+                    {measurePt1 && measurePt2 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          borderTop: `1px solid #3a5068`,
+                          paddingTop: "6px",
+                          fontWeight: 600,
+                          color: "#f59e0b",
+                        }}
+                      >
+                        <span>距離</span>
+                        <span>
+                          {(() => {
+                            const d = Math.sqrt(
+                              (measurePt2.x - measurePt1.x) ** 2 +
+                                (measurePt2.y - measurePt1.y) ** 2 +
+                                (measurePt2.z - measurePt1.z) ** 2
+                            );
+                            return d >= 1000 ? `${(d / 1000).toFixed(3)} mm` : `${d.toFixed(2)} µm`;
+                          })()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* CSV出力ボタン */}
                 <button
@@ -2388,31 +2644,6 @@ function App() {
             {/* 測定結果タブ */}
             {sideTab === "result" && (
               <>
-                {/* アルゴリズム選択 */}
-                <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
-                  {(["coin", "tgv"] as const).map((alg) => (
-                    <button
-                      key={alg}
-                      onClick={() => setAlgorithm(alg)}
-                      style={{
-                        flex: 1,
-                        height: "32px",
-                        borderRadius: "6px",
-                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
-                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
-                        color: algorithm === alg ? colors.primary : colors.textMuted,
-                        fontSize: "12px",
-                        fontWeight: algorithm === alg ? 600 : 400,
-                        fontFamily: fontFamily,
-                        cursor: "pointer",
-                        transition: "all 0.15s",
-                      }}
-                    >
-                      {alg === "coin" ? "硬貨" : "TGV"}
-                    </button>
-                  ))}
-                </div>
-
                 {cloud ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div
