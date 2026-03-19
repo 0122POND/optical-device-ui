@@ -120,7 +120,7 @@ function App() {
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
-  const [algorithm, setAlgorithm] = useState<"coin" | "tgv" | "step">("coin");
+  const [algorithm, setAlgorithm] = useState<"coin" | "coin2" | "tgv" | "step">("coin");
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -158,12 +158,14 @@ function App() {
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）
+  type HistorySource = "coin" | "coin2" | "tgv" | "step" | "csv";
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
     points: number;
     thumbnail: string;
     name: string;
+    source: HistorySource;
   };
   const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
@@ -399,6 +401,7 @@ function App() {
                   points: newCloud.x.length,
                   thumbnail: thumb,
                   name: "",
+                  source: algorithm,
                 },
                 ...prev,
               ].slice(0, 5)
@@ -1436,6 +1439,7 @@ function App() {
             points: newCloud.x.length,
             thumbnail: thumb,
             name: "",
+            source: "csv" as HistorySource,
           },
           ...prev,
         ].slice(0, 5)
@@ -2328,82 +2332,75 @@ function App() {
                 <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}>
                   アルゴリズム
                 </div>
-                <div style={{ display: "flex", gap: "4px", marginBottom: "12px" }}>
-                  {(["coin", "tgv", "step"] as const).map((alg) => (
-                    <button
-                      key={alg}
-                      onClick={() => setAlgorithm(alg)}
-                      style={{
-                        flex: 1,
-                        height: "44px",
-                        borderRadius: "6px",
-                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
-                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
-                        color: algorithm === alg ? colors.primary : colors.textMuted,
-                        fontSize: "12px",
-                        fontWeight: algorithm === alg ? 600 : 400,
-                        fontFamily: fontFamily,
-                        cursor: "pointer",
-                        transition: "all 0.15s",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      {alg === "coin" ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "4px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  {(["coin", "coin2", "tgv", "step"] as const).map((alg) => {
+                    const label =
+                      alg === "coin"
+                        ? "硬貨"
+                        : alg === "coin2"
+                          ? "硬貨(変更後)"
+                          : alg === "tgv"
+                            ? "TGV"
+                            : "段差";
+                    const icon =
+                      alg === "coin" || alg === "coin2" ? (
                         <>
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <circle cx="12" cy="12" r="9" />
-                            <circle cx="12" cy="12" r="5" />
-                          </svg>
-                          硬貨
+                          <circle cx="12" cy="12" r="9" />
+                          <circle cx="12" cy="12" r="5" />
                         </>
                       ) : alg === "tgv" ? (
                         <>
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <rect x="2" y="6" width="20" height="12" rx="1" />
-                            <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
-                          </svg>
-                          TGV
+                          <rect x="2" y="6" width="20" height="12" rx="1" />
+                          <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
                         </>
                       ) : (
-                        <>
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M2 16h8V8h4v8h8" />
-                          </svg>
-                          段差
-                        </>
-                      )}
-                    </button>
-                  ))}
+                        <path d="M2 16h8V8h4v8h8" />
+                      );
+                    return (
+                      <button
+                        key={alg}
+                        onClick={() => setAlgorithm(alg)}
+                        style={{
+                          height: "44px",
+                          borderRadius: "6px",
+                          border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                          backgroundColor:
+                            algorithm === alg ? colors.primary + "22" : "transparent",
+                          color: algorithm === alg ? colors.primary : colors.textMuted,
+                          fontSize: "11px",
+                          fontWeight: algorithm === alg ? 600 : 400,
+                          fontFamily: fontFamily,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          {icon}
+                        </svg>
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* ボタングリッド（2列） */}
@@ -2842,142 +2839,190 @@ function App() {
                     >
                       測定履歴（最新5件）
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                      {cloudHistory.map((entry, i) => {
-                        const isCurrent = cloud === entry.cloud;
-                        return (
+                    {(["coin", "coin2", "tgv", "step", "csv"] as HistorySource[]).map((src) => {
+                      const entries = cloudHistory
+                        .map((e, i) => ({ entry: e, idx: i }))
+                        .filter(({ entry }) => entry.source === src);
+                      if (entries.length === 0) return null;
+                      const srcLabel =
+                        src === "coin"
+                          ? "硬貨"
+                          : src === "coin2"
+                            ? "硬貨(変更後)"
+                            : src === "tgv"
+                              ? "TGV"
+                              : src === "step"
+                                ? "段差マスタ"
+                                : "CSVインポート";
+                      return (
+                        <div key={src} style={{ marginBottom: "10px" }}>
                           <div
-                            key={entry.measuredAt + i}
                             style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 10px",
-                              borderRadius: "6px",
-                              backgroundColor: isCurrent ? colors.primary + "22" : colors.bgDark,
-                              border: isCurrent
-                                ? `1px solid ${colors.primary}`
-                                : `1px solid ${colors.border}`,
+                              fontSize: "11px",
+                              color: colors.textMuted,
+                              marginBottom: "4px",
                             }}
                           >
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <img
-                                src={entry.thumbnail}
-                                alt={`#${cloudHistory.length - i}`}
-                                style={{
-                                  width: "48px",
-                                  height: "48px",
-                                  borderRadius: "4px",
-                                  border: `1px solid ${colors.border}`,
-                                  flexShrink: 0,
-                                }}
-                              />
-                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                {editingNameIdx === i ? (
-                                  <input
-                                    autoFocus
-                                    value={editingNameValue}
-                                    onChange={(e) => setEditingNameValue(e.target.value)}
-                                    onBlur={() => {
-                                      setCloudHistory((prev) =>
-                                        prev.map((h, idx) =>
-                                          idx === i ? { ...h, name: editingNameValue.trim() } : h
-                                        )
-                                      );
-                                      setEditingNameIdx(null);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                      if (e.key === "Escape") setEditingNameIdx(null);
-                                    }}
-                                    placeholder={`#${cloudHistory.length - i}`}
-                                    style={{
-                                      fontSize: "12px",
-                                      fontWeight: 600,
-                                      fontFamily,
-                                      width: "100px",
-                                      padding: "1px 4px",
-                                      border: `1px solid ${colors.primary}`,
-                                      borderRadius: "3px",
-                                      backgroundColor: colors.bgDark,
-                                      color: colors.text,
-                                      outline: "none",
-                                    }}
-                                  />
-                                ) : (
-                                  <span
-                                    style={{ fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-                                    title="クリックで名前を変更"
-                                    onClick={() => {
-                                      setEditingNameIdx(i);
-                                      setEditingNameValue(entry.name);
-                                    }}
-                                  >
-                                    {entry.name || `#${cloudHistory.length - i}`}
-                                  </span>
-                                )}
-                                <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                  {entry.measuredAt}
-                                </span>
-                                <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                  {entry.points.toLocaleString()} pts
-                                </span>
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                              {isCurrent ? (
-                                <span
-                                  style={{
-                                    fontSize: "11px",
-                                    color: colors.primary,
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  表示中
-                                </span>
-                              ) : (
-                                <button
-                                  style={{
-                                    padding: "4px 10px",
-                                    fontSize: "11px",
-                                    fontWeight: 600,
-                                    fontFamily,
-                                    border: `1px solid ${colors.primary}`,
-                                    borderRadius: "4px",
-                                    backgroundColor: "transparent",
-                                    color: colors.primary,
-                                    cursor: "pointer",
-                                  }}
-                                  onClick={() => {
-                                    setShowSlice(false);
-                                    setCloud(entry.cloud);
-                                    setShowPlot(true);
-                                  }}
-                                >
-                                  復元
-                                </button>
-                              )}
-                              <button
-                                style={{
-                                  padding: "4px 10px",
-                                  fontSize: "11px",
-                                  fontWeight: 600,
-                                  fontFamily,
-                                  border: `1px solid ${colors.danger}`,
-                                  borderRadius: "4px",
-                                  backgroundColor: "transparent",
-                                  color: colors.danger,
-                                  cursor: "pointer",
-                                }}
-                                onClick={() => setDeleteConfirmIdx(i)}
-                              >
-                                削除
-                              </button>
-                            </div>
+                            {srcLabel}
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            {entries.map(({ entry, idx: i }) => {
+                              const isCurrent = cloud === entry.cloud;
+                              return (
+                                <div
+                                  key={entry.measuredAt + i}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    padding: "8px 10px",
+                                    borderRadius: "6px",
+                                    backgroundColor: isCurrent
+                                      ? colors.primary + "22"
+                                      : colors.bgDark,
+                                    border: isCurrent
+                                      ? `1px solid ${colors.primary}`
+                                      : `1px solid ${colors.border}`,
+                                  }}
+                                >
+                                  <div
+                                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                                  >
+                                    <img
+                                      src={entry.thumbnail}
+                                      alt={`#${cloudHistory.length - i}`}
+                                      style={{
+                                        width: "48px",
+                                        height: "48px",
+                                        borderRadius: "4px",
+                                        border: `1px solid ${colors.border}`,
+                                        flexShrink: 0,
+                                      }}
+                                    />
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "2px",
+                                      }}
+                                    >
+                                      {editingNameIdx === i ? (
+                                        <input
+                                          autoFocus
+                                          value={editingNameValue}
+                                          onChange={(e) => setEditingNameValue(e.target.value)}
+                                          onBlur={() => {
+                                            setCloudHistory((prev) =>
+                                              prev.map((h, idx) =>
+                                                idx === i
+                                                  ? { ...h, name: editingNameValue.trim() }
+                                                  : h
+                                              )
+                                            );
+                                            setEditingNameIdx(null);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter")
+                                              (e.target as HTMLInputElement).blur();
+                                            if (e.key === "Escape") setEditingNameIdx(null);
+                                          }}
+                                          placeholder={`#${cloudHistory.length - i}`}
+                                          style={{
+                                            fontSize: "12px",
+                                            fontWeight: 600,
+                                            fontFamily,
+                                            width: "100px",
+                                            padding: "1px 4px",
+                                            border: `1px solid ${colors.primary}`,
+                                            borderRadius: "3px",
+                                            backgroundColor: colors.bgDark,
+                                            color: colors.text,
+                                            outline: "none",
+                                          }}
+                                        />
+                                      ) : (
+                                        <span
+                                          style={{
+                                            fontSize: "12px",
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                          }}
+                                          title="クリックで名前を変更"
+                                          onClick={() => {
+                                            setEditingNameIdx(i);
+                                            setEditingNameValue(entry.name);
+                                          }}
+                                        >
+                                          {entry.name || `#${cloudHistory.length - i}`}
+                                        </span>
+                                      )}
+                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                        {entry.measuredAt}
+                                      </span>
+                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                        {entry.points.toLocaleString()} pts
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{ display: "flex", gap: "4px", alignItems: "center" }}
+                                  >
+                                    {isCurrent ? (
+                                      <span
+                                        style={{
+                                          fontSize: "11px",
+                                          color: colors.primary,
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        表示中
+                                      </span>
+                                    ) : (
+                                      <button
+                                        style={{
+                                          padding: "4px 10px",
+                                          fontSize: "11px",
+                                          fontWeight: 600,
+                                          fontFamily,
+                                          border: `1px solid ${colors.primary}`,
+                                          borderRadius: "4px",
+                                          backgroundColor: "transparent",
+                                          color: colors.primary,
+                                          cursor: "pointer",
+                                        }}
+                                        onClick={() => {
+                                          setShowSlice(false);
+                                          setCloud(entry.cloud);
+                                          setShowPlot(true);
+                                        }}
+                                      >
+                                        復元
+                                      </button>
+                                    )}
+                                    <button
+                                      style={{
+                                        padding: "4px 10px",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                        fontFamily,
+                                        border: `1px solid ${colors.danger}`,
+                                        borderRadius: "4px",
+                                        backgroundColor: "transparent",
+                                        color: colors.danger,
+                                        cursor: "pointer",
+                                      }}
+                                      onClick={() => setDeleteConfirmIdx(i)}
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -3080,7 +3125,14 @@ function App() {
                 <>
                   3次元形状計測を開始しますか？
                   <br />（{useGpu ? "GPU" : "CPU"}モード /{" "}
-                  {algorithm === "tgv" ? "TGV" : algorithm === "step" ? "段差マスタ" : "硬貨"}）
+                  {algorithm === "tgv"
+                    ? "TGV"
+                    : algorithm === "step"
+                      ? "段差マスタ"
+                      : algorithm === "coin2"
+                        ? "硬貨(変更後)"
+                        : "硬貨"}
+                  ）
                 </>
               )}
             </div>

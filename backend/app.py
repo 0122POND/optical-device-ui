@@ -194,6 +194,11 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_tgv_gpu import run_preprocess
                 else:
                     from preprocessing_tgv import run_preprocess
+            elif algorithm == "coin2":
+                if use_gpu:
+                    from preprocessing_coin2_gpu import run_preprocess
+                else:
+                    from preprocessing_coin2_cpu import run_preprocess
             else:
                 if use_gpu:
                     from preprocessing_gpu import run_preprocess
@@ -273,6 +278,11 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_tgv_gpu import save_peak_results
                 else:
                     from preprocessing_tgv import save_peak_results
+            elif algorithm == "coin2":
+                if use_gpu:
+                    from preprocessing_coin2_gpu import save_peak_results
+                else:
+                    from preprocessing_coin2_cpu import save_peak_results
             else:
                 if use_gpu:
                     from preprocessing_gpu import save_peak_results
