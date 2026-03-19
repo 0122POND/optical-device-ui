@@ -136,20 +136,12 @@ function App() {
   const [measureMode, setMeasureMode] = useState(false);
   const [measurePt1, setMeasurePt1] = useState<{ x: number; y: number; z: number } | null>(null);
   const [measurePt2, setMeasurePt2] = useState<{ x: number; y: number; z: number } | null>(null);
-  const measureModeRef = useRef(false);
-  const measurePt1Ref = useRef<{ x: number; y: number; z: number } | null>(null);
-  const measurePt2Ref = useRef<{ x: number; y: number; z: number } | null>(null);
-
-  // refをstateに同期
-  useEffect(() => {
-    measureModeRef.current = measureMode;
-  }, [measureMode]);
-  useEffect(() => {
-    measurePt1Ref.current = measurePt1;
-  }, [measurePt1]);
-  useEffect(() => {
-    measurePt2Ref.current = measurePt2;
-  }, [measurePt2]);
+  type MeasurePt = { x: number; y: number; z: number } | null;
+  const measureStateRef = useRef<{ mode: boolean; pt1: MeasurePt; pt2: MeasurePt }>({
+    mode: false,
+    pt1: null,
+    pt2: null,
+  });
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
@@ -722,13 +714,16 @@ function App() {
         if (!eventData.points || eventData.points.length === 0) return;
         const p = eventData.points[0];
 
-        // 距離計測モード（2点選択済みなら無視）
-        if (measureModeRef.current) {
-          if (measurePt1Ref.current && measurePt2Ref.current) return;
+        // 距離計測モード
+        if (measureStateRef.current.mode) {
+          const s = measureStateRef.current;
+          if (s.pt1 && s.pt2) return;
           const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-          if (!measurePt1Ref.current) {
+          if (!s.pt1) {
+            measureStateRef.current = { ...s, pt1: pt3 };
             setMeasurePt1(pt3);
           } else {
+            measureStateRef.current = { ...s, pt2: pt3 };
             setMeasurePt2(pt3);
           }
           return;
@@ -985,13 +980,16 @@ function App() {
       if (!eventData.points || eventData.points.length === 0) return;
       const p = eventData.points[0];
 
-      // 距離計測モード（2点選択済みなら無視）
-      if (measureModeRef.current) {
-        if (measurePt1Ref.current && measurePt2Ref.current) return;
+      // 距離計測モード
+      if (measureStateRef.current.mode) {
+        const s = measureStateRef.current;
+        if (s.pt1 && s.pt2) return;
         const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-        if (!measurePt1Ref.current) {
+        if (!s.pt1) {
+          measureStateRef.current = { ...s, pt1: pt3 };
           setMeasurePt1(pt3);
         } else {
+          measureStateRef.current = { ...s, pt2: pt3 };
           setMeasurePt2(pt3);
         }
         return;
@@ -1028,7 +1026,7 @@ function App() {
     zData,
   ]);
 
-  // --- 距離計測マーカー描画（メインプロットとは独立） ---
+  // --- 距離計測マーカー描画（2点揃った時のみ表示） ---
   useEffect(() => {
     const el = plotRef.current;
     if (!el) return;
@@ -1045,36 +1043,21 @@ function App() {
       Plotly.deleteTraces(el, markerIndices);
     }
 
-    // マーカー追加
-    if (measureMode && measurePt1) {
-      if (measurePt2) {
-        Plotly.addTraces(el, {
-          type: "scatter3d",
-          mode: "markers+lines",
-          name: "__measure_marker__",
-          x: [measurePt1.x, measurePt2.x],
-          y: [measurePt1.y, measurePt2.y],
-          z: [measurePt1.z, measurePt2.z],
-          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-          line: { color: "#ffffff", width: 4, dash: "dash" },
-          showlegend: false,
-          hoverinfo: "skip",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
-      } else {
-        Plotly.addTraces(el, {
-          type: "scatter3d",
-          mode: "markers",
-          name: "__measure_marker__",
-          x: [measurePt1.x],
-          y: [measurePt1.y],
-          z: [measurePt1.z],
-          marker: { size: 3, color: "#ffffff", symbol: "diamond" },
-          showlegend: false,
-          hoverinfo: "skip",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
-      }
+    // 2点揃った時のみマーカー+線を追加（この時点でクリックはrefガードで無視される）
+    if (measureMode && measurePt1 && measurePt2) {
+      Plotly.addTraces(el, {
+        type: "scatter3d",
+        mode: "markers+lines",
+        name: "__measure_marker__",
+        x: [measurePt1.x, measurePt2.x],
+        y: [measurePt1.y, measurePt2.y],
+        z: [measurePt1.z, measurePt2.z],
+        marker: { size: 3, color: "#ffffff", symbol: "diamond" },
+        line: { color: "#ffffff", width: 4, dash: "dash" },
+        showlegend: false,
+        hoverinfo: "skip",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
     }
   }, [measureMode, measurePt1, measurePt2]);
 
@@ -2563,6 +2546,7 @@ function App() {
                       if (!showPlot) return;
                       const next = !measureMode;
                       setMeasureMode(next);
+                      measureStateRef.current = { mode: next, pt1: null, pt2: null };
                       if (!next) {
                         setMeasurePt1(null);
                         setMeasurePt2(null);
@@ -2732,6 +2716,7 @@ function App() {
                         </div>
                         <button
                           onClick={() => {
+                            measureStateRef.current = { mode: true, pt1: null, pt2: null };
                             setMeasurePt1(null);
                             setMeasurePt2(null);
                           }}
