@@ -139,7 +139,7 @@ def run_preprocess(
         # フォールバック: 個別ファイルの並列読み込み
         image_files = sorted(
             [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
-            key=lambda f: int(re.search(r'img_(\d+)', f).group(1))
+            key=lambda f: int((re.search(r'img_(\d+)', f) or re.search(r'(\d+)', f)).group(1))
         )
 
         if not image_files:
