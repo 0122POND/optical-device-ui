@@ -64,6 +64,37 @@ async def serve_cached_result(filename: str):
 
     raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
+
+IMAGE_EXTS = {".png", ".bmp", ".jpg", ".jpeg", ".tif", ".tiff"}
+
+
+def _ensure_manifest(d: Path) -> None:
+    """manifest.json がなければ画像ファイル一覧から自動生成する"""
+    manifest_path = d / "manifest.json"
+    if manifest_path.exists():
+        return
+    files = sorted(
+        f.name for f in d.iterdir()
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTS
+    )
+    if not files:
+        return
+    manifest_path.write_text(json.dumps({"files": files}, ensure_ascii=False, indent=2))
+
+
+@app.get("/data/mask_result/manifest.json")
+async def serve_mask_manifest():
+    """mask_result フォルダの manifest.json を自動生成して返す"""
+    mask_dir = DATA_DIR / "mask_result"
+    if not mask_dir.is_dir():
+        raise HTTPException(status_code=404, detail="mask_result フォルダが見つかりません")
+    _ensure_manifest(mask_dir)
+    manifest_path = mask_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="mask_result 内に画像ファイルがありません")
+    return Response(content=manifest_path.read_bytes(), media_type="application/json")
+
+
 # 静的ファイル配信（キャッシュルートより後に配置し、/data/result/* はキャッシュ優先）
 app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
@@ -348,9 +379,14 @@ async def ws_endpoint(ws: WebSocket):
                 try:
                     await run_preprocess_with_progress(params)
                     await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
+                except WebSocketDisconnect:
+                    raise
                 except Exception as e:
-                    await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
-                    await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
+                    try:
+                        await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
+                        await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
+                    except (WebSocketDisconnect, RuntimeError):
+                        raise WebSocketDisconnect(code=1006)
                 finally:
                     is_running = False
 

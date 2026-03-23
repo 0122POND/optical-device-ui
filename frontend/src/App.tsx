@@ -251,6 +251,9 @@ function App() {
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
 
+  // マスク読込中フラグ
+  const [isLoadingMask, setIsLoadingMask] = useState(false);
+
   // サイドパネルのタブ
   type SideTab = "settings" | "actions" | "result";
   const [sideTab, setSideTab] = useState<SideTab>("actions");
@@ -1485,6 +1488,56 @@ function App() {
     }
   };
 
+  // マスク画像を固定フォルダ(data/mask_result/)から読み込む
+  const handleLoadMask = async () => {
+    setShowSlice(false);
+    setShowPlot(true);
+    setCloud(null);
+    setIsLoadingMask(true);
+    setStatus("RUNNING");
+
+    try {
+      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
+        folderUrl: "/data/mask_result",
+        threshold: 128,
+        samplePerSlice: 4000,
+        flipZ: true,
+        colorMode: "z",
+        ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
+      });
+
+      setCloud(newCloud);
+      setZData(newGrid);
+      setPlotType("surface");
+      setStatus("COMPLETE");
+      setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
+      setMeasureCount((c) => c + 1);
+
+      // サムネイル生成＆履歴追加
+      const thumb = generateThumbnail(newCloud);
+      setCloudHistory((prev) =>
+        [
+          {
+            cloud: newCloud,
+            measuredAt: new Date().toLocaleString("ja-JP"),
+            points: newCloud.x.length,
+            thumbnail: thumb,
+            name: "mask_result",
+            source: "coin" as HistorySource,
+          },
+          ...prev,
+        ].slice(0, 5)
+      );
+    } catch (e) {
+      console.error(e);
+      setStatus("READY");
+      setShowPlot(false);
+      alert(`マスク画像の読み込みに失敗しました: ${(e as Error).message}`);
+    } finally {
+      setIsLoadingMask(false);
+    }
+  };
+
   return (
     <>
       <div
@@ -2652,6 +2705,36 @@ function App() {
                       <line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
                     CSV読込
+                  </button>
+
+                  {/* マスク画像読込ボタン */}
+                  <button
+                    disabled={status === "RUNNING" || isLoadingMask}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: "#7c3aed",
+                      border: "none",
+                      cursor: status === "RUNNING" || isLoadingMask ? "not-allowed" : "pointer",
+                      opacity: status === "RUNNING" || isLoadingMask ? 0.7 : 1,
+                      fontSize: "12px",
+                    }}
+                    onClick={handleLoadMask}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      <line x1="12" y1="11" x2="12" y2="17" />
+                      <line x1="9" y1="14" x2="15" y2="14" />
+                    </svg>
+                    {isLoadingMask ? "読込中..." : "マスク読込"}
                   </button>
                 </div>
 
