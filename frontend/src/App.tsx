@@ -2398,7 +2398,7 @@ function App() {
                       alg === "coin"
                         ? "硬貨"
                         : alg === "coin2"
-                          ? "硬貨(変更後)"
+                          ? "硬貨(別アプローチ)"
                           : alg === "tgv"
                             ? "TGV"
                             : "段差";
@@ -2931,7 +2931,7 @@ function App() {
                         src === "coin"
                           ? "硬貨"
                           : src === "coin2"
-                            ? "硬貨(変更後)"
+                            ? "硬貨(別アプローチ)"
                             : src === "tgv"
                               ? "TGV"
                               : src === "step"
@@ -3213,7 +3213,7 @@ function App() {
                     : algorithm === "step"
                       ? "段差マスタ"
                       : algorithm === "coin2"
-                        ? "硬貨(変更後)"
+                        ? "硬貨(別アプローチ)"
                         : "硬貨"}
                   ）
                 </>
