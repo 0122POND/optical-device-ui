@@ -8,7 +8,6 @@ from typing import Callable, Optional, List
 
 import cv2
 import cupy as cp
-from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
 
 # --- デフォルト設定 ---
@@ -24,9 +23,10 @@ DEFAULT_ERROR_THRESHOLD = 50.0      # 白飛びエラー閾値(平均輝度)
 DEFAULT_LINE_THRESHOLD = 50         # 縦線採用の明るさ閾値(0-255)
 DEFAULT_DRAW_LINE_WIDTH = 1         # 最終描画の直線太さ(px)
 DEFAULT_CROSS_PROFILE_WIDTH = 70    # 横線検知の幅(基準線から左右px)
-DEFAULT_HOLE_PROMINENCE = 5.0       # 横線ピークの際立ち度
-DEFAULT_MIN_DISTANCE = 15           # 穴の最小間隔(px)
-DEFAULT_HOLE_HEIGHT = 7             # 穴の縦幅(px)
+DEFAULT_EXCLUDE_WIDTH = 3           # 縦線除外幅(基準線中心から左右px)
+DEFAULT_SIGMA_BASELINE = 30.0       # ベースライン補正用ガウシアンσ
+DEFAULT_NOISE_FLOOR = 3.0           # AGC正規化のノイズフロア
+DEFAULT_PEAK_RELATIVE_THRESHOLD = 1.0  # 正規化後の横線判定閾値
 
 
 def _auto_batch_size(h: int, w: int) -> int:
@@ -115,27 +115,50 @@ def _punch_holes(
     canvas: np.ndarray,
     global_b: int,
     cross_profile_width: int,
-    hole_prominence: float,
-    min_distance: int,
-    hole_height: int,
+    exclude_width: int,
+    sigma_baseline: float,
+    noise_floor: float,
+    peak_relative_threshold: float,
 ) -> np.ndarray:
-    """基準線キャンバスに横線交点の穴をあける（CPU処理）"""
+    """基準線キャンバスに横線交点の穴をあける（AGC正規化版・CPU処理）
+
+    縦線中心を除外した横方向プロファイルを算出し、
+    DC除去 → AGC正規化 → 相対閾値判定で横線位置を検出する。
+    """
     h, w = sub_bg_slice.shape
 
-    p_left = max(0, global_b - cross_profile_width)
-    p_right = min(w, global_b + cross_profile_width + 1)
-    profile = np.mean(sub_bg_slice[:, p_left:p_right].astype(np.float32), axis=1)
+    # 1. 横方向プロファイル（縦線中心を除外）
+    left_start = max(0, global_b - cross_profile_width)
+    left_end = max(0, global_b - exclude_width)
+    right_start = min(w, global_b + exclude_width + 1)
+    right_end = min(w, global_b + cross_profile_width + 1)
 
-    profile_smooth = gaussian_filter1d(profile, sigma=1.5)
-    peaks, _ = find_peaks(
-        profile_smooth, prominence=hole_prominence, distance=min_distance
-    )
+    left_region = sub_bg_slice[:, left_start:left_end].astype(np.float32)
+    right_region = sub_bg_slice[:, right_start:right_end].astype(np.float32)
 
+    if left_region.shape[1] > 0 and right_region.shape[1] > 0:
+        profile = np.mean(
+            np.concatenate([left_region, right_region], axis=1), axis=1
+        )
+    elif left_region.shape[1] > 0:
+        profile = np.mean(left_region, axis=1)
+    elif right_region.shape[1] > 0:
+        profile = np.mean(right_region, axis=1)
+    else:
+        return canvas.copy()
+
+    # 2. ベースライン補正（DC除去）
+    profile_baseline = gaussian_filter1d(profile, sigma=sigma_baseline)
+    profile_ac = profile - profile_baseline
+
+    # 3. AGC正規化（エンベロープで割り算）
+    profile_envelope = gaussian_filter1d(np.abs(profile_ac), sigma=sigma_baseline)
+    profile_normalized = profile_ac / (profile_envelope + noise_floor)
+
+    # 4. 相対閾値で横線行を検出し穴あけ
     result = canvas.copy()
-    for y in peaks:
-        y_start = max(0, y - hole_height // 2)
-        y_end = min(h, y + hole_height // 2 + 1)
-        result[y_start:y_end, :] = 0
+    cut_indices = np.where(profile_normalized > peak_relative_threshold)[0]
+    result[cut_indices, :] = 0
 
     return result
 
@@ -152,14 +175,15 @@ def run_preprocess(
     draw_line_width: int = DEFAULT_DRAW_LINE_WIDTH,
     line_threshold: int = DEFAULT_LINE_THRESHOLD,
     cross_profile_width: int = DEFAULT_CROSS_PROFILE_WIDTH,
-    hole_prominence: float = DEFAULT_HOLE_PROMINENCE,
-    min_distance: int = DEFAULT_MIN_DISTANCE,
-    hole_height: int = DEFAULT_HOLE_HEIGHT,
+    exclude_width: int = DEFAULT_EXCLUDE_WIDTH,
+    sigma_baseline: float = DEFAULT_SIGMA_BASELINE,
+    noise_floor: float = DEFAULT_NOISE_FLOOR,
+    peak_relative_threshold: float = DEFAULT_PEAK_RELATIVE_THRESHOLD,
 ) -> dict:
     """
     TGV用画像処理を実行する（GPU版・バッチ処理対応）
 
-    背景除算をGPUでバッチ処理し、基準線検出・穴あけはCPUで実行。
+    背景除算をGPUでバッチ処理し、基準線検出・AGC正規化による穴あけはCPUで実行。
 
     Args:
         data_path: 入力ディレクトリ
@@ -173,9 +197,10 @@ def run_preprocess(
         draw_line_width: 最終描画の直線太さ(px)
         line_threshold: 縦線採用の明るさ閾値
         cross_profile_width: 横線検知幅(基準線から左右px)
-        hole_prominence: 横線ピークの際立ち度
-        min_distance: 穴の最小間隔(px)
-        hole_height: 穴の縦幅(px)
+        exclude_width: 縦線除外幅(基準線中心から左右px)
+        sigma_baseline: ベースライン補正用ガウシアンσ
+        noise_floor: AGC正規化のノイズフロア
+        peak_relative_threshold: 正規化後の横線判定閾値
 
     Returns:
         {"peak_data": np.ndarray, "image_files": list, "output_files": list}
@@ -265,9 +290,10 @@ def run_preprocess(
             base_canvas,
             global_b,
             cross_profile_width,
-            hole_prominence,
-            min_distance,
-            hole_height,
+            exclude_width,
+            sigma_baseline,
+            noise_floor,
+            peak_relative_threshold,
         )
 
     del sub_bg_cpu
