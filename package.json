@@ -24,7 +24,7 @@
   "homepage": "https://github.com/0122POND/optical-device-ui#readme",
   "devDependencies": {
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7"
+    "lint-staged": "^16.4.0"
   },
   "lint-staged": {
     "frontend/src/**/*.{ts,tsx}": [
