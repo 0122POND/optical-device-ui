@@ -185,6 +185,74 @@ async def ws_endpoint(ws: WebSocket):
             await stream_once(params)
             await asyncio.sleep(interval_ms / 1000)
 
+    async def run_ai_inference_with_progress(params: Dict[str, Any]):
+        """AI推論を実行し、進捗をWebSocketで送信"""
+        loop = asyncio.get_event_loop()
+        progress_queue: asyncio.Queue = asyncio.Queue()
+
+        def progress_callback(step: int, total: int, message: str, eta_sec: int = None, percent: int = None):
+            loop.call_soon_threadsafe(
+                progress_queue.put_nowait,
+                {"step": step, "total": total, "message": message, "eta_sec": eta_sec, "percent": percent}
+            )
+
+        input_dir = params.get("input_dir", str(DATA_DIR / "row_data"))
+        output_dir = params.get("output_dir", str(DATA_DIR / "mask_result"))
+        threshold = float(params.get("threshold", 0.5))
+
+        def blocking_inference():
+            from ai_inference import run_ai_inference
+            return run_ai_inference(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                threshold=threshold,
+                progress_callback=progress_callback,
+            )
+
+        future = loop.run_in_executor(executor, blocking_inference)
+
+        def _build_progress_msg(progress):
+            pct = progress.get("percent") if progress.get("percent") is not None else int((progress["step"] / progress["total"]) * 100)
+            msg = {
+                "type": "progress",
+                "step": progress["step"],
+                "total": progress["total"],
+                "message": progress["message"],
+                "percent": pct,
+            }
+            if progress.get("eta_sec") is not None:
+                msg["eta_sec"] = progress["eta_sec"]
+            return msg
+
+        while not future.done():
+            try:
+                progress = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                await ws.send_text(json.dumps(_build_progress_msg(progress)))
+            except asyncio.TimeoutError:
+                pass
+
+        while not progress_queue.empty():
+            progress = await progress_queue.get()
+            await ws.send_text(json.dumps(_build_progress_msg(progress)))
+
+        result = await asyncio.wrap_future(future)
+        output_files = result["output_files"]
+
+        # インメモリキャッシュに格納
+        manifest_json = json.dumps({"files": output_files}).encode()
+        with _result_cache_lock:
+            _result_cache.clear()
+            _result_cache["manifest.json"] = manifest_json
+            for name, data in result["encoded"].items():
+                _result_cache[name] = data
+
+        await ws.send_text(json.dumps({
+            "type": "ai_inference_complete",
+            "files": output_files,
+            "count": len(output_files),
+            "device": result["device"],
+        }))
+
     async def run_preprocess_with_progress(params: Dict[str, Any]):
         """画像処理を実行し、進捗をWebSocketで送信"""
         loop = asyncio.get_event_loop()
@@ -378,6 +446,28 @@ async def ws_endpoint(ws: WebSocket):
 
                 try:
                     await run_preprocess_with_progress(params)
+                    await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:
+                    try:
+                        await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
+                        await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
+                    except (WebSocketDisconnect, RuntimeError):
+                        raise WebSocketDisconnect(code=1006)
+                finally:
+                    is_running = False
+
+            elif cmd == "ai_inference":
+                if is_running:
+                    await ws.send_text(json.dumps({"type": "error", "message": "Already running"}))
+                    continue
+
+                is_running = True
+                await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
+
+                try:
+                    await run_ai_inference_with_progress(params)
                     await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
                 except WebSocketDisconnect:
                     raise

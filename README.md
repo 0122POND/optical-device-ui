@@ -33,6 +33,9 @@ npm install
 
 # バックエンド（プロジェクトルートで実行）
 pip3 install fastapi uvicorn websockets numpy Pillow scipy
+
+# AI推論機能を使用する場合（追加）
+pip3 install torch segmentation-models-pytorch albumentations opencv-python-headless
 ```
 
 ### 2. 画像データの配置

@@ -116,7 +116,7 @@ function App() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
-  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "ai" | null>(null);
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
@@ -158,7 +158,7 @@ function App() {
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）
-  type HistorySource = "coin" | "coin2" | "tgv" | "step" | "csv";
+  type HistorySource = "coin" | "coin2" | "tgv" | "step" | "csv" | "ai";
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
@@ -244,6 +244,7 @@ function App() {
   const [progressTotal, setProgressTotal] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
+  const [progressEta, setProgressEta] = useState<number | null>(null);
 
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
@@ -372,6 +373,51 @@ function App() {
           setProgressTotal(data.total);
           setProgressMessage(data.message);
           setProgressPercent(data.percent);
+          setProgressEta(data.eta_sec ?? null);
+        } else if (data.type === "ai_inference_complete") {
+          console.log("AI推論完了:", data.count, "files", "device:", data.device);
+          try {
+            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
+              folderUrl: "/data/mask_result",
+              threshold: 128,
+              samplePerSlice: 4000,
+              flipZ: true,
+              colorMode: "z",
+              ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
+            });
+
+            setCloud(newCloud);
+            setZData(newGrid);
+            setPlotType("scatter3d");
+            setIsLoadingAI(false);
+            setStatus("COMPLETE");
+            setProgressMessage(`AI推論完了 (${data.device})`);
+            setProgressPercent(100);
+            const now = new Date().toLocaleString("ja-JP");
+            setLastMeasuredAt(now);
+            setMeasureCount((c) => c + 1);
+            const thumb = generateThumbnail(newCloud);
+            setCloudHistory((prev) =>
+              [
+                {
+                  cloud: newCloud,
+                  measuredAt: now,
+                  points: newCloud.x.length,
+                  thumbnail: thumb,
+                  name: "",
+                  source: "ai" as HistorySource,
+                },
+                ...prev,
+              ].slice(0, 5)
+            );
+            console.log("AI点群生成完了", { points: newCloud.x.length });
+          } catch (e) {
+            console.error(e);
+            setIsLoadingAI(false);
+            setStatus("READY");
+            setShowPlot(false);
+            alert(`AI結果の点群生成に失敗しました: ${(e as Error).message}`);
+          }
         } else if (data.type === "preprocess_complete") {
           console.log("画像処理完了:", data.count, "files");
           // 処理完了後、点群を読み込み
@@ -1373,6 +1419,38 @@ function App() {
         }
       };
       sendCommand();
+    } else if (confirmMode === "ai") {
+      // AI推論を実行
+      setShowSlice(false);
+      setShowPlot(true);
+      setCloud(null);
+      setIsLoadingAI(true);
+
+      // 進捗初期化
+      setProgressStep(0);
+      setProgressTotal(6);
+      setProgressMessage("AI推論を開始中...");
+      setProgressPercent(0);
+
+      setStatus("RUNNING");
+
+      console.log("AI推論開始...");
+
+      const ws = connectWebSocket();
+
+      const sendCommand = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              cmd: "ai_inference",
+              params: {},
+            })
+          );
+        } else {
+          setTimeout(sendCommand, 100);
+        }
+      };
+      sendCommand();
     } else if (confirmMode === "csv") {
       if (zData) {
         await downloadCSV(zData, "surface.csv");
@@ -1453,39 +1531,10 @@ function App() {
     e.target.value = "";
   };
 
-  // AI結果を表示する処理
-  const handleShowAIResult = async () => {
-    setShowSlice(false);
-    setShowPlot(true);
-    setCloud(null);
-    setIsLoadingAI(true);
-    setStatus("RUNNING");
-
-    try {
-      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
-        folderUrl: "/data/result_coin_ai_masked",
-        threshold: 128,
-        samplePerSlice: 4000,
-        flipZ: true,
-        colorMode: "z",
-        ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-      });
-
-      setCloud(newCloud);
-      setZData(newGrid);
-      setPlotType("scatter3d");
-      setStatus("COMPLETE");
-      setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
-      setMeasureCount((c) => c + 1);
-      console.log("AI点群生成完了", { points: newCloud.x.length });
-    } catch (e) {
-      console.error(e);
-      setStatus("READY");
-      setShowPlot(false);
-      alert(`AI結果の読み込みに失敗しました: ${(e as Error).message}`);
-    } finally {
-      setIsLoadingAI(false);
-    }
+  // AI推論の確認ダイアログを表示
+  const handleShowAIResult = () => {
+    setConfirmMode("ai");
+    setShowConfirm(true);
   };
 
   // マスク画像を固定フォルダ(data/mask_result/)から読み込む
@@ -2279,6 +2328,14 @@ function App() {
 
                     <div style={{ fontSize: "12px", color: colors.textMuted }}>
                       {progressPercent}%
+                      {progressEta !== null && progressEta > 0 && (
+                        <span style={{ marginLeft: "8px" }}>
+                          残り約
+                          {progressEta >= 60
+                            ? `${Math.floor(progressEta / 60)}分${progressEta % 60}秒`
+                            : `${progressEta}秒`}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2922,190 +2979,192 @@ function App() {
                     >
                       測定履歴（最新5件）
                     </div>
-                    {(["coin", "coin2", "tgv", "step", "csv"] as HistorySource[]).map((src) => {
-                      const entries = cloudHistory
-                        .map((e, i) => ({ entry: e, idx: i }))
-                        .filter(({ entry }) => entry.source === src);
-                      if (entries.length === 0) return null;
-                      const srcLabel =
-                        src === "coin"
-                          ? "硬貨"
-                          : src === "coin2"
-                            ? "硬貨(別アプローチ)"
-                            : src === "tgv"
-                              ? "TGV"
-                              : src === "step"
-                                ? "段差マスタ"
-                                : "CSVインポート";
-                      return (
-                        <div key={src} style={{ marginBottom: "10px" }}>
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: colors.textMuted,
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {srcLabel}
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                            {entries.map(({ entry, idx: i }) => {
-                              const isCurrent = cloud === entry.cloud;
-                              return (
-                                <div
-                                  key={entry.measuredAt + i}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    padding: "8px 10px",
-                                    borderRadius: "6px",
-                                    backgroundColor: isCurrent
-                                      ? colors.primary + "22"
-                                      : colors.bgDark,
-                                    border: isCurrent
-                                      ? `1px solid ${colors.primary}`
-                                      : `1px solid ${colors.border}`,
-                                  }}
-                                >
+                    {(["coin", "coin2", "tgv", "step", "csv", "ai"] as HistorySource[]).map(
+                      (src) => {
+                        const entries = cloudHistory
+                          .map((e, i) => ({ entry: e, idx: i }))
+                          .filter(({ entry }) => entry.source === src);
+                        if (entries.length === 0) return null;
+                        const srcLabel =
+                          src === "coin"
+                            ? "硬貨"
+                            : src === "coin2"
+                              ? "硬貨(別アプローチ)"
+                              : src === "tgv"
+                                ? "TGV"
+                                : src === "step"
+                                  ? "段差マスタ"
+                                  : "CSVインポート";
+                        return (
+                          <div key={src} style={{ marginBottom: "10px" }}>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: colors.textMuted,
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {srcLabel}
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                              {entries.map(({ entry, idx: i }) => {
+                                const isCurrent = cloud === entry.cloud;
+                                return (
                                   <div
-                                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                                    key={entry.measuredAt + i}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      padding: "8px 10px",
+                                      borderRadius: "6px",
+                                      backgroundColor: isCurrent
+                                        ? colors.primary + "22"
+                                        : colors.bgDark,
+                                      border: isCurrent
+                                        ? `1px solid ${colors.primary}`
+                                        : `1px solid ${colors.border}`,
+                                    }}
                                   >
-                                    <img
-                                      src={entry.thumbnail}
-                                      alt={`#${cloudHistory.length - i}`}
-                                      style={{
-                                        width: "48px",
-                                        height: "48px",
-                                        borderRadius: "4px",
-                                        border: `1px solid ${colors.border}`,
-                                        flexShrink: 0,
-                                      }}
-                                    />
                                     <div
-                                      style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        gap: "2px",
-                                      }}
+                                      style={{ display: "flex", alignItems: "center", gap: "8px" }}
                                     >
-                                      {editingNameIdx === i ? (
-                                        <input
-                                          autoFocus
-                                          value={editingNameValue}
-                                          onChange={(e) => setEditingNameValue(e.target.value)}
-                                          onBlur={() => {
-                                            setCloudHistory((prev) =>
-                                              prev.map((h, idx) =>
-                                                idx === i
-                                                  ? { ...h, name: editingNameValue.trim() }
-                                                  : h
-                                              )
-                                            );
-                                            setEditingNameIdx(null);
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (e.key === "Enter")
-                                              (e.target as HTMLInputElement).blur();
-                                            if (e.key === "Escape") setEditingNameIdx(null);
-                                          }}
-                                          placeholder={`#${cloudHistory.length - i}`}
-                                          style={{
-                                            fontSize: "12px",
-                                            fontWeight: 600,
-                                            fontFamily,
-                                            width: "100px",
-                                            padding: "1px 4px",
-                                            border: `1px solid ${colors.primary}`,
-                                            borderRadius: "3px",
-                                            backgroundColor: colors.bgDark,
-                                            color: colors.text,
-                                            outline: "none",
-                                          }}
-                                        />
-                                      ) : (
-                                        <span
-                                          style={{
-                                            fontSize: "12px",
-                                            fontWeight: 600,
-                                            cursor: "pointer",
-                                          }}
-                                          title="クリックで名前を変更"
-                                          onClick={() => {
-                                            setEditingNameIdx(i);
-                                            setEditingNameValue(entry.name);
-                                          }}
-                                        >
-                                          {entry.name || `#${cloudHistory.length - i}`}
-                                        </span>
-                                      )}
-                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                        {entry.measuredAt}
-                                      </span>
-                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                        {entry.points.toLocaleString()} pts
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div
-                                    style={{ display: "flex", gap: "4px", alignItems: "center" }}
-                                  >
-                                    {isCurrent ? (
-                                      <span
+                                      <img
+                                        src={entry.thumbnail}
+                                        alt={`#${cloudHistory.length - i}`}
                                         style={{
-                                          fontSize: "11px",
-                                          color: colors.primary,
-                                          fontWeight: 600,
+                                          width: "48px",
+                                          height: "48px",
+                                          borderRadius: "4px",
+                                          border: `1px solid ${colors.border}`,
+                                          flexShrink: 0,
+                                        }}
+                                      />
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: "2px",
                                         }}
                                       >
-                                        表示中
-                                      </span>
-                                    ) : (
+                                        {editingNameIdx === i ? (
+                                          <input
+                                            autoFocus
+                                            value={editingNameValue}
+                                            onChange={(e) => setEditingNameValue(e.target.value)}
+                                            onBlur={() => {
+                                              setCloudHistory((prev) =>
+                                                prev.map((h, idx) =>
+                                                  idx === i
+                                                    ? { ...h, name: editingNameValue.trim() }
+                                                    : h
+                                                )
+                                              );
+                                              setEditingNameIdx(null);
+                                            }}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter")
+                                                (e.target as HTMLInputElement).blur();
+                                              if (e.key === "Escape") setEditingNameIdx(null);
+                                            }}
+                                            placeholder={`#${cloudHistory.length - i}`}
+                                            style={{
+                                              fontSize: "12px",
+                                              fontWeight: 600,
+                                              fontFamily,
+                                              width: "100px",
+                                              padding: "1px 4px",
+                                              border: `1px solid ${colors.primary}`,
+                                              borderRadius: "3px",
+                                              backgroundColor: colors.bgDark,
+                                              color: colors.text,
+                                              outline: "none",
+                                            }}
+                                          />
+                                        ) : (
+                                          <span
+                                            style={{
+                                              fontSize: "12px",
+                                              fontWeight: 600,
+                                              cursor: "pointer",
+                                            }}
+                                            title="クリックで名前を変更"
+                                            onClick={() => {
+                                              setEditingNameIdx(i);
+                                              setEditingNameValue(entry.name);
+                                            }}
+                                          >
+                                            {entry.name || `#${cloudHistory.length - i}`}
+                                          </span>
+                                        )}
+                                        <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                          {entry.measuredAt}
+                                        </span>
+                                        <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                          {entry.points.toLocaleString()} pts
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div
+                                      style={{ display: "flex", gap: "4px", alignItems: "center" }}
+                                    >
+                                      {isCurrent ? (
+                                        <span
+                                          style={{
+                                            fontSize: "11px",
+                                            color: colors.primary,
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          表示中
+                                        </span>
+                                      ) : (
+                                        <button
+                                          style={{
+                                            padding: "4px 10px",
+                                            fontSize: "11px",
+                                            fontWeight: 600,
+                                            fontFamily,
+                                            border: `1px solid ${colors.primary}`,
+                                            borderRadius: "4px",
+                                            backgroundColor: "transparent",
+                                            color: colors.primary,
+                                            cursor: "pointer",
+                                          }}
+                                          onClick={() => {
+                                            setShowSlice(false);
+                                            setCloud(entry.cloud);
+                                            setShowPlot(true);
+                                          }}
+                                        >
+                                          復元
+                                        </button>
+                                      )}
                                       <button
                                         style={{
                                           padding: "4px 10px",
                                           fontSize: "11px",
                                           fontWeight: 600,
                                           fontFamily,
-                                          border: `1px solid ${colors.primary}`,
+                                          border: `1px solid ${colors.danger}`,
                                           borderRadius: "4px",
                                           backgroundColor: "transparent",
-                                          color: colors.primary,
+                                          color: colors.danger,
                                           cursor: "pointer",
                                         }}
-                                        onClick={() => {
-                                          setShowSlice(false);
-                                          setCloud(entry.cloud);
-                                          setShowPlot(true);
-                                        }}
+                                        onClick={() => setDeleteConfirmIdx(i)}
                                       >
-                                        復元
+                                        削除
                                       </button>
-                                    )}
-                                    <button
-                                      style={{
-                                        padding: "4px 10px",
-                                        fontSize: "11px",
-                                        fontWeight: 600,
-                                        fontFamily,
-                                        border: `1px solid ${colors.danger}`,
-                                        borderRadius: "4px",
-                                        backgroundColor: "transparent",
-                                        color: colors.danger,
-                                        cursor: "pointer",
-                                      }}
-                                      onClick={() => setDeleteConfirmIdx(i)}
-                                    >
-                                      削除
-                                    </button>
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      }
+                    )}
                   </div>
                 )}
               </>
@@ -3204,6 +3263,8 @@ function App() {
             >
               {confirmMode === "csv" ? (
                 "csvファイルを出力しますか？"
+              ) : confirmMode === "ai" ? (
+                "AI推論を実行しますか？"
               ) : (
                 <>
                   3次元形状計測を開始しますか？
