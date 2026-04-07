@@ -2282,7 +2282,7 @@ function App() {
                   </div>
                 )}
 
-                {isAcquiring && (
+                {(isAcquiring || isLoadingAI) && (
                   <div
                     style={{
                       position: "absolute",
@@ -2300,7 +2300,9 @@ function App() {
                       gap: "16px",
                     }}
                   >
-                    <div style={{ fontSize: "18px", fontWeight: 600 }}>画像処理中...</div>
+                    <div style={{ fontSize: "18px", fontWeight: 600 }}>
+                      {isLoadingAI ? "AI推論中..." : "画像処理中..."}
+                    </div>
 
                     {/* 進捗バー */}
                     <div
