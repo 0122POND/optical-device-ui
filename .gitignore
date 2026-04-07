@@ -32,6 +32,9 @@ data/result_coin_ruined/
 # Claude Code
 CLAUDE.md
 
+# AIモデル（サイズが大きいため除外）
+backend/models/*.pth
+
 # Python
 __pycache__/
 *.py[cod]
