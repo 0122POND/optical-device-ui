@@ -111,6 +111,10 @@ function App() {
 
   // 左右反転フラグ（true = 反転 / false = 通常）
   const [flipX, setFlipX] = useState(false);
+  // Z軸反転フラグ（true = 反転 / false = 通常）
+  const [flipZ] = useState(false);
+  // Y軸反転フラグ（true = 反転 / false = 通常）- 文字鏡像の補正用
+  const [flipY, setFlipY] = useState(false);
 
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
@@ -120,7 +124,9 @@ function App() {
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
-  const [algorithm, setAlgorithm] = useState<"coin" | "coin2" | "tgv" | "step">("coin");
+  const [algorithm, setAlgorithm] = useState<
+    "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi"
+  >("coin");
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -158,7 +164,7 @@ function App() {
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）
-  type HistorySource = "coin" | "coin2" | "tgv" | "step" | "csv" | "ai";
+  type HistorySource = "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi" | "csv" | "ai";
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
@@ -244,7 +250,6 @@ function App() {
   const [progressTotal, setProgressTotal] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
-  const [progressEta, setProgressEta] = useState<number | null>(null);
 
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
@@ -265,6 +270,7 @@ function App() {
 
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
+  const [showAlgorithms, setShowAlgorithms] = useState(false);
   const aboutRef = useRef<HTMLDivElement>(null);
 
   // About Usポップアップ外クリックで閉じる
@@ -373,7 +379,6 @@ function App() {
           setProgressTotal(data.total);
           setProgressMessage(data.message);
           setProgressPercent(data.percent);
-          setProgressEta(data.eta_sec ?? null);
         } else if (data.type === "ai_inference_complete") {
           console.log("AI推論完了:", data.count, "files", "device:", data.device);
           try {
@@ -381,7 +386,7 @@ function App() {
               folderUrl: "/data/mask_result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: true,
+              flipZ: flipZ,
               colorMode: "z",
               ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
@@ -426,7 +431,7 @@ function App() {
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: true,
+              flipZ: flipZ,
               colorMode: "z",
               ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
@@ -601,6 +606,11 @@ function App() {
           );
         } else {
           surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+        }
+        // Y軸反転: 各行を逆順にして文字鏡像を補正
+        if (flipY) {
+          surfaceZ = surfaceZ.map((row) => [...row].reverse());
+          surfXCoords = [...surfXCoords].reverse();
         }
         xLabel = "X [µm]";
         yLabel = "Y [µm]";
@@ -843,9 +853,17 @@ function App() {
         : sweepVal
       : UM_PER_PIXEL_Y;
 
+    // Y軸反転: Y座標を反転して文字鏡像を補正
+    const yData = flipY
+      ? (() => {
+          const maxY = cloud.y.reduce((a, b) => (a > b ? a : b), cloud.y[0]);
+          return cloud.y.map((v) => maxY - v);
+        })()
+      : cloud.y;
+
     // 物理単位（µm）に変換
     const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
-    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL_Y);
+    const yDataUm = yData.map((v) => v * UM_PER_PIXEL_Y);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -1106,6 +1124,7 @@ function App() {
     axisVisible,
     cloud,
     flipX,
+    flipY,
     viewMode,
     showSlice,
     sliceLineStart,
@@ -1550,7 +1569,7 @@ function App() {
         folderUrl: "/data/mask_result",
         threshold: 128,
         samplePerSlice: 4000,
-        flipZ: true,
+        flipZ: flipZ,
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
@@ -1671,8 +1690,16 @@ function App() {
             )}
           </div>
 
-          <div style={{ fontWeight: 600, fontSize: "16px", letterSpacing: "0.3px" }}>
-            3D Surface Measurement UI
+          <div
+            style={{
+              fontFamily: '"Orbitron", sans-serif',
+              fontWeight: 700,
+              fontSize: "18px",
+              letterSpacing: "2px",
+              textTransform: "uppercase",
+            }}
+          >
+            Tori-Ton UI
           </div>
 
           <div
@@ -2067,6 +2094,87 @@ function App() {
                     }}
                   />
 
+                  {/* 正面ビュー */}
+                  <button
+                    title="正面ビュー"
+                    style={tbBtnStyle()}
+                    onClick={() => {
+                      const el = plotRef.current;
+                      if (!el) return;
+                      Plotly.relayout(el, {
+                        "scene.camera": {
+                          eye: { x: 2.0, y: 0, z: 0.5 },
+                          up: { x: 0, y: 0, z: 1 },
+                          center: { x: 0, y: 0, z: 0 },
+                        },
+                      });
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="12" cy="12" r="2" fill={svgColor} />
+                      <line x1="12" y1="6" x2="12" y2="10" />
+                      <line x1="12" y1="14" x2="12" y2="18" />
+                      <line x1="6" y1="12" x2="10" y2="12" />
+                      <line x1="14" y1="12" x2="18" y2="12" />
+                    </svg>
+                  </button>
+
+                  {/* 正面90°回転ビュー */}
+                  <button
+                    title="正面 90°回転"
+                    style={tbBtnStyle()}
+                    onClick={() => {
+                      const el = plotRef.current;
+                      if (!el) return;
+                      Plotly.relayout(el, {
+                        "scene.camera": {
+                          eye: { x: 2.0, y: 0, z: 0.5 },
+                          up: { x: 0, y: 1, z: 0 },
+                          center: { x: 0, y: 0, z: 0 },
+                        },
+                      });
+                    }}
+                  >
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={svgColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="12" cy="12" r="2" fill={svgColor} />
+                      <line x1="12" y1="6" x2="12" y2="10" />
+                      <line x1="12" y1="14" x2="12" y2="18" />
+                      <line x1="6" y1="12" x2="10" y2="12" />
+                      <line x1="14" y1="12" x2="18" y2="12" />
+                      <path d="M17 4l2 2-2 2" fill="none" />
+                    </svg>
+                  </button>
+
+                  {/* セパレータ */}
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "28px",
+                      backgroundColor: "#7a8290",
+                      margin: "0 2px",
+                    }}
+                  />
+
                   {/* XY平面ビュー */}
                   <button
                     title="XY平面ビュー"
@@ -2276,9 +2384,9 @@ function App() {
                       fontSize: "15px",
                     }}
                   >
-                    右側の「▶ CPU」または「▶ GPU」ボタンから
+                    右側のボタンから3次元形状の
                     <br />
-                    3次元形状計測を開始してください。
+                    計測・表示を開始してください。
                   </div>
                 )}
 
@@ -2326,18 +2434,6 @@ function App() {
 
                     <div style={{ fontSize: "14px" }}>
                       [{progressStep}/{progressTotal}] {progressMessage}
-                    </div>
-
-                    <div style={{ fontSize: "12px", color: colors.textMuted }}>
-                      {progressPercent}%
-                      {progressEta !== null && progressEta > 0 && (
-                        <span style={{ marginLeft: "8px" }}>
-                          残り約
-                          {progressEta >= 60
-                            ? `${Math.floor(progressEta / 60)}分${progressEta % 60}秒`
-                            : `${progressEta}秒`}
-                        </span>
-                      )}
                     </div>
                   </div>
                 )}
@@ -2440,9 +2536,52 @@ function App() {
             {/* 操作タブ */}
             {sideTab === "actions" && (
               <>
-                {/* アルゴリズム選択 */}
-                <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}>
-                  アルゴリズム
+                {/* アルゴリズム選択（アコーディオン） */}
+                <div
+                  onClick={() => setShowAlgorithms((v) => !v)}
+                  style={{
+                    fontSize: "11px",
+                    color: colors.textMuted,
+                    marginBottom: showAlgorithms ? "6px" : "12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    userSelect: "none",
+                  }}
+                >
+                  <span>
+                    アルゴリズム：
+                    <span style={{ color: colors.primary, fontWeight: 600 }}>
+                      {algorithm === "coin"
+                        ? "硬貨"
+                        : algorithm === "coin2"
+                          ? "硬貨(別アプローチ)"
+                          : algorithm === "tgv"
+                            ? "TGV"
+                            : algorithm === "elec"
+                              ? "エレキ"
+                              : algorithm === "medical"
+                                ? "医療"
+                                : "半導体"}
+                    </span>
+                  </span>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      transition: "transform 0.2s ease",
+                      transform: showAlgorithms ? "rotate(180deg)" : "rotate(0deg)",
+                    }}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </div>
                 <div
                   style={{
@@ -2450,9 +2589,12 @@ function App() {
                     gridTemplateColumns: "1fr 1fr",
                     gap: "4px",
                     marginBottom: "12px",
+                    maxHeight: showAlgorithms ? "300px" : "0px",
+                    overflow: "hidden",
+                    transition: "max-height 0.25s ease",
                   }}
                 >
-                  {(["coin", "coin2", "tgv", "step"] as const).map((alg) => {
+                  {(["coin", "coin2", "tgv", "elec", "medical", "semi"] as const).map((alg) => {
                     const label =
                       alg === "coin"
                         ? "硬貨"
@@ -2460,7 +2602,11 @@ function App() {
                           ? "硬貨(別アプローチ)"
                           : alg === "tgv"
                             ? "TGV"
-                            : "段差";
+                            : alg === "elec"
+                              ? "エレキ"
+                              : alg === "medical"
+                                ? "医療"
+                                : "半導体";
                     const icon =
                       alg === "coin" || alg === "coin2" ? (
                         <>
@@ -2472,8 +2618,30 @@ function App() {
                           <rect x="2" y="6" width="20" height="12" rx="1" />
                           <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
                         </>
+                      ) : alg === "elec" ? (
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                      ) : alg === "medical" ? (
+                        <>
+                          <line x1="12" y1="4" x2="12" y2="20" />
+                          <line x1="4" y1="12" x2="20" y2="12" />
+                        </>
                       ) : (
-                        <path d="M2 16h8V8h4v8h8" />
+                        <>
+                          <rect x="4" y="4" width="16" height="16" rx="2" />
+                          <rect x="8" y="8" width="8" height="8" rx="1" />
+                          <line x1="8" y1="2" x2="8" y2="4" />
+                          <line x1="12" y1="2" x2="12" y2="4" />
+                          <line x1="16" y1="2" x2="16" y2="4" />
+                          <line x1="8" y1="20" x2="8" y2="22" />
+                          <line x1="12" y1="20" x2="12" y2="22" />
+                          <line x1="16" y1="20" x2="16" y2="22" />
+                          <line x1="2" y1="8" x2="4" y2="8" />
+                          <line x1="2" y1="12" x2="4" y2="12" />
+                          <line x1="2" y1="16" x2="4" y2="16" />
+                          <line x1="20" y1="8" x2="22" y2="8" />
+                          <line x1="20" y1="12" x2="22" y2="12" />
+                          <line x1="20" y1="16" x2="22" y2="16" />
+                        </>
                       );
                     return (
                       <button
@@ -2652,6 +2820,41 @@ function App() {
                       <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
                     </svg>
                     {flipX ? "反転: ON" : "左右反転"}
+                  </button>
+
+                  {/* Y軸反転（鏡像補正）トグルボタン */}
+                  <button
+                    disabled={!showPlot}
+                    onClick={() => {
+                      if (!showPlot) return;
+                      setFlipY((v) => !v);
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: flipY ? "#4a6280" : "#1e2d42",
+                      border: `1px solid #3a5068`,
+                      cursor: showPlot ? "pointer" : "not-allowed",
+                      opacity: showPlot ? 1 : 0.5,
+                      fontSize: "12px",
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3" />
+                      <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3" />
+                      <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2" />
+                      <polyline points="6 9 9 12 6 15" />
+                      <polyline points="18 9 15 12 18 15" />
+                    </svg>
+                    {flipY ? "鏡像: ON" : "鏡像補正"}
                   </button>
 
                   {/* 距離計測ボタン */}
@@ -2981,192 +3184,205 @@ function App() {
                     >
                       測定履歴（最新5件）
                     </div>
-                    {(["coin", "coin2", "tgv", "step", "csv", "ai"] as HistorySource[]).map(
-                      (src) => {
-                        const entries = cloudHistory
-                          .map((e, i) => ({ entry: e, idx: i }))
-                          .filter(({ entry }) => entry.source === src);
-                        if (entries.length === 0) return null;
-                        const srcLabel =
-                          src === "coin"
-                            ? "硬貨"
-                            : src === "coin2"
-                              ? "硬貨(別アプローチ)"
-                              : src === "tgv"
-                                ? "TGV"
-                                : src === "step"
-                                  ? "段差マスタ"
-                                  : "CSVインポート";
-                        return (
-                          <div key={src} style={{ marginBottom: "10px" }}>
-                            <div
-                              style={{
-                                fontSize: "11px",
-                                color: colors.textMuted,
-                                marginBottom: "4px",
-                              }}
-                            >
-                              {srcLabel}
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                              {entries.map(({ entry, idx: i }) => {
-                                const isCurrent = cloud === entry.cloud;
-                                return (
+                    {(
+                      [
+                        "coin",
+                        "coin2",
+                        "tgv",
+                        "elec",
+                        "medical",
+                        "semi",
+                        "csv",
+                        "ai",
+                      ] as HistorySource[]
+                    ).map((src) => {
+                      const entries = cloudHistory
+                        .map((e, i) => ({ entry: e, idx: i }))
+                        .filter(({ entry }) => entry.source === src);
+                      if (entries.length === 0) return null;
+                      const srcLabel =
+                        src === "coin"
+                          ? "硬貨"
+                          : src === "coin2"
+                            ? "硬貨(別アプローチ)"
+                            : src === "tgv"
+                              ? "TGV"
+                              : src === "elec"
+                                ? "エレキ"
+                                : src === "medical"
+                                  ? "医療"
+                                  : src === "semi"
+                                    ? "半導体"
+                                    : "CSVインポート";
+                      return (
+                        <div key={src} style={{ marginBottom: "10px" }}>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: colors.textMuted,
+                              marginBottom: "4px",
+                            }}
+                          >
+                            {srcLabel}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            {entries.map(({ entry, idx: i }) => {
+                              const isCurrent = cloud === entry.cloud;
+                              return (
+                                <div
+                                  key={entry.measuredAt + i}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    padding: "8px 10px",
+                                    borderRadius: "6px",
+                                    backgroundColor: isCurrent
+                                      ? colors.primary + "22"
+                                      : colors.bgDark,
+                                    border: isCurrent
+                                      ? `1px solid ${colors.primary}`
+                                      : `1px solid ${colors.border}`,
+                                  }}
+                                >
                                   <div
-                                    key={entry.measuredAt + i}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "space-between",
-                                      padding: "8px 10px",
-                                      borderRadius: "6px",
-                                      backgroundColor: isCurrent
-                                        ? colors.primary + "22"
-                                        : colors.bgDark,
-                                      border: isCurrent
-                                        ? `1px solid ${colors.primary}`
-                                        : `1px solid ${colors.border}`,
-                                    }}
+                                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
                                   >
+                                    <img
+                                      src={entry.thumbnail}
+                                      alt={`#${cloudHistory.length - i}`}
+                                      style={{
+                                        width: "48px",
+                                        height: "48px",
+                                        borderRadius: "4px",
+                                        border: `1px solid ${colors.border}`,
+                                        flexShrink: 0,
+                                      }}
+                                    />
                                     <div
-                                      style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                                      style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "2px",
+                                      }}
                                     >
-                                      <img
-                                        src={entry.thumbnail}
-                                        alt={`#${cloudHistory.length - i}`}
-                                        style={{
-                                          width: "48px",
-                                          height: "48px",
-                                          borderRadius: "4px",
-                                          border: `1px solid ${colors.border}`,
-                                          flexShrink: 0,
-                                        }}
-                                      />
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          flexDirection: "column",
-                                          gap: "2px",
-                                        }}
-                                      >
-                                        {editingNameIdx === i ? (
-                                          <input
-                                            autoFocus
-                                            value={editingNameValue}
-                                            onChange={(e) => setEditingNameValue(e.target.value)}
-                                            onBlur={() => {
-                                              setCloudHistory((prev) =>
-                                                prev.map((h, idx) =>
-                                                  idx === i
-                                                    ? { ...h, name: editingNameValue.trim() }
-                                                    : h
-                                                )
-                                              );
-                                              setEditingNameIdx(null);
-                                            }}
-                                            onKeyDown={(e) => {
-                                              if (e.key === "Enter")
-                                                (e.target as HTMLInputElement).blur();
-                                              if (e.key === "Escape") setEditingNameIdx(null);
-                                            }}
-                                            placeholder={`#${cloudHistory.length - i}`}
-                                            style={{
-                                              fontSize: "12px",
-                                              fontWeight: 600,
-                                              fontFamily,
-                                              width: "100px",
-                                              padding: "1px 4px",
-                                              border: `1px solid ${colors.primary}`,
-                                              borderRadius: "3px",
-                                              backgroundColor: colors.bgDark,
-                                              color: colors.text,
-                                              outline: "none",
-                                            }}
-                                          />
-                                        ) : (
-                                          <span
-                                            style={{
-                                              fontSize: "12px",
-                                              fontWeight: 600,
-                                              cursor: "pointer",
-                                            }}
-                                            title="クリックで名前を変更"
-                                            onClick={() => {
-                                              setEditingNameIdx(i);
-                                              setEditingNameValue(entry.name);
-                                            }}
-                                          >
-                                            {entry.name || `#${cloudHistory.length - i}`}
-                                          </span>
-                                        )}
-                                        <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                          {entry.measuredAt}
-                                        </span>
-                                        <span style={{ fontSize: "11px", color: colors.textMuted }}>
-                                          {entry.points.toLocaleString()} pts
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div
-                                      style={{ display: "flex", gap: "4px", alignItems: "center" }}
-                                    >
-                                      {isCurrent ? (
-                                        <span
-                                          style={{
-                                            fontSize: "11px",
-                                            color: colors.primary,
-                                            fontWeight: 600,
+                                      {editingNameIdx === i ? (
+                                        <input
+                                          autoFocus
+                                          value={editingNameValue}
+                                          onChange={(e) => setEditingNameValue(e.target.value)}
+                                          onBlur={() => {
+                                            setCloudHistory((prev) =>
+                                              prev.map((h, idx) =>
+                                                idx === i
+                                                  ? { ...h, name: editingNameValue.trim() }
+                                                  : h
+                                              )
+                                            );
+                                            setEditingNameIdx(null);
                                           }}
-                                        >
-                                          表示中
-                                        </span>
-                                      ) : (
-                                        <button
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter")
+                                              (e.target as HTMLInputElement).blur();
+                                            if (e.key === "Escape") setEditingNameIdx(null);
+                                          }}
+                                          placeholder={`#${cloudHistory.length - i}`}
                                           style={{
-                                            padding: "4px 10px",
-                                            fontSize: "11px",
+                                            fontSize: "12px",
                                             fontWeight: 600,
                                             fontFamily,
+                                            width: "100px",
+                                            padding: "1px 4px",
                                             border: `1px solid ${colors.primary}`,
-                                            borderRadius: "4px",
-                                            backgroundColor: "transparent",
-                                            color: colors.primary,
+                                            borderRadius: "3px",
+                                            backgroundColor: colors.bgDark,
+                                            color: colors.text,
+                                            outline: "none",
+                                          }}
+                                        />
+                                      ) : (
+                                        <span
+                                          style={{
+                                            fontSize: "12px",
+                                            fontWeight: 600,
                                             cursor: "pointer",
                                           }}
+                                          title="クリックで名前を変更"
                                           onClick={() => {
-                                            setShowSlice(false);
-                                            setCloud(entry.cloud);
-                                            setShowPlot(true);
+                                            setEditingNameIdx(i);
+                                            setEditingNameValue(entry.name);
                                           }}
                                         >
-                                          復元
-                                        </button>
+                                          {entry.name || `#${cloudHistory.length - i}`}
+                                        </span>
                                       )}
+                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                        {entry.measuredAt}
+                                      </span>
+                                      <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                                        {entry.points.toLocaleString()} pts
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{ display: "flex", gap: "4px", alignItems: "center" }}
+                                  >
+                                    {isCurrent ? (
+                                      <span
+                                        style={{
+                                          fontSize: "11px",
+                                          color: colors.primary,
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        表示中
+                                      </span>
+                                    ) : (
                                       <button
                                         style={{
                                           padding: "4px 10px",
                                           fontSize: "11px",
                                           fontWeight: 600,
                                           fontFamily,
-                                          border: `1px solid ${colors.danger}`,
+                                          border: `1px solid ${colors.primary}`,
                                           borderRadius: "4px",
                                           backgroundColor: "transparent",
-                                          color: colors.danger,
+                                          color: colors.primary,
                                           cursor: "pointer",
                                         }}
-                                        onClick={() => setDeleteConfirmIdx(i)}
+                                        onClick={() => {
+                                          setShowSlice(false);
+                                          setCloud(entry.cloud);
+                                          setShowPlot(true);
+                                        }}
                                       >
-                                        削除
+                                        復元
                                       </button>
-                                    </div>
+                                    )}
+                                    <button
+                                      style={{
+                                        padding: "4px 10px",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                        fontFamily,
+                                        border: `1px solid ${colors.danger}`,
+                                        borderRadius: "4px",
+                                        backgroundColor: "transparent",
+                                        color: colors.danger,
+                                        cursor: "pointer",
+                                      }}
+                                      onClick={() => setDeleteConfirmIdx(i)}
+                                    >
+                                      削除
+                                    </button>
                                   </div>
-                                );
-                              })}
-                            </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      }
-                    )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -3273,11 +3489,15 @@ function App() {
                   <br />（{useGpu ? "GPU" : "CPU"}モード /{" "}
                   {algorithm === "tgv"
                     ? "TGV"
-                    : algorithm === "step"
-                      ? "段差マスタ"
-                      : algorithm === "coin2"
-                        ? "硬貨(別アプローチ)"
-                        : "硬貨"}
+                    : algorithm === "elec"
+                      ? "エレキ"
+                      : algorithm === "medical"
+                        ? "医療"
+                        : algorithm === "semi"
+                          ? "半導体"
+                          : algorithm === "coin2"
+                            ? "硬貨(別アプローチ)"
+                            : "硬貨"}
                   ）
                 </>
               )}
