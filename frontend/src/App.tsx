@@ -270,6 +270,7 @@ function App() {
 
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
+  const [showAlgorithms, setShowAlgorithms] = useState(false);
   const aboutRef = useRef<HTMLDivElement>(null);
 
   // About Usポップアップ外クリックで閉じる
@@ -2527,9 +2528,52 @@ function App() {
             {/* 操作タブ */}
             {sideTab === "actions" && (
               <>
-                {/* アルゴリズム選択 */}
-                <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}>
-                  アルゴリズム
+                {/* アルゴリズム選択（アコーディオン） */}
+                <div
+                  onClick={() => setShowAlgorithms((v) => !v)}
+                  style={{
+                    fontSize: "11px",
+                    color: colors.textMuted,
+                    marginBottom: showAlgorithms ? "6px" : "12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    userSelect: "none",
+                  }}
+                >
+                  <span>
+                    アルゴリズム：
+                    <span style={{ color: colors.primary, fontWeight: 600 }}>
+                      {algorithm === "coin"
+                        ? "硬貨"
+                        : algorithm === "coin2"
+                          ? "硬貨(別アプローチ)"
+                          : algorithm === "tgv"
+                            ? "TGV"
+                            : algorithm === "elec"
+                              ? "エレキ"
+                              : algorithm === "medical"
+                                ? "医療"
+                                : "半導体"}
+                    </span>
+                  </span>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      transition: "transform 0.2s ease",
+                      transform: showAlgorithms ? "rotate(180deg)" : "rotate(0deg)",
+                    }}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </div>
                 <div
                   style={{
@@ -2537,6 +2581,9 @@ function App() {
                     gridTemplateColumns: "1fr 1fr",
                     gap: "4px",
                     marginBottom: "12px",
+                    maxHeight: showAlgorithms ? "300px" : "0px",
+                    overflow: "hidden",
+                    transition: "max-height 0.25s ease",
                   }}
                 >
                   {(["coin", "coin2", "tgv", "elec", "medical", "semi"] as const).map((alg) => {
