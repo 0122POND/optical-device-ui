@@ -111,6 +111,10 @@ function App() {
 
   // 左右反転フラグ（true = 反転 / false = 通常）
   const [flipX, setFlipX] = useState(false);
+  // Z軸反転フラグ（true = 反転 / false = 通常）
+  const [flipZ] = useState(false);
+  // Y軸反転フラグ（true = 反転 / false = 通常）- 文字鏡像の補正用
+  const [flipY, setFlipY] = useState(false);
 
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
@@ -381,7 +385,7 @@ function App() {
               folderUrl: "/data/mask_result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: true,
+              flipZ: flipZ,
               colorMode: "z",
               ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
@@ -426,7 +430,7 @@ function App() {
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: true,
+              flipZ: flipZ,
               colorMode: "z",
               ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
@@ -601,6 +605,11 @@ function App() {
           );
         } else {
           surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+        }
+        // Y軸反転: 各行を逆順にして文字鏡像を補正
+        if (flipY) {
+          surfaceZ = surfaceZ.map((row) => [...row].reverse());
+          surfXCoords = [...surfXCoords].reverse();
         }
         xLabel = "X [µm]";
         yLabel = "Y [µm]";
@@ -843,9 +852,17 @@ function App() {
         : sweepVal
       : UM_PER_PIXEL_Y;
 
+    // Y軸反転: Y座標を反転して文字鏡像を補正
+    const yData = flipY
+      ? (() => {
+          const maxY = cloud.y.reduce((a, b) => (a > b ? a : b), cloud.y[0]);
+          return cloud.y.map((v) => maxY - v);
+        })()
+      : cloud.y;
+
     // 物理単位（µm）に変換
     const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
-    const yDataUm = cloud.y.map((v) => v * UM_PER_PIXEL_Y);
+    const yDataUm = yData.map((v) => v * UM_PER_PIXEL_Y);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -1106,6 +1123,7 @@ function App() {
     axisVisible,
     cloud,
     flipX,
+    flipY,
     viewMode,
     showSlice,
     sliceLineStart,
@@ -1550,7 +1568,7 @@ function App() {
         folderUrl: "/data/mask_result",
         threshold: 128,
         samplePerSlice: 4000,
-        flipZ: true,
+        flipZ: flipZ,
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
@@ -2747,6 +2765,41 @@ function App() {
                       <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
                     </svg>
                     {flipX ? "反転: ON" : "左右反転"}
+                  </button>
+
+                  {/* Y軸反転（鏡像補正）トグルボタン */}
+                  <button
+                    disabled={!showPlot}
+                    onClick={() => {
+                      if (!showPlot) return;
+                      setFlipY((v) => !v);
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: flipY ? "#4a6280" : "#1e2d42",
+                      border: `1px solid #3a5068`,
+                      cursor: showPlot ? "pointer" : "not-allowed",
+                      opacity: showPlot ? 1 : 0.5,
+                      fontSize: "12px",
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3" />
+                      <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3" />
+                      <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2" />
+                      <polyline points="6 9 9 12 6 15" />
+                      <polyline points="18 9 15 12 18 15" />
+                    </svg>
+                    {flipY ? "鏡像: ON" : "鏡像補正"}
                   </button>
 
                   {/* 距離計測ボタン */}
