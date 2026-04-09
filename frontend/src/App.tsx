@@ -1690,8 +1690,16 @@ function App() {
             )}
           </div>
 
-          <div style={{ fontWeight: 600, fontSize: "16px", letterSpacing: "0.3px" }}>
-            3D Surface Measurement UI
+          <div
+            style={{
+              fontFamily: '"Orbitron", sans-serif',
+              fontWeight: 700,
+              fontSize: "18px",
+              letterSpacing: "2px",
+              textTransform: "uppercase",
+            }}
+          >
+            Tori-Ton UI
           </div>
 
           <div
