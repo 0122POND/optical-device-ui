@@ -199,6 +199,7 @@ async def ws_endpoint(ws: WebSocket):
         input_dir = params.get("input_dir", str(DATA_DIR / "row_data"))
         output_dir = params.get("output_dir", str(DATA_DIR / "mask_result"))
         threshold = float(params.get("threshold", 0.5))
+        model_type = params.get("model_type", "resnet34")
 
         def blocking_inference():
             from ai_inference import run_ai_inference
@@ -206,6 +207,7 @@ async def ws_endpoint(ws: WebSocket):
                 input_dir=input_dir,
                 output_dir=output_dir,
                 threshold=threshold,
+                model_type=model_type,
                 progress_callback=progress_callback,
             )
 

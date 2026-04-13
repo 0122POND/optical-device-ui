@@ -256,6 +256,8 @@ function App() {
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
+  // AIモデルタイプ選択
+  const [aiModelType, setAiModelType] = useState<"resnet34" | "resnet50">("resnet34");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -1462,7 +1464,7 @@ function App() {
           ws.send(
             JSON.stringify({
               cmd: "ai_inference",
-              params: {},
+              params: { model_type: aiModelType },
             })
           );
         } else {
@@ -3482,7 +3484,36 @@ function App() {
               {confirmMode === "csv" ? (
                 "csvファイルを出力しますか？"
               ) : confirmMode === "ai" ? (
-                "AI推論を実行しますか？"
+                <>
+                  AI推論を実行しますか？
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
+                    <span style={{ fontSize: "13px", whiteSpace: "nowrap" }}>モデル:</span>
+                    <select
+                      value={aiModelType}
+                      onChange={(e) => setAiModelType(e.target.value as "resnet34" | "resnet50")}
+                      style={{
+                        flex: 1,
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        border: `1px solid ${colors.border}`,
+                        backgroundColor: colors.bgDark,
+                        color: colors.text,
+                        fontSize: "13px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="resnet34">ResNet34</option>
+                      <option value="resnet50">ResNet50</option>
+                    </select>
+                  </div>
+                </>
               ) : (
                 <>
                   3次元形状計測を開始しますか？
