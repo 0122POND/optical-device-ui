@@ -20,21 +20,31 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-# モデル設定（unetpp_resnet34.yaml に対応）
-MODEL_CONFIG = {
-    "encoder_name": "resnet34",
-    "in_channels": 3,
-    "classes": 1,
-    "target_size": (1024, 1248),  # (H, W)
+# モデル設定
+MODEL_CONFIGS = {
+    "resnet34": {
+        "encoder_name": "resnet34",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),  # (H, W)
+        "checkpoint": "best_model_resnet34.pth",
+    },
+    "resnet50": {
+        "encoder_name": "resnet50",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),  # (H, W)
+        "checkpoint": "best_model_resnet50.pth",
+    },
 }
 
 # モデルファイルパス
 MODEL_DIR = Path(__file__).parent / "models"
-DEFAULT_CHECKPOINT = MODEL_DIR / "best_model.pth"
 
 # シングルトンでモデルをキャッシュ
 _cached_model = None
 _cached_device = None
+_cached_model_type = None
 
 
 def get_device() -> torch.device:
@@ -47,25 +57,28 @@ def get_device() -> torch.device:
         return torch.device("cpu")
 
 
-def load_model(checkpoint_path: Optional[str] = None, device: Optional[torch.device] = None) -> tuple:
+def load_model(model_type: str = "resnet34", device: Optional[torch.device] = None) -> tuple:
     """モデルをロード（キャッシュ付き）"""
-    global _cached_model, _cached_device
+    global _cached_model, _cached_device, _cached_model_type
+
+    if model_type not in MODEL_CONFIGS:
+        raise ValueError(f"未対応のモデルタイプ: {model_type}")
 
     if device is None:
         device = get_device()
 
-    if checkpoint_path is None:
-        checkpoint_path = str(DEFAULT_CHECKPOINT)
-
-    # キャッシュヒット
-    if _cached_model is not None and _cached_device == device:
+    # キャッシュヒット（同じモデルタイプ・同じデバイスの場合）
+    if _cached_model is not None and _cached_device == device and _cached_model_type == model_type:
         return _cached_model, device
 
+    config = MODEL_CONFIGS[model_type]
+    checkpoint_path = str(MODEL_DIR / config["checkpoint"])
+
     model = smp.UnetPlusPlus(
-        encoder_name=MODEL_CONFIG["encoder_name"],
+        encoder_name=config["encoder_name"],
         encoder_weights=None,
-        in_channels=MODEL_CONFIG["in_channels"],
-        classes=MODEL_CONFIG["classes"],
+        in_channels=config["in_channels"],
+        classes=config["classes"],
     )
 
     state = torch.load(checkpoint_path, map_location=device, weights_only=True)
@@ -79,6 +92,7 @@ def load_model(checkpoint_path: Optional[str] = None, device: Optional[torch.dev
 
     _cached_model = model
     _cached_device = device
+    _cached_model_type = model_type
 
     return model, device
 
@@ -96,6 +110,7 @@ def run_ai_inference(
     input_dir: str,
     output_dir: str,
     threshold: float = 0.5,
+    model_type: str = "resnet34",
     progress_callback: Optional[Callable] = None,
 ) -> dict:
     """
@@ -118,8 +133,8 @@ def run_ai_inference(
     device = get_device()
     progress_callback(1, 6, f"デバイス検出: {device}", percent=5)
 
-    progress_callback(2, 6, "AIモデルをロード中...", percent=10)
-    model, device = load_model(device=device)
+    progress_callback(2, 6, f"AIモデルをロード中... ({model_type})", percent=10)
+    model, device = load_model(model_type=model_type, device=device)
 
     # Step 3: 入力画像の収集
     progress_callback(3, 6, "入力画像を収集中...", percent=15)
@@ -138,7 +153,7 @@ def run_ai_inference(
     os.makedirs(output_dir)
 
     # Transform
-    target_size = MODEL_CONFIG["target_size"]
+    target_size = MODEL_CONFIGS[model_type]["target_size"]
     transform = get_inference_transform(target_size)
 
     # Step 5: 推論実行
