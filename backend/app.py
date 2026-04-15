@@ -300,6 +300,21 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import run_preprocess
                 else:
                     from preprocessing_coin2_cpu import run_preprocess
+            elif algorithm == "elec":
+                if use_gpu:
+                    from preprocessing_elec_gpu import run_preprocess
+                else:
+                    from preprocessing_elec_cpu import run_preprocess
+            elif algorithm == "medical":
+                if use_gpu:
+                    from preprocessing_medical_gpu import run_preprocess
+                else:
+                    from preprocessing_medical_cpu import run_preprocess
+            elif algorithm == "semi":
+                if use_gpu:
+                    from preprocessing_semi_gpu import run_preprocess
+                else:
+                    from preprocessing_semi_cpu import run_preprocess
             else:
                 if use_gpu:
                     from preprocessing_gpu import run_preprocess
@@ -384,6 +399,21 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import save_peak_results
                 else:
                     from preprocessing_coin2_cpu import save_peak_results
+            elif algorithm == "elec":
+                if use_gpu:
+                    from preprocessing_elec_gpu import save_peak_results
+                else:
+                    from preprocessing_elec_cpu import save_peak_results
+            elif algorithm == "medical":
+                if use_gpu:
+                    from preprocessing_medical_gpu import save_peak_results
+                else:
+                    from preprocessing_medical_cpu import save_peak_results
+            elif algorithm == "semi":
+                if use_gpu:
+                    from preprocessing_semi_gpu import save_peak_results
+                else:
+                    from preprocessing_semi_cpu import save_peak_results
             else:
                 if use_gpu:
                     from preprocessing_gpu import save_peak_results
