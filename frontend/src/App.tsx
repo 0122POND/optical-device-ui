@@ -7,9 +7,12 @@ import "./App.css";
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
-// 1ピクセルあたりのµm換算係数（軸ごとに異なる）
-const UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
-const UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
+// 1ピクセルあたりのµm換算係数（軸ごとに異なる）のデフォルト値
+const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
+const DEFAULT_UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
+
+// CSV点群表示時の総点数上限（pointCloud.ts の maxTotalPoints と揃える）
+const CSV_MAX_TOTAL_POINTS = 120_000;
 
 // カラーパレット（モダングレー）
 const colors = {
@@ -34,6 +37,14 @@ const fontFamily =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 // 計測ステータス
+// 経過時間を「12.3秒」「1分5.0秒」形式に整形
+const formatElapsed = (ms: number): string => {
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}秒`;
+  const m = Math.floor(s / 60);
+  return `${m}分${(s - m * 60).toFixed(1)}秒`;
+};
+
 type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
 
 const StatusBadge = ({ status }: { status: MeasureStatus }) => {
@@ -155,6 +166,17 @@ function App() {
   // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("100");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
+  // X/Y軸 µm/pix 換算係数（可変設定）
+  const [umPerPixelXInput, setUmPerPixelXInput] = useState(String(DEFAULT_UM_PER_PIXEL_X));
+  const [umPerPixelYInput, setUmPerPixelYInput] = useState(String(DEFAULT_UM_PER_PIXEL_Y));
+  const umPerPixelX = (() => {
+    const v = parseFloat(umPerPixelXInput);
+    return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_X;
+  })();
+  const umPerPixelY = (() => {
+    const v = parseFloat(umPerPixelYInput);
+    return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_Y;
+  })();
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
@@ -251,13 +273,40 @@ function App() {
   const [progressMessage, setProgressMessage] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
 
+  // 処理経過時間（RUNNING中はカウントアップ、終了時に確定）
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const runStartRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (status !== "RUNNING") return;
+    runStartRef.current = Date.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => {
+      setElapsedMs(Date.now() - runStartRef.current);
+    }, 100);
+    return () => {
+      window.clearInterval(id);
+      setElapsedMs(Date.now() - runStartRef.current);
+    };
+  }, [status]);
+
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   // AIモデルタイプ選択
-  const [aiModelType, setAiModelType] = useState<"resnet34" | "resnet50">("resnet34");
+  type AiModelType =
+    | "resnet34"
+    | "resnet50"
+    | "resnet101"
+    | "resnet152"
+    | "deeplabv3plus_effv2m"
+    | "segformer_b2"
+    | "unetpp_effv2m"
+    | "unetpp_effv2l"
+    | "unetpp_2_5d";
+  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet34");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -576,7 +625,7 @@ function App() {
         ? sweepIntervalUnit === "mm"
           ? sweepVal * 1000
           : sweepVal
-        : UM_PER_PIXEL_Y;
+        : umPerPixelY;
 
       // データソース判定: 値がピクセル座標っぽい（小さい値）なら光学デバイス、大きい値ならCSV（Keyence等）
       // 光学デバイスのgrid値はX重心(0〜画像幅≒1000px)、KeyenceのCSV値は高さ(µm、数百〜)
@@ -593,7 +642,7 @@ function App() {
 
       if (isOpticalDevice) {
         // 光学デバイス: 列=Y方向ピクセル→µm, 行=Zスライス→µm, 値=X重心→µm
-        surfXCoords = Array.from({ length: numCols }, (_, i) => i * UM_PER_PIXEL_Y);
+        surfXCoords = Array.from({ length: numCols }, (_, i) => i * umPerPixelY);
         surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
         if (flipX) {
           // 左右反転: X重心を反転してからµm変換
@@ -604,10 +653,10 @@ function App() {
             }
           }
           surfaceZ = zData.map((row) =>
-            row.map((v) => (v == null ? null : (maxRawX - v) * UM_PER_PIXEL_X))
+            row.map((v) => (v == null ? null : (maxRawX - v) * umPerPixelX))
           );
         } else {
-          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
+          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
         }
         // Y軸反転: 各行を逆順にして文字鏡像を補正
         if (flipY) {
@@ -846,14 +895,14 @@ function App() {
         })()
       : cloud.x;
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL_Y;
+      : umPerPixelY;
 
     // Y軸反転: Y座標を反転して文字鏡像を補正
     const yData = flipY
@@ -864,8 +913,8 @@ function App() {
       : cloud.y;
 
     // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
-    const yDataUm = yData.map((v) => v * UM_PER_PIXEL_Y);
+    const xDataUm = xData.map((v) => v * umPerPixelX);
+    const yDataUm = yData.map((v) => v * umPerPixelY);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -1133,6 +1182,8 @@ function App() {
     sliceLineEnd,
     sweepInterval,
     sweepIntervalUnit,
+    umPerPixelX,
+    umPerPixelY,
     plotType,
     zData,
     measureMode,
@@ -1150,21 +1201,21 @@ function App() {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL_Y;
+      : umPerPixelY;
 
     // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
     const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
     // surfaceモードかつCSV由来: grid値がすでにµm（高さ）なので変換不要
     const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
     const depthToUm = (rawVal: number) =>
-      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * UM_PER_PIXEL_X : rawVal * UM_PER_PIXEL_X;
+      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * umPerPixelX : rawVal * umPerPixelX;
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -1192,9 +1243,9 @@ function App() {
       // surfaceモードかつCSV由来（cloudなし）: クリック座標がピクセル単位なので変換不要
       const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
       // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = isSurfaceCSV ? y0 : y0 / UM_PER_PIXEL_Y;
+      const y0Px = isSurfaceCSV ? y0 : y0 / umPerPixelY;
       const z0Px = isSurfaceCSV ? z0 : z0 / zUmPerSlice;
-      const y1Px = isSurfaceCSV ? y1 : y1 / UM_PER_PIXEL_Y;
+      const y1Px = isSurfaceCSV ? y1 : y1 / umPerPixelY;
       const z1Px = isSurfaceCSV ? z1 : z1 / zUmPerSlice;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
@@ -1286,12 +1337,12 @@ function App() {
       }
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出 ---
-      let minY = cloud.y[0] * UM_PER_PIXEL_Y;
+      let minY = cloud.y[0] * umPerPixelY;
       let maxY = minY;
       let minZ = cloud.z[0] * zUmPerSlice;
       let maxZ = minZ;
       for (let i = 1; i < cloud.y.length; i++) {
-        const yum = cloud.y[i] * UM_PER_PIXEL_Y;
+        const yum = cloud.y[i] * umPerPixelY;
         if (yum < minY) minY = yum;
         if (yum > maxY) maxY = yum;
       }
@@ -1307,7 +1358,7 @@ function App() {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * UM_PER_PIXEL_Y - y0;
+        const py = cloud.y[i] * umPerPixelY - y0;
         const pz = cloud.z[i] * zUmPerSlice - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
@@ -1392,6 +1443,8 @@ function App() {
     sliceLineEnd,
     sweepInterval,
     sweepIntervalUnit,
+    umPerPixelX,
+    umPerPixelY,
     flipX,
     plotType,
   ]);
@@ -1491,65 +1544,183 @@ function App() {
     setConfirmMode(null);
   };
 
+  // CSVテキストを取り込み、3Dプロット表示まで行う共通処理
+  const loadCsvText = (text: string, source: HistorySource = "csv") => {
+    const grid = parseCSV(text);
+    if (grid.length === 0) {
+      alert("CSVデータが空です");
+      return;
+    }
+    const xArr: number[] = [];
+    const yArr: number[] = [];
+    const zArr: number[] = [];
+    const cArr: number[] = [];
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        const v = grid[row][col];
+        if (v == null) continue;
+        xArr.push(v);
+        yArr.push(col);
+        zArr.push(row);
+        cArr.push(v);
+      }
+    }
+    if (xArr.length === 0) {
+      alert("有効なデータがありません");
+      return;
+    }
+    // 総点数が上限を超える場合はランダム間引き（画像処理結果 pointCloud.ts と同じ方式）
+    let cx = xArr,
+      cy = yArr,
+      cz = zArr,
+      cc = cArr;
+    if (xArr.length > CSV_MAX_TOTAL_POINTS) {
+      const indices = Array.from({ length: xArr.length }, (_, i) => i);
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      indices.length = CSV_MAX_TOTAL_POINTS;
+      indices.sort((a, b) => a - b); // 元の並び順を保持
+      cx = indices.map((idx) => xArr[idx]);
+      cy = indices.map((idx) => yArr[idx]);
+      cz = indices.map((idx) => zArr[idx]);
+      cc = indices.map((idx) => cArr[idx]);
+    }
+    const newCloud = { x: cx, y: cy, z: cz, c: cc };
+    setShowSlice(false);
+    setZData(grid);
+    setCloud(newCloud);
+    setPlotType("surface");
+    setShowPlot(true);
+    setStatus("COMPLETE");
+    const now = new Date().toLocaleString("ja-JP");
+    setLastMeasuredAt(now);
+    setMeasureCount((c) => c + 1);
+    const thumb = generateThumbnail(newCloud);
+    setCloudHistory((prev) =>
+      [
+        {
+          cloud: newCloud,
+          measuredAt: now,
+          points: newCloud.x.length,
+          thumbnail: thumb,
+          name: "",
+          source,
+        },
+        ...prev,
+      ].slice(0, 5)
+    );
+  };
+
   // CSV読み込み処理
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const text = reader.result as string;
-      const grid = parseCSV(text);
-      if (grid.length === 0) {
-        alert("CSVデータが空です");
-        return;
-      }
-      // 2Dグリッド → PointCloud 変換
-      const xArr: number[] = [];
-      const yArr: number[] = [];
-      const zArr: number[] = [];
-      const cArr: number[] = [];
-      for (let row = 0; row < grid.length; row++) {
-        for (let col = 0; col < grid[row].length; col++) {
-          const v = grid[row][col];
-          if (v == null) continue;
-          xArr.push(v);
-          yArr.push(col);
-          zArr.push(row);
-          cArr.push(v);
-        }
-      }
-      if (xArr.length === 0) {
-        alert("有効なデータがありません");
-        return;
-      }
-      const newCloud = { x: xArr, y: yArr, z: zArr, c: cArr };
-      setShowSlice(false);
-      setZData(grid);
-      setCloud(newCloud);
-      setPlotType("surface");
-      setShowPlot(true);
-      setStatus("COMPLETE");
-      const now = new Date().toLocaleString("ja-JP");
-      setLastMeasuredAt(now);
-      setMeasureCount((c) => c + 1);
-      const thumb = generateThumbnail(newCloud);
-      setCloudHistory((prev) =>
-        [
-          {
-            cloud: newCloud,
-            measuredAt: now,
-            points: newCloud.x.length,
-            thumbnail: thumb,
-            name: "",
-            source: "csv" as HistorySource,
-          },
-          ...prev,
-        ].slice(0, 5)
-      );
+      loadCsvText(reader.result as string, "csv");
     };
     reader.readAsText(file);
     // 同じファイルを再選択できるようにリセット
     e.target.value = "";
+  };
+
+  // 画像 → 深度推定 → CSV 取り込み
+  const depthImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDepthInferring, setIsDepthInferring] = useState(false);
+  const [depthHeightRange, setDepthHeightRange] = useState("1000");
+  const [depthInvert, setDepthInvert] = useState(true);
+  const [depthModelSize, setDepthModelSize] = useState<"small" | "base" | "large" | "depth_pro">(
+    "base"
+  );
+  const [depthGamma, setDepthGamma] = useState("0.5");
+  const [depthClipPercentile, setDepthClipPercentile] = useState("10");
+
+  const handleImageToDepth = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setIsDepthInferring(true);
+    setStatus("RUNNING");
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      fd.append("height_range", depthHeightRange || "1000");
+      fd.append("invert", depthInvert ? "true" : "false");
+      fd.append("max_size", depthModelSize === "depth_pro" ? "0" : "1024");
+      fd.append("model_size", depthModelSize);
+      fd.append("gamma", depthGamma || "1.0");
+      fd.append("clip_percentile", depthClipPercentile || "2");
+
+      const res = await fetch(`http://${window.location.hostname}:8000/depth_from_image`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`深度推論失敗: ${res.status} ${errText}`);
+      }
+      const csvText = await res.text();
+      loadCsvText(csvText, "csv");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      setStatus("READY");
+    } finally {
+      setIsDepthInferring(false);
+    }
+  };
+
+  // 深度補正: カメラ画像 + 現在の干渉縞 zData → 絶対深度マップ
+  const calibImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+
+  const handleCalibrateDepth = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !zData) return;
+
+    setIsCalibrating(true);
+    setStatus("RUNNING");
+    try {
+      // 現在の zData を CSV テキストに変換
+      const csvRows = zData.map((row) =>
+        row.map((v) => (v == null ? "-9999.9" : v.toString())).join(",")
+      );
+      const csvBlob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+
+      const fd = new FormData();
+      fd.append("camera_image", file);
+      fd.append("interference_csv", csvBlob, "interference.csv");
+      fd.append("depth_model_size", depthModelSize);
+      fd.append("max_size", "1024");
+
+      const res = await fetch(`http://${window.location.hostname}:8000/calibrate_depth`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`深度補正失敗: ${res.status} ${errText}`);
+      }
+      const result = await res.json();
+
+      // 補正結果を表示
+      loadCsvText(result.csv, "csv");
+      alert(
+        `深度補正完了\n` +
+          `マッチングスコア: ${(result.match_score * 100).toFixed(1)}%\n` +
+          `有効ピクセル: ${result.valid_points}点\n` +
+          `スケール: ${result.scale.toFixed(4)}\n` +
+          `オフセット: ${result.offset.toFixed(2)} µm\n` +
+          `出力サイズ: ${result.shape[0]}×${result.shape[1]}`
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      setStatus("READY");
+    } finally {
+      setIsCalibrating(false);
+    }
   };
 
   // AI推論の確認ダイアログを表示
@@ -2437,6 +2608,9 @@ function App() {
                     <div style={{ fontSize: "14px" }}>
                       [{progressStep}/{progressTotal}] {progressMessage}
                     </div>
+                    <div style={{ fontSize: "13px", opacity: 0.8 }}>
+                      経過時間: {formatElapsed(elapsedMs)}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2530,6 +2704,50 @@ function App() {
                       <option value="um">µm</option>
                       <option value="mm">mm</option>
                     </select>
+                  </div>
+                </div>
+
+                {/* X軸 µm/pix */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                    X軸 µm/pix（深さ方向）
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder={String(DEFAULT_UM_PER_PIXEL_X)}
+                      value={umPerPixelXInput}
+                      onChange={(e) => setUmPerPixelXInput(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        width: "100px",
+                        height: "32px",
+                        padding: "4px 10px",
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
+                  </div>
+                </div>
+
+                {/* Y軸 µm/pix */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                    Y軸 µm/pix（縦方向）
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder={String(DEFAULT_UM_PER_PIXEL_Y)}
+                      value={umPerPixelYInput}
+                      onChange={(e) => setUmPerPixelYInput(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        width: "100px",
+                        height: "32px",
+                        padding: "4px 10px",
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
                   </div>
                 </div>
               </>
@@ -2971,6 +3189,100 @@ function App() {
                     CSV読込
                   </button>
 
+                  {/* 画像→3D化（Depth Anything V2） */}
+                  <input
+                    ref={depthImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handleImageToDepth}
+                  />
+                  <button
+                    disabled={isDepthInferring || status === "RUNNING"}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: "#2d1e42",
+                      border: `1px solid #563a68`,
+                      fontSize: "12px",
+                      opacity: isDepthInferring ? 0.6 : 1,
+                    }}
+                    onClick={() => {
+                      const hr = prompt(
+                        "高さレンジ(µm) / モデル(small|base|large|depth_pro) / 反転(y/n) / ガンマ(<1で凹凸強調) / クリップ(%)\n" +
+                          "カンマ区切り。空欄は現在値。例: 1000,depth_pro,y,0.7,2",
+                        `${depthHeightRange},${depthModelSize},${depthInvert ? "y" : "n"},${depthGamma},${depthClipPercentile}`
+                      );
+                      if (hr === null) return;
+                      const parts = hr.split(",").map((s) => s.trim());
+                      if (parts[0]) setDepthHeightRange(parts[0]);
+                      if (
+                        parts[1] === "small" ||
+                        parts[1] === "base" ||
+                        parts[1] === "large" ||
+                        parts[1] === "depth_pro"
+                      ) {
+                        setDepthModelSize(parts[1]);
+                      }
+                      if (parts[2]) setDepthInvert(parts[2].toLowerCase() === "y");
+                      if (parts[3]) setDepthGamma(parts[3]);
+                      if (parts[4]) setDepthClipPercentile(parts[4]);
+                      depthImageInputRef.current?.click();
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    {isDepthInferring ? "推論中..." : "画像→3D"}
+                  </button>
+
+                  {/* 深度補正（カメラ画像 + 干渉縞 → 絶対深度） */}
+                  <input
+                    ref={calibImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handleCalibrateDepth}
+                  />
+                  <button
+                    disabled={!zData || isCalibrating || status === "RUNNING"}
+                    title={!zData ? "先に干渉縞データを読み込んでください" : "カメラ画像で深度補正"}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: "#1e3a2f",
+                      border: `1px solid #3a6850`,
+                      fontSize: "12px",
+                      opacity: !zData || isCalibrating ? 0.5 : 1,
+                    }}
+                    onClick={() => calibImageInputRef.current?.click()}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 20V10" />
+                      <path d="M18 20V4" />
+                      <path d="M6 20v-4" />
+                    </svg>
+                    {isCalibrating ? "補正中..." : "深度補正"}
+                  </button>
+
                   {/* マスク画像読込ボタン */}
                   <button
                     disabled={status === "RUNNING" || isLoadingMask}
@@ -3392,6 +3704,21 @@ function App() {
 
             <div style={{ flexGrow: 1 }} />
 
+            {/* 処理経過時間 / 処理時間 */}
+            {(status === "RUNNING" || status === "COMPLETE") && (
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: "13px",
+                  color: colors.text,
+                  opacity: 0.85,
+                  marginBottom: "6px",
+                }}
+              >
+                {status === "RUNNING" ? "経過時間" : "処理時間"}: {formatElapsed(elapsedMs)}
+              </div>
+            )}
+
             {/* STARTボタン（CPU/GPU）- タブ外で常時表示 */}
             <div style={{ display: "flex", gap: "8px" }}>
               <button
@@ -3497,7 +3824,7 @@ function App() {
                     <span style={{ fontSize: "13px", whiteSpace: "nowrap" }}>モデル:</span>
                     <select
                       value={aiModelType}
-                      onChange={(e) => setAiModelType(e.target.value as "resnet34" | "resnet50")}
+                      onChange={(e) => setAiModelType(e.target.value as AiModelType)}
                       style={{
                         flex: 1,
                         padding: "6px 10px",
@@ -3509,8 +3836,15 @@ function App() {
                         cursor: "pointer",
                       }}
                     >
-                      <option value="resnet34">ResNet34</option>
-                      <option value="resnet50">ResNet50</option>
+                      <option value="resnet34">U-Net++ (ResNet34)</option>
+                      <option value="resnet50">U-Net++ (ResNet50)</option>
+                      <option value="resnet101">U-Net++ (ResNet101)</option>
+                      <option value="resnet152">U-Net++ (ResNet152)</option>
+                      <option value="deeplabv3plus_effv2m">DeepLabV3+ (EfficientNetV2-M)</option>
+                      <option value="segformer_b2">SegFormer-B2</option>
+                      <option value="unetpp_effv2m">U-Net++ (EfficientNetV2-M)</option>
+                      <option value="unetpp_effv2l">U-Net++ (EfficientNetV2-L)</option>
+                      <option value="unetpp_2_5d">U-Net++ 2.5D (ResNet34)</option>
                     </select>
                   </div>
                 </>
