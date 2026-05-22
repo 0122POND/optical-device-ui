@@ -6,6 +6,7 @@ line-finder-ai の推論ロジックを移植。
 
 import glob
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Callable, Optional
@@ -23,6 +24,7 @@ from albumentations.pytorch import ToTensorV2
 # モデル設定
 MODEL_CONFIGS = {
     "resnet34": {
+        "architecture": "unetpp",
         "encoder_name": "resnet34",
         "in_channels": 3,
         "classes": 1,
@@ -30,11 +32,69 @@ MODEL_CONFIGS = {
         "checkpoint": "best_model_resnet34.pth",
     },
     "resnet50": {
+        "architecture": "unetpp",
         "encoder_name": "resnet50",
         "in_channels": 3,
         "classes": 1,
-        "target_size": (1024, 1248),  # (H, W)
+        "target_size": (1024, 1248),
         "checkpoint": "best_model_resnet50.pth",
+    },
+    "resnet101": {
+        "architecture": "unetpp",
+        "encoder_name": "resnet101",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_resnet101.pth",
+    },
+    "resnet152": {
+        "architecture": "unetpp",
+        "encoder_name": "resnet152",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_resnet152.pth",
+    },
+    "deeplabv3plus_effv2m": {
+        "architecture": "deeplabv3plus",
+        "encoder_name": "tu-tf_efficientnetv2_m",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_deeplabv3plus_effv2m.pth",
+    },
+    "segformer_b2": {
+        "architecture": "segformer",
+        "model_name": "nvidia/segformer-b2-finetuned-ade-512-512",
+        "num_labels": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_segformer_b2.pth",
+    },
+    "unetpp_effv2m": {
+        "architecture": "unetpp",
+        "encoder_name": "tu-tf_efficientnetv2_m",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_unetpp_effv2m.pth",
+    },
+    "unetpp_effv2l": {
+        "architecture": "unetpp",
+        "encoder_name": "tu-tf_efficientnetv2_l",
+        "in_channels": 3,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_unetpp_effv2l.pth",
+    },
+    "unetpp_2_5d": {
+        "architecture": "unetpp",
+        "encoder_name": "resnet34",
+        "in_channels": 9,
+        "classes": 1,
+        "target_size": (1024, 1248),
+        "checkpoint": "best_model_unetpp_2_5d.pth",
+        "mode": "2.5d",
+        "num_adjacent": 1,
     },
 }
 
@@ -45,6 +105,30 @@ MODEL_DIR = Path(__file__).parent / "models"
 _cached_model = None
 _cached_device = None
 _cached_model_type = None
+
+
+def _build_segformer(model_name: str, num_labels: int) -> torch.nn.Module:
+    """SegFormer を UnetPlusPlus と同じ (B,1,H,W) logits を返すラッパーで包む"""
+    from transformers import SegformerForSemanticSegmentation
+    import torch.nn.functional as F
+
+    class SegFormerWrapper(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = SegformerForSemanticSegmentation.from_pretrained(
+                model_name, num_labels=num_labels, ignore_mismatched_sizes=True
+            )
+
+        def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+            logits = self.model(pixel_values=pixel_values).logits
+            return F.interpolate(
+                logits,
+                size=pixel_values.shape[2:],
+                mode="bilinear",
+                align_corners=False,
+            )
+
+    return SegFormerWrapper()
 
 
 def get_device() -> torch.device:
@@ -73,15 +157,32 @@ def load_model(model_type: str = "resnet34", device: Optional[torch.device] = No
 
     config = MODEL_CONFIGS[model_type]
     checkpoint_path = str(MODEL_DIR / config["checkpoint"])
+    architecture = config.get("architecture", "unetpp")
 
-    model = smp.UnetPlusPlus(
-        encoder_name=config["encoder_name"],
-        encoder_weights=None,
-        in_channels=config["in_channels"],
-        classes=config["classes"],
-    )
+    if architecture == "unetpp":
+        model = smp.UnetPlusPlus(
+            encoder_name=config["encoder_name"],
+            encoder_weights=None,
+            in_channels=config["in_channels"],
+            classes=config["classes"],
+        )
+    elif architecture == "deeplabv3plus":
+        model = smp.DeepLabV3Plus(
+            encoder_name=config["encoder_name"],
+            encoder_weights=None,
+            in_channels=config["in_channels"],
+            classes=config["classes"],
+        )
+    elif architecture == "segformer":
+        model = _build_segformer(config["model_name"], config["num_labels"])
+    else:
+        raise ValueError(f"未対応のアーキテクチャ: {architecture}")
 
-    state = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    # segformer は HuggingFace 重みも含むため weights_only=False が必要な場合あり
+    try:
+        state = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    except Exception:
+        state = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if "model_state_dict" in state:
         model.load_state_dict(state["model_state_dict"])
     else:
@@ -104,6 +205,39 @@ def get_inference_transform(target_size: tuple):
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ], is_check_shapes=False)
+
+
+def _load_and_transform_image(path: str, transform) -> torch.Tensor:
+    """画像を読み込み、transform適用済みテンソル (3, H, W) を返す"""
+    pil_img = Image.open(path).convert("RGB")
+    image = np.array(pil_img)
+    transformed = transform(image=image)
+    return transformed["image"]
+
+
+def _build_2_5d_tensor(
+    image_paths: list,
+    idx: int,
+    transform,
+    num_adjacent: int,
+    device: torch.device,
+) -> tuple:
+    """
+    2.5D用: 前後スライスをスタックして (1, 9, H, W) テンソルを作成。
+    端のスライスはクランプ（繰り返し）。
+    """
+    slices = []
+    n = len(image_paths)
+    for offset in range(-num_adjacent, num_adjacent + 1):
+        adj_idx = max(0, min(idx + offset, n - 1))
+        t = _load_and_transform_image(image_paths[adj_idx], transform)
+        slices.append(t)
+    # (num_slices*3, H, W)
+    stacked = torch.cat(slices, dim=0)
+    # 元画像のサイズ（中央スライス）
+    pil_center = Image.open(image_paths[idx])
+    orig_w, orig_h = pil_center.size
+    return stacked.unsqueeze(0).to(device), orig_w, orig_h
 
 
 def run_ai_inference(
@@ -142,7 +276,15 @@ def run_ai_inference(
     image_paths = []
     for ext in exts:
         image_paths.extend(glob.glob(os.path.join(input_dir, ext)))
-    image_paths = sorted(image_paths)
+    # ファイル名内の数字で数値順（自然順）ソート。
+    # 辞書式だと img_10 が img_2 より前に来てスライス順が壊れる（preprocessing側と統一）。
+    image_paths = sorted(
+        image_paths,
+        key=lambda p: int(
+            (re.search(r"img_(\d+)", os.path.basename(p))
+             or re.search(r"(\d+)", os.path.basename(p))).group(1)
+        ),
+    )
 
     if not image_paths:
         raise ValueError(f"入力画像が見つかりません: {input_dir}")
@@ -193,12 +335,20 @@ def run_ai_inference(
                 percent=inference_percent,
             )
 
-            pil_img = Image.open(img_path).convert("RGB")
-            orig_w, orig_h = pil_img.size
-            image = np.array(pil_img)
+            config = MODEL_CONFIGS[model_type]
+            is_2_5d = config.get("mode") == "2.5d"
 
-            transformed = transform(image=image)
-            image_tensor = transformed["image"].unsqueeze(0).to(device)
+            if is_2_5d:
+                num_adjacent = config.get("num_adjacent", 1)
+                image_tensor, orig_w, orig_h = _build_2_5d_tensor(
+                    image_paths, idx, transform, num_adjacent, device
+                )
+            else:
+                pil_img = Image.open(img_path).convert("RGB")
+                orig_w, orig_h = pil_img.size
+                image = np.array(pil_img)
+                transformed = transform(image=image)
+                image_tensor = transformed["image"].unsqueeze(0).to(device)
 
             output = model(image_tensor)
             pred_prob = torch.sigmoid(output).squeeze(0).squeeze(0).cpu().numpy()
