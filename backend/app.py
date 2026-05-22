@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import cv2
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 # 同一ディレクトリのモジュールをインポートできるようにパスを追加
@@ -519,6 +519,124 @@ async def ws_endpoint(ws: WebSocket):
         print("WebSocket disconnected")
         if running_task and not running_task.done():
             running_task.cancel()
+
+
+# -----------------------------
+# Depth from image (monocular depth estimation → Keyence互換CSV)
+# -----------------------------
+@app.post("/depth_from_image", response_class=PlainTextResponse)
+async def depth_from_image(
+    image: UploadFile = File(...),
+    height_range: float = Form(1000.0),
+    height_min: float = Form(0.0),
+    invert: bool = Form(False),
+    max_size: int = Form(1024),
+    model_size: str = Form("small"),
+    clip_percentile: float = Form(2.0),
+    gamma: float = Form(1.0),
+):
+    """
+    単一画像を Depth Anything V2 で擬似3D化し、Keyence互換の高さマップCSVを返す。
+    """
+    import io
+    from PIL import Image as PILImage
+
+    from depth_inference import image_to_height_grid, height_grid_to_csv_text
+
+    try:
+        raw = await image.read()
+        pil = PILImage.open(io.BytesIO(raw))
+        loop = asyncio.get_event_loop()
+        grid = await loop.run_in_executor(
+            executor,
+            lambda: image_to_height_grid(
+                pil,
+                height_range=height_range,
+                height_min=height_min,
+                invert=invert,
+                max_size=max_size if max_size > 0 else None,
+                model_size=model_size,
+                clip_percentile=clip_percentile,
+                gamma=gamma,
+            ),
+        )
+        csv_text = height_grid_to_csv_text(grid)
+        return PlainTextResponse(content=csv_text, media_type="text/csv; charset=utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"深度推論失敗: {e}") from e
+
+
+# -----------------------------
+# Depth calibration (相対深度 + 干渉縞 → 絶対深度)
+# -----------------------------
+@app.post("/calibrate_depth")
+async def calibrate_depth_endpoint(
+    camera_image: UploadFile = File(...),
+    interference_csv: UploadFile = File(...),
+    depth_model_size: str = Form("base"),
+    max_size: int = Form(1024),
+    rotation_search: int = Form(5),
+):
+    """
+    カメラ画像 + 干渉縞CSV → キャリブレーション済み絶対深度マップ (JSON)。
+    欠損のない完全な絶対深度グリッドを返す。
+    """
+    import io
+    from PIL import Image as PILImage
+
+    from depth_calibration import calibrate_depth
+    from depth_inference import height_grid_to_csv_text
+
+    try:
+        img_raw = await camera_image.read()
+        csv_raw = await interference_csv.read()
+
+        pil = PILImage.open(io.BytesIO(img_raw))
+        csv_text = csv_raw.decode("utf-8")
+
+        # CSV → 2D grid (null = 欠損)
+        absolute_grid = []
+        for line in csv_text.strip().split("\n"):
+            row = []
+            for cell in line.split(","):
+                cell = cell.strip()
+                if cell == "" or cell == "-9999.9":
+                    row.append(None)
+                else:
+                    try:
+                        row.append(float(cell))
+                    except ValueError:
+                        row.append(None)
+            absolute_grid.append(row)
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor,
+            lambda: calibrate_depth(
+                pil,
+                absolute_grid,
+                depth_model_size=depth_model_size,
+                max_size=max_size if max_size > 0 else None,
+                rotation_search=rotation_search,
+            ),
+        )
+
+        csv_out = height_grid_to_csv_text(result["calibrated_grid"])
+
+        return {
+            "csv": csv_out,
+            "match_score": result["match_score"],
+            "match_position": result["match_position"],
+            "match_angle": result["match_angle"],
+            "scale": result["scale"],
+            "offset": result["offset"],
+            "valid_points": result["valid_points"],
+            "shape": result["shape"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"深度キャリブレーション失敗: {e}") from e
 
 
 # -----------------------------
