@@ -274,21 +274,6 @@ async def ws_endpoint(ws: WebSocket):
         algorithm = params.get("algorithm", "coin")
 
         def blocking_preprocess():
-            # HDF5が未作成なら初回のみ自動変換（以降の処理が高速化される）
-            data_dir = Path(data_path).resolve()
-            hdf5_file = data_dir.parent / f"{data_dir.name}.h5"
-            if not hdf5_file.exists():
-                try:
-                    from convert_to_hdf5 import convert_to_hdf5
-                    progress_callback(0, 8, "HDF5形式に変換中（初回のみ）...")
-                    convert_to_hdf5(
-                        str(data_dir),
-                        str(hdf5_file),
-                        progress_callback=lambda msg: progress_callback(0, 8, msg),
-                    )
-                except ImportError:
-                    pass  # h5pyがなければスキップ
-
             # use_gpu / algorithm に応じて適切なモジュールを動的にインポート
             if algorithm == "tgv":
                 if use_gpu:

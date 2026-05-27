@@ -29,6 +29,9 @@ data/result/
 data/result_coin_ai/
 data/result_coin_ruined/
 
+# HDF5キャッシュ（過去の自動生成残骸）
+data/*.h5
+
 # Claude Code
 CLAUDE.md
 
