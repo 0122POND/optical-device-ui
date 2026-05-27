@@ -8,11 +8,6 @@ from typing import Callable, Optional, List
 
 import cv2
 
-try:
-    import h5py
-    HDF5_AVAILABLE = True
-except ImportError:
-    HDF5_AVAILABLE = False
 
 # --- GPU対応: CuPyが使用可能か判定 ---
 try:
@@ -134,37 +129,23 @@ def run_preprocess(
             device = "GPU" if using_gpu else "CPU"
             progress_callback(step, total_steps, f"[{device}] {message}")
 
-    # Step 1: 画像の読み込み（HDF5優先、なければ個別ファイル）
+    # Step 1: 画像の読み込み
     report(1, "画像を読み込み中...")
 
-    data_dir = Path(data_path).resolve()
-    hdf5_path = data_dir.parent / f"{data_dir.name}.h5"
+    image_files = sorted(
+        [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
+        key=lambda f: int((re.search(r'img_(\d+)', f) or re.search(r'(\d+)', f)).group(1))
+    )
 
-    if HDF5_AVAILABLE and hdf5_path.exists():
-        # HDF5: 1ファイルからの一括読み込み（高速）
-        with h5py.File(str(hdf5_path), "r") as f:
-            images_np = f["images"][:]
-            image_files = list(f["filenames"][:])
-            if image_files and isinstance(image_files[0], bytes):
-                image_files = [n.decode() for n in image_files]
-        images = to_gpu(images_np, xp)
-        del images_np
-    else:
-        # フォールバック: 個別ファイルの並列読み込み
-        image_files = sorted(
-            [f for f in os.listdir(data_path) if f.lower().endswith(('.bmp', '.png'))],
-            key=lambda f: int((re.search(r'img_(\d+)', f) or re.search(r'(\d+)', f)).group(1))
-        )
+    if not image_files:
+        raise ValueError("画像が見つかりません")
 
-        if not image_files:
-            raise ValueError("画像が見つかりません")
+    paths = [os.path.join(data_path, f) for f in image_files]
+    with ThreadPoolExecutor() as executor:
+        img_list = list(executor.map(_load_image, paths))
 
-        paths = [os.path.join(data_path, f) for f in image_files]
-        with ThreadPoolExecutor() as executor:
-            img_list = list(executor.map(_load_image, paths))
-
-        images = xp.stack([to_gpu(img, xp) for img in img_list])
-        del img_list
+    images = xp.stack([to_gpu(img, xp) for img in img_list])
+    del img_list
 
     # Step 2: 中央値画像の計算
     report(2, "背景画像を計算中...")
