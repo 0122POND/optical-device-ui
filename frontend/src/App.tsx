@@ -124,8 +124,6 @@ function App() {
   const [flipX, setFlipX] = useState(false);
   // Z軸反転フラグ（true = 反転 / false = 通常）
   const [flipZ] = useState(false);
-  // Y軸反転フラグ（true = 反転 / false = 通常）- 文字鏡像の補正用
-  const [flipY, setFlipY] = useState(false);
 
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
@@ -306,7 +304,7 @@ function App() {
     | "unetpp_effv2m"
     | "unetpp_effv2l"
     | "unetpp_2_5d";
-  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet34");
+  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet50");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -658,11 +656,6 @@ function App() {
         } else {
           surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
         }
-        // Y軸反転: 各行を逆順にして文字鏡像を補正
-        if (flipY) {
-          surfaceZ = surfaceZ.map((row) => [...row].reverse());
-          surfXCoords = [...surfXCoords].reverse();
-        }
         xLabel = "X [µm]";
         yLabel = "Y [µm]";
         zLabel = "Z (Depth) [µm]";
@@ -904,13 +897,7 @@ function App() {
         : sweepVal
       : umPerPixelY;
 
-    // Y軸反転: Y座標を反転して文字鏡像を補正
-    const yData = flipY
-      ? (() => {
-          const maxY = cloud.y.reduce((a, b) => (a > b ? a : b), cloud.y[0]);
-          return cloud.y.map((v) => maxY - v);
-        })()
-      : cloud.y;
+    const yData = cloud.y;
 
     // 物理単位（µm）に変換
     const xDataUm = xData.map((v) => v * umPerPixelX);
@@ -1175,7 +1162,6 @@ function App() {
     axisVisible,
     cloud,
     flipX,
-    flipY,
     viewMode,
     showSlice,
     sliceLineStart,
@@ -1624,103 +1610,6 @@ function App() {
     reader.readAsText(file);
     // 同じファイルを再選択できるようにリセット
     e.target.value = "";
-  };
-
-  // 画像 → 深度推定 → CSV 取り込み
-  const depthImageInputRef = useRef<HTMLInputElement | null>(null);
-  const [isDepthInferring, setIsDepthInferring] = useState(false);
-  const [depthHeightRange, setDepthHeightRange] = useState("1000");
-  const [depthInvert, setDepthInvert] = useState(true);
-  const [depthModelSize, setDepthModelSize] = useState<"small" | "base" | "large" | "depth_pro">(
-    "base"
-  );
-  const [depthGamma, setDepthGamma] = useState("0.5");
-  const [depthClipPercentile, setDepthClipPercentile] = useState("10");
-
-  const handleImageToDepth = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setIsDepthInferring(true);
-    setStatus("RUNNING");
-    try {
-      const fd = new FormData();
-      fd.append("image", file);
-      fd.append("height_range", depthHeightRange || "1000");
-      fd.append("invert", depthInvert ? "true" : "false");
-      fd.append("max_size", depthModelSize === "depth_pro" ? "0" : "1024");
-      fd.append("model_size", depthModelSize);
-      fd.append("gamma", depthGamma || "1.0");
-      fd.append("clip_percentile", depthClipPercentile || "2");
-
-      const res = await fetch(`http://${window.location.hostname}:8000/depth_from_image`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`深度推論失敗: ${res.status} ${errText}`);
-      }
-      const csvText = await res.text();
-      loadCsvText(csvText, "csv");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
-      setStatus("READY");
-    } finally {
-      setIsDepthInferring(false);
-    }
-  };
-
-  // 深度補正: カメラ画像 + 現在の干渉縞 zData → 絶対深度マップ
-  const calibImageInputRef = useRef<HTMLInputElement | null>(null);
-  const [isCalibrating, setIsCalibrating] = useState(false);
-
-  const handleCalibrateDepth = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !zData) return;
-
-    setIsCalibrating(true);
-    setStatus("RUNNING");
-    try {
-      // 現在の zData を CSV テキストに変換
-      const csvRows = zData.map((row) =>
-        row.map((v) => (v == null ? "-9999.9" : v.toString())).join(",")
-      );
-      const csvBlob = new Blob([csvRows.join("\n")], { type: "text/csv" });
-
-      const fd = new FormData();
-      fd.append("camera_image", file);
-      fd.append("interference_csv", csvBlob, "interference.csv");
-      fd.append("depth_model_size", depthModelSize);
-      fd.append("max_size", "1024");
-
-      const res = await fetch(`http://${window.location.hostname}:8000/calibrate_depth`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`深度補正失敗: ${res.status} ${errText}`);
-      }
-      const result = await res.json();
-
-      // 補正結果を表示
-      loadCsvText(result.csv, "csv");
-      alert(
-        `深度補正完了\n` +
-          `マッチングスコア: ${(result.match_score * 100).toFixed(1)}%\n` +
-          `有効ピクセル: ${result.valid_points}点\n` +
-          `スケール: ${result.scale.toFixed(4)}\n` +
-          `オフセット: ${result.offset.toFixed(2)} µm\n` +
-          `出力サイズ: ${result.shape[0]}×${result.shape[1]}`
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
-      setStatus("READY");
-    } finally {
-      setIsCalibrating(false);
-    }
   };
 
   // AI推論の確認ダイアログを表示
@@ -2267,237 +2156,6 @@ function App() {
                     }}
                   />
 
-                  {/* 正面ビュー */}
-                  <button
-                    title="正面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0.5 },
-                          up: { x: 0, y: 0, z: 1 },
-                          center: { x: 0, y: 0, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="12" cy="12" r="2" fill={svgColor} />
-                      <line x1="12" y1="6" x2="12" y2="10" />
-                      <line x1="12" y1="14" x2="12" y2="18" />
-                      <line x1="6" y1="12" x2="10" y2="12" />
-                      <line x1="14" y1="12" x2="18" y2="12" />
-                    </svg>
-                  </button>
-
-                  {/* 正面90°回転ビュー */}
-                  <button
-                    title="正面 90°回転"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0.5 },
-                          up: { x: 0, y: 1, z: 0 },
-                          center: { x: 0, y: 0, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="12" cy="12" r="2" fill={svgColor} />
-                      <line x1="12" y1="6" x2="12" y2="10" />
-                      <line x1="12" y1="14" x2="12" y2="18" />
-                      <line x1="6" y1="12" x2="10" y2="12" />
-                      <line x1="14" y1="12" x2="18" y2="12" />
-                      <path d="M17 4l2 2-2 2" fill="none" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* XY平面ビュー */}
-                  <button
-                    title="XY平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 0, y: 0, z: 2.0 },
-                          up: { x: 0, y: 1, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        XY
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* XZ平面ビュー */}
-                  <button
-                    title="XZ平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 0, y: -2.0, z: 0 },
-                          up: { x: 0, y: 0, z: 1 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        XZ
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* YZ平面ビュー */}
-                  <button
-                    title="YZ平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0 },
-                          up: { x: 0, y: 0, z: 1 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        YZ
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
                   {/* リセット */}
                   <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
                     <svg
@@ -2863,10 +2521,16 @@ function App() {
                           <line x1="20" y1="16" x2="22" y2="16" />
                         </>
                       );
+                    const disabled = alg !== "coin";
                     return (
                       <button
                         key={alg}
-                        onClick={() => setAlgorithm(alg)}
+                        onClick={() => {
+                          if (disabled) return;
+                          setAlgorithm(alg);
+                        }}
+                        disabled={disabled}
+                        title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
                         style={{
                           height: "44px",
                           borderRadius: "6px",
@@ -2877,7 +2541,8 @@ function App() {
                           fontSize: "11px",
                           fontWeight: algorithm === alg ? 600 : 400,
                           fontFamily: fontFamily,
-                          cursor: "pointer",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          opacity: disabled ? 0.4 : 1,
                           transition: "all 0.15s",
                           display: "flex",
                           alignItems: "center",
@@ -3042,41 +2707,6 @@ function App() {
                     {flipX ? "反転: ON" : "左右反転"}
                   </button>
 
-                  {/* Y軸反転（鏡像補正）トグルボタン */}
-                  <button
-                    disabled={!showPlot}
-                    onClick={() => {
-                      if (!showPlot) return;
-                      setFlipY((v) => !v);
-                    }}
-                    style={{
-                      ...buttonSecondaryStyle,
-                      backgroundColor: flipY ? "#4a6280" : "#1e2d42",
-                      border: `1px solid #3a5068`,
-                      cursor: showPlot ? "pointer" : "not-allowed",
-                      opacity: showPlot ? 1 : 0.5,
-                      fontSize: "12px",
-                    }}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3" />
-                      <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3" />
-                      <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2" />
-                      <polyline points="6 9 9 12 6 15" />
-                      <polyline points="18 9 15 12 18 15" />
-                    </svg>
-                    {flipY ? "鏡像: ON" : "鏡像補正"}
-                  </button>
-
                   {/* 距離計測ボタン */}
                   <button
                     disabled={!showPlot}
@@ -3187,100 +2817,6 @@ function App() {
                       <line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
                     CSV読込
-                  </button>
-
-                  {/* 画像→3D化（Depth Anything V2） */}
-                  <input
-                    ref={depthImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    onChange={handleImageToDepth}
-                  />
-                  <button
-                    disabled={isDepthInferring || status === "RUNNING"}
-                    style={{
-                      ...buttonSecondaryStyle,
-                      backgroundColor: "#2d1e42",
-                      border: `1px solid #563a68`,
-                      fontSize: "12px",
-                      opacity: isDepthInferring ? 0.6 : 1,
-                    }}
-                    onClick={() => {
-                      const hr = prompt(
-                        "高さレンジ(µm) / モデル(small|base|large|depth_pro) / 反転(y/n) / ガンマ(<1で凹凸強調) / クリップ(%)\n" +
-                          "カンマ区切り。空欄は現在値。例: 1000,depth_pro,y,0.7,2",
-                        `${depthHeightRange},${depthModelSize},${depthInvert ? "y" : "n"},${depthGamma},${depthClipPercentile}`
-                      );
-                      if (hr === null) return;
-                      const parts = hr.split(",").map((s) => s.trim());
-                      if (parts[0]) setDepthHeightRange(parts[0]);
-                      if (
-                        parts[1] === "small" ||
-                        parts[1] === "base" ||
-                        parts[1] === "large" ||
-                        parts[1] === "depth_pro"
-                      ) {
-                        setDepthModelSize(parts[1]);
-                      }
-                      if (parts[2]) setDepthInvert(parts[2].toLowerCase() === "y");
-                      if (parts[3]) setDepthGamma(parts[3]);
-                      if (parts[4]) setDepthClipPercentile(parts[4]);
-                      depthImageInputRef.current?.click();
-                    }}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <polyline points="21 15 16 10 5 21" />
-                    </svg>
-                    {isDepthInferring ? "推論中..." : "画像→3D"}
-                  </button>
-
-                  {/* 深度補正（カメラ画像 + 干渉縞 → 絶対深度） */}
-                  <input
-                    ref={calibImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    onChange={handleCalibrateDepth}
-                  />
-                  <button
-                    disabled={!zData || isCalibrating || status === "RUNNING"}
-                    title={!zData ? "先に干渉縞データを読み込んでください" : "カメラ画像で深度補正"}
-                    style={{
-                      ...buttonSecondaryStyle,
-                      backgroundColor: "#1e3a2f",
-                      border: `1px solid #3a6850`,
-                      fontSize: "12px",
-                      opacity: !zData || isCalibrating ? 0.5 : 1,
-                    }}
-                    onClick={() => calibImageInputRef.current?.click()}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12 20V10" />
-                      <path d="M18 20V4" />
-                      <path d="M6 20v-4" />
-                    </svg>
-                    {isCalibrating ? "補正中..." : "深度補正"}
                   </button>
 
                   {/* マスク画像読込ボタン */}
@@ -3836,15 +3372,7 @@ function App() {
                         cursor: "pointer",
                       }}
                     >
-                      <option value="resnet34">U-Net++ (ResNet34)</option>
                       <option value="resnet50">U-Net++ (ResNet50)</option>
-                      <option value="resnet101">U-Net++ (ResNet101)</option>
-                      <option value="resnet152">U-Net++ (ResNet152)</option>
-                      <option value="deeplabv3plus_effv2m">DeepLabV3+ (EfficientNetV2-M)</option>
-                      <option value="segformer_b2">SegFormer-B2</option>
-                      <option value="unetpp_effv2m">U-Net++ (EfficientNetV2-M)</option>
-                      <option value="unetpp_effv2l">U-Net++ (EfficientNetV2-L)</option>
-                      <option value="unetpp_2_5d">U-Net++ 2.5D (ResNet34)</option>
                     </select>
                   </div>
                 </>
