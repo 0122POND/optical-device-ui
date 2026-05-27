@@ -160,8 +160,9 @@ def run_preprocess(
     # OpenCV + scipy.ndimage.gaussian_filter1d で高速化
     report(6, "3次元スタックブラーを適用中...")
 
-    # axis=0 (画像間方向) に sigma=1 のガウスフィルタ
-    temp = gaussian_filter1d(gausswin, sigma=1, axis=0)
+    # axis=0 (画像間方向) のガウスフィルタ
+    # 【検証中】掃引間隔10µm/枚なのでσ=10（デフォルト100µm/枚×σ1と同じ物理±400µmスケール）
+    temp = gaussian_filter1d(gausswin, sigma=10, axis=0)
     del gausswin
 
     # axis=1,2 (2D画像) に sigma=7 のガウスフィルタ（OpenCVで高速化）
@@ -180,18 +181,16 @@ def run_preprocess(
     contrast = blurred_stack / max_vals * 255
     del blurred_stack
 
-    # Step 7: ピーク検出
-    report(7, "ピーク検出を実行中...")
+    # Step 7: ピーク検出 (argmax)
+    report(7, "ピーク検出 (argmax)...")
     n_img, h_img, w_img = contrast.shape
 
-    # argmaxとmaxを効率的に計算
     max_indices = np.argmax(contrast, axis=2)
     max_values = np.take_along_axis(contrast, max_indices[:, :, np.newaxis], axis=2).squeeze(axis=2)
 
     peak_result = np.zeros((n_img, h_img, w_img), dtype=np.uint8)
     valid_mask = max_values >= peak_threshold
 
-    # インデックス配列を効率的に生成
     img_idx, row_idx = np.mgrid[:n_img, :h_img]
 
     valid_img = img_idx[valid_mask]
@@ -199,6 +198,8 @@ def run_preprocess(
     valid_col = max_indices[valid_mask]
 
     peak_result[valid_img, valid_row, valid_col] = 255
+
+    # 線の視認性のため 1px 右膨張（従来挙動を維持）
     peak_result[:, :, :-1] |= peak_result[:, :, 1:]
 
     # Step 8: ピークマスク適用

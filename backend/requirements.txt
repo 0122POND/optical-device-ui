@@ -5,8 +5,16 @@ opencv-python>=4.5.0
 fastapi>=0.68.0
 uvicorn>=0.15.0
 websockets>=10.0
+python-multipart>=0.0.6  # FastAPIのファイルアップロード
 Pillow>=8.0.0
 h5py>=3.0.0
+
+# AI inference dependencies
+torch>=2.0.0
+segmentation-models-pytorch>=0.3.0
+albumentations>=1.3.0
+timm>=0.9.0          # DeepLabV3+ (EfficientNetV2-M) encoder
+transformers>=4.30.0 # SegFormer
 
 # GPU support (optional)
 # Install CuPy according to your CUDA version:

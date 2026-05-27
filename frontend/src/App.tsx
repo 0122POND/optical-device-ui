@@ -7,9 +7,12 @@ import "./App.css";
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
-// 1ピクセルあたりのµm換算係数（軸ごとに異なる）
-const UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
-const UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
+// 1ピクセルあたりのµm換算係数（軸ごとに異なる）のデフォルト値
+const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
+const DEFAULT_UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
+
+// CSV点群表示時の総点数上限（pointCloud.ts の maxTotalPoints と揃える）
+const CSV_MAX_TOTAL_POINTS = 120_000;
 
 // カラーパレット（モダングレー）
 const colors = {
@@ -34,6 +37,14 @@ const fontFamily =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 // 計測ステータス
+// 経過時間を「12.3秒」「1分5.0秒」形式に整形
+const formatElapsed = (ms: number): string => {
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}秒`;
+  const m = Math.floor(s / 60);
+  return `${m}分${(s - m * 60).toFixed(1)}秒`;
+};
+
 type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
 
 const StatusBadge = ({ status }: { status: MeasureStatus }) => {
@@ -113,8 +124,6 @@ function App() {
   const [flipX, setFlipX] = useState(false);
   // Z軸反転フラグ（true = 反転 / false = 通常）
   const [flipZ] = useState(false);
-  // Y軸反転フラグ（true = 反転 / false = 通常）- 文字鏡像の補正用
-  const [flipY, setFlipY] = useState(false);
 
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
@@ -155,6 +164,17 @@ function App() {
   // 掃引関連の入力値 & 単位
   const [sweepInterval, setSweepInterval] = useState("100");
   const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
+  // X/Y軸 µm/pix 換算係数（可変設定）
+  const [umPerPixelXInput, setUmPerPixelXInput] = useState(String(DEFAULT_UM_PER_PIXEL_X));
+  const [umPerPixelYInput, setUmPerPixelYInput] = useState(String(DEFAULT_UM_PER_PIXEL_Y));
+  const umPerPixelX = (() => {
+    const v = parseFloat(umPerPixelXInput);
+    return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_X;
+  })();
+  const umPerPixelY = (() => {
+    const v = parseFloat(umPerPixelYInput);
+    return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_Y;
+  })();
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
@@ -251,13 +271,40 @@ function App() {
   const [progressMessage, setProgressMessage] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
 
+  // 処理経過時間（RUNNING中はカウントアップ、終了時に確定）
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const runStartRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (status !== "RUNNING") return;
+    runStartRef.current = Date.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => {
+      setElapsedMs(Date.now() - runStartRef.current);
+    }, 100);
+    return () => {
+      window.clearInterval(id);
+      setElapsedMs(Date.now() - runStartRef.current);
+    };
+  }, [status]);
+
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   // AIモデルタイプ選択
-  const [aiModelType, setAiModelType] = useState<"resnet34" | "resnet50">("resnet34");
+  type AiModelType =
+    | "resnet34"
+    | "resnet50"
+    | "resnet101"
+    | "resnet152"
+    | "deeplabv3plus_effv2m"
+    | "segformer_b2"
+    | "unetpp_effv2m"
+    | "unetpp_effv2l"
+    | "unetpp_2_5d";
+  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet50");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -576,7 +623,7 @@ function App() {
         ? sweepIntervalUnit === "mm"
           ? sweepVal * 1000
           : sweepVal
-        : UM_PER_PIXEL_Y;
+        : umPerPixelY;
 
       // データソース判定: 値がピクセル座標っぽい（小さい値）なら光学デバイス、大きい値ならCSV（Keyence等）
       // 光学デバイスのgrid値はX重心(0〜画像幅≒1000px)、KeyenceのCSV値は高さ(µm、数百〜)
@@ -593,7 +640,7 @@ function App() {
 
       if (isOpticalDevice) {
         // 光学デバイス: 列=Y方向ピクセル→µm, 行=Zスライス→µm, 値=X重心→µm
-        surfXCoords = Array.from({ length: numCols }, (_, i) => i * UM_PER_PIXEL_Y);
+        surfXCoords = Array.from({ length: numCols }, (_, i) => i * umPerPixelY);
         surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
         if (flipX) {
           // 左右反転: X重心を反転してからµm変換
@@ -604,15 +651,10 @@ function App() {
             }
           }
           surfaceZ = zData.map((row) =>
-            row.map((v) => (v == null ? null : (maxRawX - v) * UM_PER_PIXEL_X))
+            row.map((v) => (v == null ? null : (maxRawX - v) * umPerPixelX))
           );
         } else {
-          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * UM_PER_PIXEL_X)));
-        }
-        // Y軸反転: 各行を逆順にして文字鏡像を補正
-        if (flipY) {
-          surfaceZ = surfaceZ.map((row) => [...row].reverse());
-          surfXCoords = [...surfXCoords].reverse();
+          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
         }
         xLabel = "X [µm]";
         yLabel = "Y [µm]";
@@ -846,26 +888,20 @@ function App() {
         })()
       : cloud.x;
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL_Y;
+      : umPerPixelY;
 
-    // Y軸反転: Y座標を反転して文字鏡像を補正
-    const yData = flipY
-      ? (() => {
-          const maxY = cloud.y.reduce((a, b) => (a > b ? a : b), cloud.y[0]);
-          return cloud.y.map((v) => maxY - v);
-        })()
-      : cloud.y;
+    const yData = cloud.y;
 
     // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * UM_PER_PIXEL_X);
-    const yDataUm = yData.map((v) => v * UM_PER_PIXEL_Y);
+    const xDataUm = xData.map((v) => v * umPerPixelX);
+    const yDataUm = yData.map((v) => v * umPerPixelY);
     const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
 
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
@@ -1126,13 +1162,14 @@ function App() {
     axisVisible,
     cloud,
     flipX,
-    flipY,
     viewMode,
     showSlice,
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
     sweepIntervalUnit,
+    umPerPixelX,
+    umPerPixelY,
     plotType,
     zData,
     measureMode,
@@ -1150,21 +1187,21 @@ function App() {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は UM_PER_PIXEL_Y を仮定)
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
     const zUmPerSlice = hasSweep
       ? sweepIntervalUnit === "mm"
         ? sweepVal * 1000
         : sweepVal
-      : UM_PER_PIXEL_Y;
+      : umPerPixelY;
 
     // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
     const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
     // surfaceモードかつCSV由来: grid値がすでにµm（高さ）なので変換不要
     const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
     const depthToUm = (rawVal: number) =>
-      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * UM_PER_PIXEL_X : rawVal * UM_PER_PIXEL_X;
+      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * umPerPixelX : rawVal * umPerPixelX;
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -1192,9 +1229,9 @@ function App() {
       // surfaceモードかつCSV由来（cloudなし）: クリック座標がピクセル単位なので変換不要
       const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
       // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = isSurfaceCSV ? y0 : y0 / UM_PER_PIXEL_Y;
+      const y0Px = isSurfaceCSV ? y0 : y0 / umPerPixelY;
       const z0Px = isSurfaceCSV ? z0 : z0 / zUmPerSlice;
-      const y1Px = isSurfaceCSV ? y1 : y1 / UM_PER_PIXEL_Y;
+      const y1Px = isSurfaceCSV ? y1 : y1 / umPerPixelY;
       const z1Px = isSurfaceCSV ? z1 : z1 / zUmPerSlice;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
@@ -1286,12 +1323,12 @@ function App() {
       }
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出 ---
-      let minY = cloud.y[0] * UM_PER_PIXEL_Y;
+      let minY = cloud.y[0] * umPerPixelY;
       let maxY = minY;
       let minZ = cloud.z[0] * zUmPerSlice;
       let maxZ = minZ;
       for (let i = 1; i < cloud.y.length; i++) {
-        const yum = cloud.y[i] * UM_PER_PIXEL_Y;
+        const yum = cloud.y[i] * umPerPixelY;
         if (yum < minY) minY = yum;
         if (yum > maxY) maxY = yum;
       }
@@ -1307,7 +1344,7 @@ function App() {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * UM_PER_PIXEL_Y - y0;
+        const py = cloud.y[i] * umPerPixelY - y0;
         const pz = cloud.z[i] * zUmPerSlice - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
@@ -1392,6 +1429,8 @@ function App() {
     sliceLineEnd,
     sweepInterval,
     sweepIntervalUnit,
+    umPerPixelX,
+    umPerPixelY,
     flipX,
     plotType,
   ]);
@@ -1491,61 +1530,82 @@ function App() {
     setConfirmMode(null);
   };
 
+  // CSVテキストを取り込み、3Dプロット表示まで行う共通処理
+  const loadCsvText = (text: string, source: HistorySource = "csv") => {
+    const grid = parseCSV(text);
+    if (grid.length === 0) {
+      alert("CSVデータが空です");
+      return;
+    }
+    const xArr: number[] = [];
+    const yArr: number[] = [];
+    const zArr: number[] = [];
+    const cArr: number[] = [];
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        const v = grid[row][col];
+        if (v == null) continue;
+        xArr.push(v);
+        yArr.push(col);
+        zArr.push(row);
+        cArr.push(v);
+      }
+    }
+    if (xArr.length === 0) {
+      alert("有効なデータがありません");
+      return;
+    }
+    // 総点数が上限を超える場合はランダム間引き（画像処理結果 pointCloud.ts と同じ方式）
+    let cx = xArr,
+      cy = yArr,
+      cz = zArr,
+      cc = cArr;
+    if (xArr.length > CSV_MAX_TOTAL_POINTS) {
+      const indices = Array.from({ length: xArr.length }, (_, i) => i);
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      indices.length = CSV_MAX_TOTAL_POINTS;
+      indices.sort((a, b) => a - b); // 元の並び順を保持
+      cx = indices.map((idx) => xArr[idx]);
+      cy = indices.map((idx) => yArr[idx]);
+      cz = indices.map((idx) => zArr[idx]);
+      cc = indices.map((idx) => cArr[idx]);
+    }
+    const newCloud = { x: cx, y: cy, z: cz, c: cc };
+    setShowSlice(false);
+    setZData(grid);
+    setCloud(newCloud);
+    setPlotType("surface");
+    setShowPlot(true);
+    setStatus("COMPLETE");
+    const now = new Date().toLocaleString("ja-JP");
+    setLastMeasuredAt(now);
+    setMeasureCount((c) => c + 1);
+    const thumb = generateThumbnail(newCloud);
+    setCloudHistory((prev) =>
+      [
+        {
+          cloud: newCloud,
+          measuredAt: now,
+          points: newCloud.x.length,
+          thumbnail: thumb,
+          name: "",
+          source,
+        },
+        ...prev,
+      ].slice(0, 5)
+    );
+  };
+
   // CSV読み込み処理
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const text = reader.result as string;
-      const grid = parseCSV(text);
-      if (grid.length === 0) {
-        alert("CSVデータが空です");
-        return;
-      }
-      // 2Dグリッド → PointCloud 変換
-      const xArr: number[] = [];
-      const yArr: number[] = [];
-      const zArr: number[] = [];
-      const cArr: number[] = [];
-      for (let row = 0; row < grid.length; row++) {
-        for (let col = 0; col < grid[row].length; col++) {
-          const v = grid[row][col];
-          if (v == null) continue;
-          xArr.push(v);
-          yArr.push(col);
-          zArr.push(row);
-          cArr.push(v);
-        }
-      }
-      if (xArr.length === 0) {
-        alert("有効なデータがありません");
-        return;
-      }
-      const newCloud = { x: xArr, y: yArr, z: zArr, c: cArr };
-      setShowSlice(false);
-      setZData(grid);
-      setCloud(newCloud);
-      setPlotType("surface");
-      setShowPlot(true);
-      setStatus("COMPLETE");
-      const now = new Date().toLocaleString("ja-JP");
-      setLastMeasuredAt(now);
-      setMeasureCount((c) => c + 1);
-      const thumb = generateThumbnail(newCloud);
-      setCloudHistory((prev) =>
-        [
-          {
-            cloud: newCloud,
-            measuredAt: now,
-            points: newCloud.x.length,
-            thumbnail: thumb,
-            name: "",
-            source: "csv" as HistorySource,
-          },
-          ...prev,
-        ].slice(0, 5)
-      );
+      loadCsvText(reader.result as string, "csv");
     };
     reader.readAsText(file);
     // 同じファイルを再選択できるようにリセット
@@ -2096,237 +2156,6 @@ function App() {
                     }}
                   />
 
-                  {/* 正面ビュー */}
-                  <button
-                    title="正面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0.5 },
-                          up: { x: 0, y: 0, z: 1 },
-                          center: { x: 0, y: 0, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="12" cy="12" r="2" fill={svgColor} />
-                      <line x1="12" y1="6" x2="12" y2="10" />
-                      <line x1="12" y1="14" x2="12" y2="18" />
-                      <line x1="6" y1="12" x2="10" y2="12" />
-                      <line x1="14" y1="12" x2="18" y2="12" />
-                    </svg>
-                  </button>
-
-                  {/* 正面90°回転ビュー */}
-                  <button
-                    title="正面 90°回転"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0.5 },
-                          up: { x: 0, y: 1, z: 0 },
-                          center: { x: 0, y: 0, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="12" cy="12" r="2" fill={svgColor} />
-                      <line x1="12" y1="6" x2="12" y2="10" />
-                      <line x1="12" y1="14" x2="12" y2="18" />
-                      <line x1="6" y1="12" x2="10" y2="12" />
-                      <line x1="14" y1="12" x2="18" y2="12" />
-                      <path d="M17 4l2 2-2 2" fill="none" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* XY平面ビュー */}
-                  <button
-                    title="XY平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 0, y: 0, z: 2.0 },
-                          up: { x: 0, y: 1, z: 0 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        XY
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* XZ平面ビュー */}
-                  <button
-                    title="XZ平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 0, y: -2.0, z: 0 },
-                          up: { x: 0, y: 0, z: 1 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        XZ
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* YZ平面ビュー */}
-                  <button
-                    title="YZ平面ビュー"
-                    style={tbBtnStyle()}
-                    onClick={() => {
-                      const el = plotRef.current;
-                      if (!el) return;
-                      Plotly.relayout(el, {
-                        "scene.camera": {
-                          eye: { x: 2.0, y: 0, z: 0 },
-                          up: { x: 0, y: 0, z: 1 },
-                        },
-                      });
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <text
-                        x="12"
-                        y="15"
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={svgColor}
-                        stroke="none"
-                      >
-                        YZ
-                      </text>
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
                   {/* リセット */}
                   <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
                     <svg
@@ -2437,6 +2266,9 @@ function App() {
                     <div style={{ fontSize: "14px" }}>
                       [{progressStep}/{progressTotal}] {progressMessage}
                     </div>
+                    <div style={{ fontSize: "13px", opacity: 0.8 }}>
+                      経過時間: {formatElapsed(elapsedMs)}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2530,6 +2362,50 @@ function App() {
                       <option value="um">µm</option>
                       <option value="mm">mm</option>
                     </select>
+                  </div>
+                </div>
+
+                {/* X軸 µm/pix */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                    X軸 µm/pix（深さ方向）
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder={String(DEFAULT_UM_PER_PIXEL_X)}
+                      value={umPerPixelXInput}
+                      onChange={(e) => setUmPerPixelXInput(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        width: "100px",
+                        height: "32px",
+                        padding: "4px 10px",
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
+                  </div>
+                </div>
+
+                {/* Y軸 µm/pix */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
+                    Y軸 µm/pix（縦方向）
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder={String(DEFAULT_UM_PER_PIXEL_Y)}
+                      value={umPerPixelYInput}
+                      onChange={(e) => setUmPerPixelYInput(e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        width: "100px",
+                        height: "32px",
+                        padding: "4px 10px",
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
                   </div>
                 </div>
               </>
@@ -2645,10 +2521,16 @@ function App() {
                           <line x1="20" y1="16" x2="22" y2="16" />
                         </>
                       );
+                    const disabled = alg !== "coin";
                     return (
                       <button
                         key={alg}
-                        onClick={() => setAlgorithm(alg)}
+                        onClick={() => {
+                          if (disabled) return;
+                          setAlgorithm(alg);
+                        }}
+                        disabled={disabled}
+                        title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
                         style={{
                           height: "44px",
                           borderRadius: "6px",
@@ -2659,7 +2541,8 @@ function App() {
                           fontSize: "11px",
                           fontWeight: algorithm === alg ? 600 : 400,
                           fontFamily: fontFamily,
-                          cursor: "pointer",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          opacity: disabled ? 0.4 : 1,
                           transition: "all 0.15s",
                           display: "flex",
                           alignItems: "center",
@@ -2822,41 +2705,6 @@ function App() {
                       <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
                     </svg>
                     {flipX ? "反転: ON" : "左右反転"}
-                  </button>
-
-                  {/* Y軸反転（鏡像補正）トグルボタン */}
-                  <button
-                    disabled={!showPlot}
-                    onClick={() => {
-                      if (!showPlot) return;
-                      setFlipY((v) => !v);
-                    }}
-                    style={{
-                      ...buttonSecondaryStyle,
-                      backgroundColor: flipY ? "#4a6280" : "#1e2d42",
-                      border: `1px solid #3a5068`,
-                      cursor: showPlot ? "pointer" : "not-allowed",
-                      opacity: showPlot ? 1 : 0.5,
-                      fontSize: "12px",
-                    }}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3" />
-                      <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3" />
-                      <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2" />
-                      <polyline points="6 9 9 12 6 15" />
-                      <polyline points="18 9 15 12 18 15" />
-                    </svg>
-                    {flipY ? "鏡像: ON" : "鏡像補正"}
                   </button>
 
                   {/* 距離計測ボタン */}
@@ -3392,6 +3240,21 @@ function App() {
 
             <div style={{ flexGrow: 1 }} />
 
+            {/* 処理経過時間 / 処理時間 */}
+            {(status === "RUNNING" || status === "COMPLETE") && (
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: "13px",
+                  color: colors.text,
+                  opacity: 0.85,
+                  marginBottom: "6px",
+                }}
+              >
+                {status === "RUNNING" ? "経過時間" : "処理時間"}: {formatElapsed(elapsedMs)}
+              </div>
+            )}
+
             {/* STARTボタン（CPU/GPU）- タブ外で常時表示 */}
             <div style={{ display: "flex", gap: "8px" }}>
               <button
@@ -3497,7 +3360,7 @@ function App() {
                     <span style={{ fontSize: "13px", whiteSpace: "nowrap" }}>モデル:</span>
                     <select
                       value={aiModelType}
-                      onChange={(e) => setAiModelType(e.target.value as "resnet34" | "resnet50")}
+                      onChange={(e) => setAiModelType(e.target.value as AiModelType)}
                       style={{
                         flex: 1,
                         padding: "6px 10px",
@@ -3509,8 +3372,7 @@ function App() {
                         cursor: "pointer",
                       }}
                     >
-                      <option value="resnet34">ResNet34</option>
-                      <option value="resnet50">ResNet50</option>
+                      <option value="resnet50">U-Net++ (ResNet50)</option>
                     </select>
                   </div>
                 </>
