@@ -11,6 +11,9 @@ const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
 const DEFAULT_UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
 
+// 寸法線の色パレット（線ごとに色を変えて区別しやすくする）
+const DIM_COLORS = ["#ffffff", "#fde047", "#34d399", "#f472b6", "#60a5fa", "#fb923c"];
+
 // CSV点群表示時の総点数上限（pointCloud.ts の maxTotalPoints と揃える）
 const CSV_MAX_TOTAL_POINTS = 120_000;
 
@@ -158,6 +161,87 @@ function App() {
     pt2: null,
   });
   const measureLockRef = useRef(false);
+
+  // 寸法測定モード（2D: ドラッグ可能な両矢印で任意2点間の距離を測る。複数本対応）
+  const [dimensionMode, setDimensionMode] = useState(false);
+  // 寸法線の端点座標（軸の物理単位）。再描画をまたいで位置を保持する
+  // lx/ly: ユーザーが手動でずらしたラベル位置（軸の物理単位）。null なら線の中点付近に自動配置
+  type DimLine = {
+    id: number;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    lx?: number | null;
+    ly?: number | null;
+  };
+  const dimLinesRef = useRef<DimLine[]>([]);
+  const dimIdRef = useRef(0);
+  // 直近の描画範囲（寸法線の新規追加・配置に使う）
+  const dimRangeRef = useRef<{ xMin: number; xMax: number; yMin: number; yMax: number } | null>(
+    null
+  );
+  // 寸法線の追加・削除で再描画を促すためのバージョン
+  const [dimLineVersion, setDimLineVersion] = useState(0);
+  // Shift押下中はドラッグした端点を水平/垂直へスナップ（直交固定）
+  const shiftHeldRef = useRef(false);
+  // 寸法読み取り値（サイドパネル表示用。線ごと）
+  const [dimReadouts, setDimReadouts] = useState<
+    {
+      id: number;
+      dist: number;
+      dx: number;
+      dy: number;
+      unit: string;
+    }[]
+  >([]);
+
+  // 寸法線を1本追加（直近の描画範囲を基準に中央付近へ配置。重ならないよう縦にずらす）
+  const addDimLine = () => {
+    const r = dimRangeRef.current;
+    if (!r) return;
+    const n = dimLinesRef.current.length;
+    const frac = Math.min(0.85, Math.max(0.15, 0.5 + ((n % 6) - 2) * 0.12));
+    const y = r.yMin + (r.yMax - r.yMin) * frac;
+    dimLinesRef.current = [
+      ...dimLinesRef.current,
+      {
+        id: ++dimIdRef.current,
+        x0: r.xMin + (r.xMax - r.xMin) * 0.25,
+        x1: r.xMin + (r.xMax - r.xMin) * 0.75,
+        y0: y,
+        y1: y,
+      },
+    ];
+    setDimLineVersion((v) => v + 1);
+  };
+
+  // Shiftキーの押下状態を追跡（寸法線ドラッグ時の直交スナップに使用）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftHeldRef.current = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftHeldRef.current = false;
+    };
+    const onBlur = () => {
+      shiftHeldRef.current = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  // 指定IDの寸法線を削除（0本になったら次の再描画で1本自動生成）
+  const removeDimLine = (id: number) => {
+    dimLinesRef.current = dimLinesRef.current.filter((l) => l.id !== id);
+    setDimLineVersion((v) => v + 1);
+  };
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
@@ -607,6 +691,379 @@ function App() {
     }
 
     const savedCamera = cameraRef.current;
+
+    // ---- 寸法測定モード（2D 本物のヒートマップ + ドラッグ可能な両矢印）----
+    // 3Dシーンには編集可能図形が無いため、寸法測定中だけ真の2Dヒートマップで描画する。
+    if (viewMode === "2D-camera" && dimensionMode && zData && zData.length > 0) {
+      const numRows = zData.length;
+      const numCols = zData[0].length;
+
+      const sweepVal = parseFloat(sweepInterval);
+      const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+      const zUmPerSlice = hasSweep
+        ? sweepIntervalUnit === "mm"
+          ? sweepVal * 1000
+          : sweepVal
+        : umPerPixelY;
+
+      const isOpticalDevice = cloud !== null && cloud.x.length > 0;
+
+      let surfXCoords: number[];
+      let surfYCoords: number[];
+      let surfaceZ: (number | null)[][];
+      let xLabel: string;
+      let yLabel: string;
+      let zLabel: string;
+      let planeUnit: string;
+
+      if (isOpticalDevice) {
+        surfXCoords = Array.from({ length: numCols }, (_, i) => i * umPerPixelY);
+        surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
+        if (flipX) {
+          let maxRawX = -Infinity;
+          for (const row of zData) {
+            for (const v of row) {
+              if (v != null && v > maxRawX) maxRawX = v;
+            }
+          }
+          surfaceZ = zData.map((row) =>
+            row.map((v) => (v == null ? null : (maxRawX - v) * umPerPixelX))
+          );
+        } else {
+          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
+        }
+        xLabel = "X [µm]";
+        yLabel = "Y [µm]";
+        zLabel = "Z (Depth) [µm]";
+        planeUnit = "µm";
+      } else {
+        surfXCoords = flipX
+          ? Array.from({ length: numCols }, (_, i) => numCols - 1 - i)
+          : Array.from({ length: numCols }, (_, i) => i);
+        surfYCoords = Array.from({ length: numRows }, (_, i) => i);
+        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v)));
+        xLabel = "X [pixel]";
+        yLabel = "Y [pixel]";
+        zLabel = "Height [µm]";
+        planeUnit = "px";
+      }
+
+      let hMin = Infinity,
+        hMax = -Infinity;
+      for (const row of surfaceZ) {
+        for (const v of row) {
+          if (v == null) continue;
+          if (v < hMin) hMin = v;
+          if (v > hMax) hMax = v;
+        }
+      }
+      if (!isFinite(hMin)) {
+        hMin = 0;
+        hMax = 1;
+      }
+
+      const xMin = Math.min(surfXCoords[0], surfXCoords[surfXCoords.length - 1]);
+      const xMax = Math.max(surfXCoords[0], surfXCoords[surfXCoords.length - 1]);
+      const yMin = surfYCoords[0];
+      const yMax = surfYCoords[surfYCoords.length - 1];
+
+      dimRangeRef.current = { xMin, xMax, yMin, yMax };
+
+      // 寸法線の初期位置（保存値が範囲内ならそれを使う。無ければ中央に水平配置）
+      const inRange = (l: DimLine) =>
+        l.x0 >= xMin &&
+        l.x0 <= xMax &&
+        l.x1 >= xMin &&
+        l.x1 <= xMax &&
+        l.y0 >= yMin &&
+        l.y0 <= yMax &&
+        l.y1 >= yMin &&
+        l.y1 <= yMax;
+      let lines = dimLinesRef.current.filter(inRange);
+      if (lines.length === 0) {
+        lines = [
+          {
+            id: ++dimIdRef.current,
+            x0: xMin + (xMax - xMin) * 0.25,
+            x1: xMin + (xMax - xMin) * 0.75,
+            y0: yMin + (yMax - yMin) * 0.5,
+            y1: yMin + (yMax - yMin) * 0.5,
+          },
+        ];
+      }
+      dimLinesRef.current = lines;
+
+      const fmtVal = (v: number) => {
+        if (planeUnit === "µm") {
+          return v >= 1000
+            ? `${v.toFixed(1)} µm (${(v / 1000).toFixed(3)} mm)`
+            : `${v.toFixed(1)} µm`;
+        }
+        return `${v.toFixed(1)} px`;
+      };
+
+      // ラベルの表示位置（データ座標）。手動位置(lx/ly)があればそれを、無ければ
+      // 線の中点から直交方向に少し離した既定位置を返す。
+      const labelGap = (xMax - xMin) * 0.05 || 1;
+      const renderedLabelPos = (l: DimLine) => {
+        if (l.lx != null && l.ly != null) return { x: l.lx, y: l.ly };
+        const mx = (l.x0 + l.x1) / 2;
+        const my = (l.y0 + l.y1) / 2;
+        const len = Math.hypot(l.x1 - l.x0, l.y1 - l.y0) || 1;
+        const px = -(l.y1 - l.y0) / len;
+        const py = (l.x1 - l.x0) / len;
+        return { x: mx + px * labelGap, y: my + py * labelGap };
+      };
+
+      const buildShapes = (ls: DimLine[]) =>
+        ls.map((l, idx) => ({
+          type: "line",
+          xref: "x",
+          yref: "y",
+          x0: l.x0,
+          y0: l.y0,
+          x1: l.x1,
+          y1: l.y1,
+          line: { color: DIM_COLORS[idx % DIM_COLORS.length], width: 2 },
+        }));
+
+      const buildAnnotations = (ls: DimLine[]) => {
+        const multi = ls.length > 1;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ann: any[] = [];
+        ls.forEach((l, idx) => {
+          const color = DIM_COLORS[idx % DIM_COLORS.length];
+          const dist = Math.hypot(l.x1 - l.x0, l.y1 - l.y0);
+          // 線方向の単位ベクトル（データ座標）。画面のyは下向き正なので矢じり尾の
+          // ピクセルオフセットではyを反転する。
+          const len = Math.hypot(l.x1 - l.x0, l.y1 - l.y0) || 1;
+          const ux = (l.x1 - l.x0) / len;
+          const uy = (l.y1 - l.y0) / len;
+          const AR = 22; // 矢じりの長さ（px）。端点近傍だけに収め、線本体のドラッグを邪魔しない
+          const arrowBase = {
+            xref: "x",
+            yref: "y",
+            axref: "pixel",
+            ayref: "pixel",
+            showarrow: true,
+            arrowhead: 3,
+            arrowsize: 1.4,
+            arrowwidth: 2,
+            arrowcolor: color,
+            text: "",
+          };
+          // 端点0に外向きの短い矢じり（尾は内側=端点1方向）
+          ann.push({ ...arrowBase, x: l.x0, y: l.y0, ax: ux * AR, ay: -uy * AR });
+          // 端点1に外向きの短い矢じり（尾は内側=端点0方向）
+          ann.push({ ...arrowBase, x: l.x1, y: l.y1, ax: -ux * AR, ay: uy * AR });
+          // 寸法ラベル（ドラッグで自由に移動可。複数本のときは番号付き）
+          const lp = renderedLabelPos(l);
+          ann.push({
+            x: lp.x,
+            y: lp.y,
+            xref: "x",
+            yref: "y",
+            showarrow: false,
+            captureevents: true,
+            text: multi ? `${idx + 1}. ${fmtVal(dist)}` : fmtVal(dist),
+            font: { color: "#ffffff", size: 14 },
+            bgcolor: "rgba(0,0,0,0.65)",
+            bordercolor: color,
+            borderwidth: 1,
+            borderpad: 4,
+          });
+        });
+        return ann;
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dimData: any[] = [
+        {
+          type: "heatmap",
+          x: surfXCoords,
+          y: surfYCoords,
+          z: surfaceZ,
+          colorscale: [
+            [0, "#0000ff"],
+            [0.25, "#00bfff"],
+            [0.5, "#00ff00"],
+            [0.75, "#ffbf00"],
+            [1, "#ff0000"],
+          ],
+          zmin: hMin,
+          zmax: hMax,
+          zsmooth: false,
+          connectgaps: false,
+          colorbar: {
+            x: -0.05,
+            thickness: 18,
+            len: 0.9,
+            ypad: 10,
+            tickfont: { color: "#ffffff" },
+            title: { text: zLabel, font: { color: "#ffffff", size: 11 }, side: "right" },
+          },
+          hovertemplate: `${xLabel}: %{x:.1f}<br>${yLabel}: %{y:.1f}<br>${zLabel}: %{z:.2f}<extra></extra>`,
+        },
+      ];
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dimLayout: any = {
+        autosize: true,
+        margin: { l: 50, r: 10, t: 30, b: 45 },
+        paper_bgcolor: "#000000",
+        plot_bgcolor: "#000000",
+        dragmode: "pan",
+        xaxis: {
+          title: { text: xLabel, font: { size: 12, color: "#ffffff" } },
+          color: "#ffffff",
+          gridcolor: "#222222",
+          zeroline: false,
+          constrain: "domain",
+        },
+        yaxis: {
+          title: { text: yLabel, font: { size: 12, color: "#ffffff" } },
+          color: "#ffffff",
+          gridcolor: "#222222",
+          zeroline: false,
+          scaleanchor: "x",
+          scaleratio: 1,
+        },
+        shapes: buildShapes(lines),
+        annotations: buildAnnotations(lines),
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dimConfig: any = {
+        responsive: true,
+        displaylogo: false,
+        displayModeBar: true,
+        scrollZoom: true, // ホイールでズームイン/アウト（寸法線ドラッグと両立）
+        modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+        editable: false,
+        edits: { shapePosition: true, annotationPosition: true },
+      };
+
+      Plotly.newPlot(plotEl, dimData, dimLayout, dimConfig);
+
+      const toReadouts = (ls: DimLine[]) =>
+        ls.map((l) => ({
+          id: l.id,
+          dist: Math.hypot(l.x1 - l.x0, l.y1 - l.y0),
+          dx: Math.abs(l.x1 - l.x0),
+          dy: Math.abs(l.y1 - l.y0),
+          unit: planeUnit,
+        }));
+      setDimReadouts(toReadouts(lines));
+
+      // 物理座標の桁が大きい(µm)ため、変化検出は範囲基準の相対許容で行う
+      const tol = Math.max(1e-6, (xMax - xMin) * 1e-4);
+      const differs = (a: number, b: number) => Math.abs(a - b) > tol;
+      // 動かした端点(mx,my)を固定端点(fx,fy)に対し水平/垂直へスナップ（Shift押下時）
+      const snap = (mx: number, my: number, fx: number, fy: number) =>
+        Math.abs(mx - fx) < Math.abs(my - fy)
+          ? { x: fx, y: my } // X差が小 → 垂直に固定
+          : { x: mx, y: fy }; // Y差が小 → 水平に固定
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_relayout", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const layout = (plotEl as any).layout;
+        const shapes = layout?.shapes;
+        const anns = layout?.annotations;
+        const cur = dimLinesRef.current;
+        let changed = false;
+        const updated = cur.map((l, i) => {
+          let nl = l;
+          // 1) 線(shape)のドラッグ: 端点や全体移動。ラベルは中点の移動量だけ追従
+          const sh = shapes?.[i];
+          let shapeChanged = false;
+          if (sh && sh.x0 != null && sh.y0 != null && sh.x1 != null && sh.y1 != null) {
+            const e0moved = differs(l.x0, sh.x0) || differs(l.y0, sh.y0);
+            const e1moved = differs(l.x1, sh.x1) || differs(l.y1, sh.y1);
+            if (e0moved || e1moved) {
+              let nx0 = sh.x0,
+                ny0 = sh.y0,
+                nx1 = sh.x1,
+                ny1 = sh.y1;
+              // Shift中の単一端点ドラッグは直交スナップ（両端移動=平行移動は対象外）
+              if (shiftHeldRef.current && e0moved && !e1moved) {
+                const s = snap(nx0, ny0, nx1, ny1);
+                nx0 = s.x;
+                ny0 = s.y;
+              } else if (shiftHeldRef.current && e1moved && !e0moved) {
+                const s = snap(nx1, ny1, nx0, ny0);
+                nx1 = s.x;
+                ny1 = s.y;
+              }
+              const dmx = (nx0 + nx1) / 2 - (l.x0 + l.x1) / 2;
+              const dmy = (ny0 + ny1) / 2 - (l.y0 + l.y1) / 2;
+              nl = {
+                ...nl,
+                x0: nx0,
+                y0: ny0,
+                x1: nx1,
+                y1: ny1,
+                lx: nl.lx != null ? nl.lx + dmx : nl.lx,
+                ly: nl.ly != null ? nl.ly + dmy : nl.ly,
+              };
+              shapeChanged = true;
+              changed = true;
+            }
+          }
+          // 2) 注釈(矢じり/ラベル)のドラッグ。線ドラッグと同時には起きない前提
+          if (!shapeChanged && anns) {
+            const a0 = anns[3 * i]; // 端点0の矢じり
+            const a1 = anns[3 * i + 1]; // 端点1の矢じり
+            const al = anns[3 * i + 2]; // ラベル
+            // 矢じりドラッグ → 端点を移動（Shift中は固定端点に対し直交スナップ）
+            if (
+              a0 &&
+              a0.x != null &&
+              a0.y != null &&
+              (differs(a0.x, nl.x0) || differs(a0.y, nl.y0))
+            ) {
+              const p = shiftHeldRef.current
+                ? snap(a0.x, a0.y, nl.x1, nl.y1)
+                : { x: a0.x, y: a0.y };
+              nl = { ...nl, x0: p.x, y0: p.y };
+              changed = true;
+            }
+            if (
+              a1 &&
+              a1.x != null &&
+              a1.y != null &&
+              (differs(a1.x, nl.x1) || differs(a1.y, nl.y1))
+            ) {
+              const p = shiftHeldRef.current
+                ? snap(a1.x, a1.y, nl.x0, nl.y0)
+                : { x: a1.x, y: a1.y };
+              nl = { ...nl, x1: p.x, y1: p.y };
+              changed = true;
+            }
+            // ラベルドラッグ → 表示位置を記憶
+            if (al && al.x != null && al.y != null) {
+              const rp = renderedLabelPos(nl);
+              if (differs(al.x, rp.x) || differs(al.y, rp.y)) {
+                nl = { ...nl, lx: al.x, ly: al.y };
+                changed = true;
+              }
+            }
+          }
+          return nl;
+        });
+        // ズーム/パンでは何も変わらない → 再描画せずループ防止
+        if (!changed) return;
+        dimLinesRef.current = updated;
+        setDimReadouts(toReadouts(updated));
+        Plotly.relayout(plotEl, {
+          shapes: buildShapes(updated),
+          annotations: buildAnnotations(updated),
+        });
+      });
+
+      return () => {
+        Plotly.purge(plotEl);
+      };
+    }
 
     // surfaceモード: zDataのグリッドをsurfaceプロットで描画
     // 光学デバイスのグリッド: grid[zSlice][yPixel] = xCentroid
@@ -1175,6 +1632,8 @@ function App() {
     measureMode,
     measurePt1,
     measurePt2,
+    dimensionMode,
+    dimLineVersion,
   ]);
 
   // --- 2D 断層グラフ描画 ---
@@ -1839,7 +2298,10 @@ function App() {
                   key={key}
                   onClick={() => {
                     setViewMode(key);
-                    if (key === "3D") setShowSlice(false);
+                    if (key === "3D") {
+                      setShowSlice(false);
+                      setDimensionMode(false);
+                    }
                   }}
                   style={{
                     padding: "0 14px",
@@ -2745,6 +3207,128 @@ function App() {
                     </svg>
                     {measureMode ? "計測: ON" : "距離計測"}
                   </button>
+
+                  {/* 寸法測定（2D 両矢印ドラッグ）トグルボタン */}
+                  <button
+                    disabled={viewMode !== "2D-camera" || !zData || zData.length === 0}
+                    onClick={() => {
+                      if (viewMode !== "2D-camera" || !zData || zData.length === 0) return;
+                      const next = !dimensionMode;
+                      setDimensionMode(next);
+                      if (next) {
+                        // 競合する他モードを解除
+                        setShowSlice(false);
+                        setMeasureMode(false);
+                        measureStateRef.current = { mode: false, pt1: null, pt2: null };
+                        setMeasurePt1(null);
+                        setMeasurePt2(null);
+                      } else {
+                        setDimReadouts([]);
+                      }
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: dimensionMode ? "#0e7490" : "#1e2d42",
+                      border: `1px solid ${dimensionMode ? "#22d3ee" : "#3a5068"}`,
+                      cursor:
+                        viewMode === "2D-camera" && zData && zData.length > 0
+                          ? "pointer"
+                          : "not-allowed",
+                      opacity: viewMode === "2D-camera" && zData && zData.length > 0 ? 1 : 0.5,
+                      fontSize: "12px",
+                    }}
+                    title="2D表示で両矢印をドラッグし、任意2点間の寸法を測る"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="3" y1="12" x2="21" y2="12" />
+                      <polyline points="6 9 3 12 6 15" />
+                      <polyline points="18 9 21 12 18 15" />
+                    </svg>
+                    {dimensionMode ? "寸法: ON" : "寸法測定"}
+                  </button>
+
+                  {/* 寸法読み取り値（線ごと） */}
+                  {dimensionMode && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          onClick={addDimLine}
+                          style={{
+                            ...buttonSecondaryStyle,
+                            flex: 1,
+                            backgroundColor: "#0e7490",
+                            border: "1px solid #22d3ee",
+                            fontSize: "12px",
+                          }}
+                          title="寸法線をもう1本追加する"
+                        >
+                          ＋ 寸法線を追加
+                        </button>
+                      </div>
+                      {dimReadouts.map((r, idx) => {
+                        const color = DIM_COLORS[idx % DIM_COLORS.length];
+                        return (
+                          <div
+                            key={r.id}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: "6px",
+                              backgroundColor: "#0b1f2a",
+                              border: `1px solid ${color}`,
+                              fontSize: "12px",
+                              color: "#e0f2fe",
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div style={{ fontWeight: 600, color }}>
+                                {dimReadouts.length > 1 ? `${idx + 1}. ` : ""}距離:{" "}
+                                {r.unit === "µm" && r.dist >= 1000
+                                  ? `${r.dist.toFixed(1)} µm (${(r.dist / 1000).toFixed(3)} mm)`
+                                  : `${r.dist.toFixed(1)} ${r.unit}`}
+                              </div>
+                              <button
+                                onClick={() => removeDimLine(r.id)}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  color: "#94a3b8",
+                                  cursor: "pointer",
+                                  fontSize: "14px",
+                                  lineHeight: 1,
+                                  padding: "0 2px",
+                                }}
+                                title="この寸法線を削除"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <div style={{ color: "#7dd3fc" }}>
+                              ΔX: {r.dx.toFixed(1)} {r.unit} ／ ΔY: {r.dy.toFixed(1)} {r.unit}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ color: "#5b7a8a", fontSize: "11px" }}>
+                        矢印の端点をドラッグして測りたい2点に合わせてください。Shiftを押しながらドラッグすると水平/垂直に固定できます。数値ボックスはドラッグで自由に移動できます
+                      </div>
+                    </div>
+                  )}
 
                   {/* 断層 出力/停止 トグルボタン */}
                   <button
