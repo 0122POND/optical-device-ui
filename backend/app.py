@@ -274,7 +274,9 @@ async def ws_endpoint(ws: WebSocket):
         algorithm = params.get("algorithm", "coin")
 
         def blocking_preprocess():
-            # use_gpu / algorithm に応じて適切なモジュールを動的にインポート
+            # use_gpu / algorithm に応じて適切なモジュールを動的にインポート。
+            # elec/medical/semi は標準系と同一処理（GPUは preprocessing_gpu、
+            # CPUは preprocessing_std_cpu を共用）。coin(=else)のみ CPUが σ=10+膨張で別。
             if algorithm == "tgv":
                 if use_gpu:
                     from preprocessing_tgv_gpu import run_preprocess
@@ -285,21 +287,11 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import run_preprocess
                 else:
                     from preprocessing_coin2_cpu import run_preprocess
-            elif algorithm == "elec":
+            elif algorithm in ("elec", "medical", "semi"):
                 if use_gpu:
-                    from preprocessing_elec_gpu import run_preprocess
+                    from preprocessing_gpu import run_preprocess
                 else:
-                    from preprocessing_elec_cpu import run_preprocess
-            elif algorithm == "medical":
-                if use_gpu:
-                    from preprocessing_medical_gpu import run_preprocess
-                else:
-                    from preprocessing_medical_cpu import run_preprocess
-            elif algorithm == "semi":
-                if use_gpu:
-                    from preprocessing_semi_gpu import run_preprocess
-                else:
-                    from preprocessing_semi_cpu import run_preprocess
+                    from preprocessing_std_cpu import run_preprocess
             else:
                 if use_gpu:
                     from preprocessing_gpu import run_preprocess
@@ -384,21 +376,11 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import save_peak_results
                 else:
                     from preprocessing_coin2_cpu import save_peak_results
-            elif algorithm == "elec":
+            elif algorithm in ("elec", "medical", "semi"):
                 if use_gpu:
-                    from preprocessing_elec_gpu import save_peak_results
+                    from preprocessing_gpu import save_peak_results
                 else:
-                    from preprocessing_elec_cpu import save_peak_results
-            elif algorithm == "medical":
-                if use_gpu:
-                    from preprocessing_medical_gpu import save_peak_results
-                else:
-                    from preprocessing_medical_cpu import save_peak_results
-            elif algorithm == "semi":
-                if use_gpu:
-                    from preprocessing_semi_gpu import save_peak_results
-                else:
-                    from preprocessing_semi_cpu import save_peak_results
+                    from preprocessing_std_cpu import save_peak_results
             else:
                 if use_gpu:
                     from preprocessing_gpu import save_peak_results
