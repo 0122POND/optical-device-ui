@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
@@ -110,9 +110,6 @@ function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cameraRef = useRef<any>(null);
-
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -125,8 +122,6 @@ function App() {
 
   // 左右反転フラグ（true = 反転 / false = 通常）
   const [flipX, setFlipX] = useState(false);
-  // Z軸反転フラグ（true = 反転 / false = 通常）
-  const [flipZ] = useState(false);
 
   // 確認ダイアログの表示フラグ
   const [showConfirm, setShowConfirm] = useState(false);
@@ -139,6 +134,10 @@ function App() {
   const [algorithm, setAlgorithm] = useState<
     "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi"
   >("coin");
+  // connectWebSocket は [] 依存で一度だけ生成され、onmessage が初期の algorithm を握り続ける
+  // （stale closure）。WS再接続を避けつつ最新値を読むため ref に毎レンダー同期する。
+  const algorithmRef = useRef(algorithm);
+  algorithmRef.current = algorithm;
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -185,6 +184,15 @@ function App() {
   const [dimLineVersion, setDimLineVersion] = useState(0);
   // Shift押下中はドラッグした端点を水平/垂直へスナップ（直交固定）
   const shiftHeldRef = useRef(false);
+  // クリックハンドラを一度だけ登録する Plotly.react 方式のため、ハンドラ内で参照する
+  // 値は ref 経由で常に最新を読む（クロージャの陳腐化を防ぐ）
+  const viewModeRef = useRef(viewMode);
+  const showSliceRef = useRef(showSlice);
+  const sliceLineStartRef = useRef(sliceLineStart);
+  const sliceLineEndRef = useRef(sliceLineEnd);
+  // 現在マウント中のプロット種別。同種なら Plotly.react で差分更新、種別が変わる時だけ
+  // purge + newPlot でハンドラを貼り直す
+  const plotKindRef = useRef<"dim" | "surface" | "points" | null>(null);
   // 寸法読み取り値（サイドパネル表示用。線ごと）
   const [dimReadouts, setDimReadouts] = useState<
     {
@@ -519,9 +527,9 @@ function App() {
               folderUrl: "/data/mask_result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: flipZ,
+              flipZ: false,
               colorMode: "z",
-              ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
+              ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
             setCloud(newCloud);
@@ -564,9 +572,9 @@ function App() {
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
-              flipZ: flipZ,
+              flipZ: false,
               colorMode: "z",
-              ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
+              ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
             setCloud(newCloud);
@@ -588,7 +596,7 @@ function App() {
                   points: newCloud.x.length,
                   thumbnail: thumb,
                   name: "",
-                  source: algorithm,
+                  source: algorithmRef.current,
                 },
                 ...prev,
               ].slice(0, 5)
@@ -667,19 +675,65 @@ function App() {
     return () => clearTimeout(timer);
   }, [showPlot, showSlice]);
 
-  // 再描画前のカメラ状態を保存・復元するヘルパー
+  // クリックハンドラ内で参照する状態を毎レンダーで最新化（Plotly.react でハンドラを
+  // 貼り直さないため）。カメラ位置は layout.scene.uirevision により Plotly 側で保持される。
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+    showSliceRef.current = showSlice;
+    sliceLineStartRef.current = sliceLineStart;
+    sliceLineEndRef.current = sliceLineEnd;
+  });
 
-  const saveCameraState = (el: HTMLDivElement) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const curLayout = (el as any).layout;
-      if (curLayout?.scene?.camera) {
-        cameraRef.current = curLayout.scene.camera;
-      }
-    } catch {
-      /* 初回描画時など */
+  // アンマウント時にプロットを破棄（再描画ごとの purge はしない＝react で再利用するため）
+  useEffect(() => {
+    const el = plotRef.current;
+    return () => {
+      if (el) Plotly.purge(el);
+    };
+  }, []);
+
+  // 点群(scatter3d)の物理座標(µm)変換と範囲。最大12万点×3配列の生成は重いので memo 化し、
+  // 入力(cloud/反転/換算係数)が変わらない限り同じ配列参照を返す。これにより描画 effect が
+  // 軸表示・計測マーカー等の無関係な state で再実行されても、Plotly.react は点群トレースを
+  // 「変化なし」と判定して WebGL バッファの再アップロードを省略できる。
+  const pointGeom = useMemo(() => {
+    if (!cloud || cloud.x.length === 0) return null;
+    // 左右反転時はX座標を反転
+    const xData = flipX
+      ? (() => {
+          const maxX = cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]);
+          return cloud.x.map((v) => maxX - v);
+        })()
+      : cloud.x;
+    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
+    const sweepVal = parseFloat(sweepInterval);
+    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+    const zUmPerSlice = hasSweep
+      ? sweepIntervalUnit === "mm"
+        ? sweepVal * 1000
+        : sweepVal
+      : umPerPixelY;
+    // 物理単位（µm）に変換
+    const xDataUm = xData.map((v) => v * umPerPixelX);
+    const yDataUm = cloud.y.map((v) => v * umPerPixelY);
+    const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
+    // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
+    let xUmMin = xDataUm[0],
+      xUmMax = xDataUm[0];
+    let yUmMin = yDataUm[0],
+      yUmMax = yDataUm[0];
+    let zUmMin = zDataUm[0],
+      zUmMax = zDataUm[0];
+    for (let i = 1; i < xDataUm.length; i++) {
+      if (xDataUm[i] < xUmMin) xUmMin = xDataUm[i];
+      if (xDataUm[i] > xUmMax) xUmMax = xDataUm[i];
+      if (yDataUm[i] < yUmMin) yUmMin = yDataUm[i];
+      if (yDataUm[i] > yUmMax) yUmMax = yDataUm[i];
+      if (zDataUm[i] < zUmMin) zUmMin = zDataUm[i];
+      if (zDataUm[i] > zUmMax) zUmMax = zDataUm[i];
     }
-  };
+    return { xDataUm, yDataUm, zDataUm, xUmMin, xUmMax, yUmMin, yUmMax, zUmMin, zUmMax };
+  }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval, sweepIntervalUnit]);
 
   useEffect(() => {
     const plotEl = plotRef.current;
@@ -687,10 +741,9 @@ function App() {
 
     if (!showPlot) {
       Plotly.purge(plotEl);
+      plotKindRef.current = null;
       return;
     }
-
-    const savedCamera = cameraRef.current;
 
     // ---- 寸法測定モード（2D 本物のヒートマップ + ドラッグ可能な両矢印）----
     // 3Dシーンには編集可能図形が無いため、寸法測定中だけ真の2Dヒートマップで描画する。
@@ -943,7 +996,11 @@ function App() {
         edits: { shapePosition: true, annotationPosition: true },
       };
 
+      // 寸法測定の relayout ハンドラは tol などその場のクロージャに依存するため、
+      // react での流用はせず常に貼り直す（purge で旧ハンドラ・旧トレースを除去）
+      Plotly.purge(plotEl);
       Plotly.newPlot(plotEl, dimData, dimLayout, dimConfig);
+      plotKindRef.current = "dim";
 
       const toReadouts = (ls: DimLine[]) =>
         ls.map((l) => ({
@@ -1060,9 +1117,8 @@ function App() {
         });
       });
 
-      return () => {
-        Plotly.purge(plotEl);
-      };
+      // 再描画ごとの purge はしない（次回 effect 冒頭の種別判定で制御）
+      return;
     }
 
     // surfaceモード: zDataのグリッドをsurfaceプロットで描画
@@ -1234,7 +1290,9 @@ function App() {
                   y: yRange / xyMax,
                   z: Math.max(hRange / xyMax, 0.15),
                 },
-          camera: savedCamera || cam,
+          camera: cam,
+          // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
+          uirevision: viewMode,
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
       };
@@ -1287,95 +1345,77 @@ function App() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
-      Plotly.newPlot(plotEl, surfData, surfLayout, config);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (plotEl as any).on("plotly_click", (eventData: any) => {
-        if (!eventData.points || eventData.points.length === 0) return;
-        const p = eventData.points[0];
-
-        // 距離計測モード
-        if (measureStateRef.current.mode) {
-          const s = measureStateRef.current;
-          if (s.pt1 && s.pt2) return;
-          if (measureLockRef.current) return;
-          measureLockRef.current = true;
-          const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-          if (!s.pt1) {
-            measureStateRef.current = { ...s, pt1: pt3 };
-            setMeasurePt1(pt3);
-          } else {
-            measureStateRef.current = { ...s, pt2: pt3 };
-            setMeasurePt2(pt3);
-          }
-          setTimeout(() => {
-            measureLockRef.current = false;
-          }, 300);
-          return;
-        }
-
-        // 2Dモード + 断層表示時、クリックで始点・終点を設定
-        if (viewMode === "2D-camera" && showSlice) {
-          const pt = { y: p.x as number, z: p.y as number };
-          if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
-            setSliceLineStart(pt);
-            setSliceLineEnd(null);
-          } else {
-            setSliceLineEnd(pt);
-          }
-        }
-      });
-
-      return () => {
-        saveCameraState(plotEl);
+      // 同種(surface)で再描画する場合は react で差分更新（WebGL再構築を避け凍結を防ぐ）。
+      // 種別が変わる時だけ purge + newPlot し、クリックハンドラを貼り直す。
+      if (plotKindRef.current === "surface") {
+        Plotly.react(plotEl, surfData, surfLayout, config);
+      } else {
         Plotly.purge(plotEl);
-      };
+        Plotly.newPlot(plotEl, surfData, surfLayout, config);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_click", (eventData: any) => {
+          if (!eventData.points || eventData.points.length === 0) return;
+          const p = eventData.points[0];
+
+          // 距離計測モード
+          if (measureStateRef.current.mode) {
+            const s = measureStateRef.current;
+            if (s.pt1 && s.pt2) return;
+            if (measureLockRef.current) return;
+            measureLockRef.current = true;
+            const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
+            if (!s.pt1) {
+              measureStateRef.current = { ...s, pt1: pt3 };
+              setMeasurePt1(pt3);
+            } else {
+              measureStateRef.current = { ...s, pt2: pt3 };
+              setMeasurePt2(pt3);
+            }
+            setTimeout(() => {
+              measureLockRef.current = false;
+            }, 300);
+            return;
+          }
+
+          // 2Dモード + 断層表示時、クリックで始点・終点を設定（最新値は ref から読む）
+          if (viewModeRef.current === "2D-camera" && showSliceRef.current) {
+            const pt = { y: p.x as number, z: p.y as number };
+            if (
+              !sliceLineStartRef.current ||
+              (sliceLineStartRef.current && sliceLineEndRef.current)
+            ) {
+              setSliceLineStart(pt);
+              setSliceLineEnd(null);
+            } else {
+              setSliceLineEnd(pt);
+            }
+          }
+        });
+        plotKindRef.current = "surface";
+      }
+
+      // 再描画ごとの purge はしない（react 再利用のため）
+      return;
     }
 
     if (!cloud) {
       Plotly.purge(plotEl);
+      plotKindRef.current = null;
       return;
     }
 
-    // 左右反転時はX座標を反転
-    const xData = flipX
-      ? (() => {
-          const maxX = cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]);
-          return cloud.x.map((v) => maxX - v);
-        })()
-      : cloud.x;
+    // 物理座標(µm)変換と範囲は pointGeom(memo) を再利用。参照が安定するため、
+    // 無関係な state 変化での再描画では Plotly.react が点群バッファを再アップロードしない。
+    if (!pointGeom) {
+      Plotly.purge(plotEl);
+      plotKindRef.current = null;
+      return;
+    }
+    const { xDataUm, yDataUm, zDataUm, xUmMin, xUmMax, yUmMin, yUmMax, zUmMin, zUmMax } = pointGeom;
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
+    // 掃引間隔が指定されているか（Z軸ラベルの表示分岐に使用）
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep
-      ? sweepIntervalUnit === "mm"
-        ? sweepVal * 1000
-        : sweepVal
-      : umPerPixelY;
-
-    const yData = cloud.y;
-
-    // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * umPerPixelX);
-    const yDataUm = yData.map((v) => v * umPerPixelY);
-    const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
-
-    // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
-    let xUmMin = xDataUm[0],
-      xUmMax = xDataUm[0];
-    let yUmMin = yDataUm[0],
-      yUmMax = yDataUm[0];
-    let zUmMin = zDataUm[0],
-      zUmMax = zDataUm[0];
-    for (let i = 1; i < xDataUm.length; i++) {
-      if (xDataUm[i] < xUmMin) xUmMin = xDataUm[i];
-      if (xDataUm[i] > xUmMax) xUmMax = xDataUm[i];
-      if (yDataUm[i] < yUmMin) yUmMin = yDataUm[i];
-      if (yDataUm[i] > yUmMax) yUmMax = yDataUm[i];
-      if (zDataUm[i] < zUmMin) zUmMin = zDataUm[i];
-      if (zDataUm[i] > zUmMax) zUmMax = zDataUm[i];
-    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any[];
@@ -1519,7 +1559,9 @@ function App() {
               z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
-          camera: savedCamera || cam,
+          camera: cam,
+          // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
+          uirevision: viewMode,
           // 2D-cameraではドラッグ回転を無効化
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
@@ -1576,44 +1618,51 @@ function App() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
-    Plotly.newPlot(plotEl, data, layout, config);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (plotEl as any).on("plotly_click", (eventData: any) => {
-      if (!eventData.points || eventData.points.length === 0) return;
-      const p = eventData.points[0];
-
-      // 距離計測モード
-      if (measureStateRef.current.mode) {
-        const s = measureStateRef.current;
-        if (s.pt1 && s.pt2) return;
-        const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
-        if (!s.pt1) {
-          measureStateRef.current = { ...s, pt1: pt3 };
-          setMeasurePt1(pt3);
-        } else {
-          measureStateRef.current = { ...s, pt2: pt3 };
-          setMeasurePt2(pt3);
-        }
-        return;
-      }
-
-      // 2Dモード + 断層表示時、クリックで始点・終点を設定
-      if (viewMode === "2D-camera" && showSlice) {
-        const pt = { y: p.y as number, z: p.z as number };
-        if (!sliceLineStart || (sliceLineStart && sliceLineEnd)) {
-          setSliceLineStart(pt);
-          setSliceLineEnd(null);
-        } else {
-          setSliceLineEnd(pt);
-        }
-      }
-    });
-
-    return () => {
-      saveCameraState(plotEl);
+    // 点群(scatter3d, 最大12万点)は WebGL 再構築コストが大きいため、同種なら react 差分更新。
+    if (plotKindRef.current === "points") {
+      Plotly.react(plotEl, data, layout, config);
+    } else {
       Plotly.purge(plotEl);
-    };
+      Plotly.newPlot(plotEl, data, layout, config);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_click", (eventData: any) => {
+        if (!eventData.points || eventData.points.length === 0) return;
+        const p = eventData.points[0];
+
+        // 距離計測モード
+        if (measureStateRef.current.mode) {
+          const s = measureStateRef.current;
+          if (s.pt1 && s.pt2) return;
+          const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
+          if (!s.pt1) {
+            measureStateRef.current = { ...s, pt1: pt3 };
+            setMeasurePt1(pt3);
+          } else {
+            measureStateRef.current = { ...s, pt2: pt3 };
+            setMeasurePt2(pt3);
+          }
+          return;
+        }
+
+        // 2Dモード + 断層表示時、クリックで始点・終点を設定（最新値は ref から読む）
+        if (viewModeRef.current === "2D-camera" && showSliceRef.current) {
+          const pt = { y: p.y as number, z: p.z as number };
+          if (
+            !sliceLineStartRef.current ||
+            (sliceLineStartRef.current && sliceLineEndRef.current)
+          ) {
+            setSliceLineStart(pt);
+            setSliceLineEnd(null);
+          } else {
+            setSliceLineEnd(pt);
+          }
+        }
+      });
+      plotKindRef.current = "points";
+    }
+
+    // 再描画ごとの purge はしない（react 再利用のため。破棄はアンマウント時のみ）
+    return;
   }, [
     showPlot,
     axisVisible,
@@ -1629,6 +1678,7 @@ function App() {
     umPerPixelY,
     plotType,
     zData,
+    pointGeom,
     measureMode,
     measurePt1,
     measurePt2,
@@ -1996,43 +2046,54 @@ function App() {
       alert("CSVデータが空です");
       return;
     }
-    const xArr: number[] = [];
-    const yArr: number[] = [];
-    const zArr: number[] = [];
-    const cArr: number[] = [];
+    // 展開とランダム間引きを1パスで行う（reservoir sampling）。
+    // 全有効点を一旦配列に展開→全インデックスをシャッフルする旧方式は、巨大CSVで
+    // メインスレッドを数秒凍結させた。上限 CSV_MAX_TOTAL_POINTS 件だけを保持しながら
+    // 走査することで、確保するメモリ・計算量を点数ではなく上限値に比例させる。
+    const MAX = CSV_MAX_TOTAL_POINTS;
+    const sx: number[] = [];
+    const sy: number[] = [];
+    const sz: number[] = [];
+    const sseq: number[] = []; // 各サンプルの元の出現順（間引き後に並び順を復元するため）
+    let seen = 0; // これまでに見た有効点の数
     for (let row = 0; row < grid.length; row++) {
-      for (let col = 0; col < grid[row].length; col++) {
-        const v = grid[row][col];
+      const gridRow = grid[row];
+      for (let col = 0; col < gridRow.length; col++) {
+        const v = gridRow[col];
         if (v == null) continue;
-        xArr.push(v);
-        yArr.push(col);
-        zArr.push(row);
-        cArr.push(v);
+        if (seen < MAX) {
+          sx.push(v);
+          sy.push(col);
+          sz.push(row);
+          sseq.push(seen);
+        } else {
+          // 既に上限に達している場合は確率 MAX/(seen+1) で既存サンプルと置換
+          const j = Math.floor(Math.random() * (seen + 1));
+          if (j < MAX) {
+            sx[j] = v;
+            sy[j] = col;
+            sz[j] = row;
+            sseq[j] = seen;
+          }
+        }
+        seen++;
       }
     }
-    if (xArr.length === 0) {
+    if (seen === 0) {
       alert("有効なデータがありません");
       return;
     }
-    // 総点数が上限を超える場合はランダム間引き（画像処理結果 pointCloud.ts と同じ方式）
-    let cx = xArr,
-      cy = yArr,
-      cz = zArr,
-      cc = cArr;
-    if (xArr.length > CSV_MAX_TOTAL_POINTS) {
-      const indices = Array.from({ length: xArr.length }, (_, i) => i);
-      for (let i = indices.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
-      }
-      indices.length = CSV_MAX_TOTAL_POINTS;
-      indices.sort((a, b) => a - b); // 元の並び順を保持
-      cx = indices.map((idx) => xArr[idx]);
-      cy = indices.map((idx) => yArr[idx]);
-      cz = indices.map((idx) => zArr[idx]);
-      cc = indices.map((idx) => cArr[idx]);
+    // 間引きが発生した場合のみ、サンプルを元の出現順に並べ直す（c は値=深さなので x と共有）
+    let cx = sx,
+      cy = sy,
+      cz = sz;
+    if (seen > MAX) {
+      const order = Array.from({ length: MAX }, (_, i) => i).sort((a, b) => sseq[a] - sseq[b]);
+      cx = order.map((i) => sx[i]);
+      cy = order.map((i) => sy[i]);
+      cz = order.map((i) => sz[i]);
     }
-    const newCloud = { x: cx, y: cy, z: cz, c: cc };
+    const newCloud = { x: cx, y: cy, z: cz, c: cx };
     setShowSlice(false);
     setZData(grid);
     setCloud(newCloud);
@@ -2090,7 +2151,7 @@ function App() {
         folderUrl: "/data/mask_result",
         threshold: 128,
         samplePerSlice: 4000,
-        flipZ: flipZ,
+        flipZ: false,
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
