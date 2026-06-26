@@ -5,3 +5,6 @@ export type PlotType = "scatter3d" | "surface";
 
 // 測定履歴の取得元（算法名 / CSV / AI）
 export type HistorySource = "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi" | "csv" | "ai";
+
+// 計測ステータス
+export type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";

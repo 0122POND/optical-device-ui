@@ -4,106 +4,18 @@ import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import { useWebSocket } from "./hooks/useWebSocket";
-import type { PlotType, HistorySource } from "./types";
+import {
+  DEFAULT_UM_PER_PIXEL_X,
+  DEFAULT_UM_PER_PIXEL_Y,
+  DIM_COLORS,
+  CSV_MAX_TOTAL_POINTS,
+  colors,
+  fontFamily,
+} from "./utils/constants";
+import { formatElapsed } from "./utils/format";
+import { StatusBadge } from "./components/StatusBadge";
+import type { PlotType, HistorySource, MeasureStatus } from "./types";
 import "./App.css";
-
-// 1ピクセルあたりのµm換算係数（軸ごとに異なる）のデフォルト値
-const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
-const DEFAULT_UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
-
-// 寸法線の色パレット（線ごとに色を変えて区別しやすくする）
-const DIM_COLORS = ["#ffffff", "#fde047", "#34d399", "#f472b6", "#60a5fa", "#fb923c"];
-
-// CSV点群表示時の総点数上限（pointCloud.ts の maxTotalPoints と揃える）
-const CSV_MAX_TOTAL_POINTS = 120_000;
-
-// カラーパレット（モダングレー）
-const colors = {
-  bg: "#3a3f47",
-  bgLight: "#454b54",
-  bgDark: "#2d3139",
-  border: "#4f5661",
-  borderLight: "#5a6270",
-  text: "#f0f1f3",
-  textMuted: "#9ca3af",
-  textDim: "#8b939f",
-  primary: "#3b82f6",
-  primaryHover: "#2563eb",
-  danger: "#ef4444",
-  success: "#22c55e",
-  secondary: "#6b7280",
-  secondaryHover: "#4b5563",
-};
-
-// フォント設定
-const fontFamily =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-
-// 計測ステータス
-// 経過時間を「12.3秒」「1分5.0秒」形式に整形
-const formatElapsed = (ms: number): string => {
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}秒`;
-  const m = Math.floor(s / 60);
-  return `${m}分${(s - m * 60).toFixed(1)}秒`;
-};
-
-type MeasureStatus = "READY" | "RUNNING" | "COMPLETE";
-
-const StatusBadge = ({ status }: { status: MeasureStatus }) => {
-  const config = {
-    READY: {
-      bg: "#1e3a2f",
-      color: "#6bff95",
-      border: "#6bff9555",
-      dot: "#3ddc84",
-      label: "READY",
-    },
-    RUNNING: {
-      bg: "#3a2828",
-      color: "#ff6b6b",
-      border: "#ff6b6b55",
-      dot: "#ff4d4d",
-      label: "RUNNING",
-    },
-    COMPLETE: {
-      bg: "#1e2a3a",
-      color: "#6b95ff",
-      border: "#6b95ff55",
-      dot: "#4d7fff",
-      label: "COMPLETE",
-    },
-  };
-  const c = config[status];
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "8px 12px",
-        borderRadius: "999px",
-        fontSize: "12px",
-        fontWeight: 600,
-        backgroundColor: c.bg,
-        color: c.color,
-        border: `1px solid ${c.border}`,
-      }}
-    >
-      <span
-        style={{
-          width: "8px",
-          height: "8px",
-          borderRadius: "50%",
-          backgroundColor: c.dot,
-          animation: status === "RUNNING" ? "blink 1s ease-in-out infinite" : "none",
-        }}
-      />
-      {c.label}
-    </div>
-  );
-};
 
 function App() {
   const GRID_SIZE = 80;
