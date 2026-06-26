@@ -41,6 +41,11 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 # スレッドプール（画像処理用）
 executor = ThreadPoolExecutor(max_workers=2)
 
+
+class WorkerCancelled(Exception):
+    """WebSocket切断時に、進捗コールバック経由でワーカースレッドの重い処理を
+    協調的に中断するための内部例外（スレッドは外部から強制終了できないため）。"""
+
 # ピーク結果のインメモリキャッシュ（PNG encoded bytes）
 _result_cache: Dict[str, bytes] = {}
 _result_cache_lock = threading.Lock()
@@ -160,6 +165,9 @@ async def ws_endpoint(ws: WebSocket):
 
     is_running = False
     running_task: Optional[asyncio.Task] = None
+    # 切断時にワーカースレッド（AI推論・前処理）を協調的に中断するためのフラグ。
+    # 進捗コールバック内で is_set() を確認し、立っていれば WorkerCancelled を送出する。
+    cancel_event = threading.Event()
 
     async def stream_once(params: Dict[str, Any]):
         size = int(params.get("size", 120))
@@ -191,6 +199,9 @@ async def ws_endpoint(ws: WebSocket):
         progress_queue: asyncio.Queue = asyncio.Queue()
 
         def progress_callback(step: int, total: int, message: str, eta_sec: int = None, percent: int = None):
+            # 切断済みなら次のチェックポイントで処理を中断（CPU/GPUの空回しを防ぐ）
+            if cancel_event.is_set():
+                raise WorkerCancelled()
             loop.call_soon_threadsafe(
                 progress_queue.put_nowait,
                 {"step": step, "total": total, "message": message, "eta_sec": eta_sec, "percent": percent}
@@ -212,6 +223,8 @@ async def ws_endpoint(ws: WebSocket):
             )
 
         future = loop.run_in_executor(executor, blocking_inference)
+        # 切断後に誰も await しないと "exception never retrieved" 警告が出るため取得して握る
+        future.add_done_callback(lambda f: f.cancelled() or f.exception())
 
         def _build_progress_msg(progress):
             pct = progress.get("percent") if progress.get("percent") is not None else int((progress["step"] / progress["total"]) * 100)
@@ -261,6 +274,9 @@ async def ws_endpoint(ws: WebSocket):
         progress_queue: asyncio.Queue = asyncio.Queue()
 
         def progress_callback(step: int, total: int, message: str):
+            # 切断済みなら次のチェックポイントで処理を中断（CPU/GPUの空回しを防ぐ）
+            if cancel_event.is_set():
+                raise WorkerCancelled()
             # スレッドセーフにキューに追加
             loop.call_soon_threadsafe(
                 progress_queue.put_nowait,
@@ -316,6 +332,8 @@ async def ws_endpoint(ws: WebSocket):
 
         # 別スレッドで画像処理を実行
         future = loop.run_in_executor(executor, blocking_preprocess)
+        # 切断後に誰も await しないと "exception never retrieved" 警告が出るため取得して握る
+        future.add_done_callback(lambda f: f.cancelled() or f.exception())
 
         # 進捗を監視して送信
         while not future.done():
@@ -484,8 +502,15 @@ async def ws_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         print("WebSocket disconnected")
+        # ワーカースレッド（AI推論・前処理）を次のチェックポイントで中断させる
+        cancel_event.set()
+        # ストリームタスクは cancel 後に await まで行い、後始末を完了させる
         if running_task and not running_task.done():
             running_task.cancel()
+            try:
+                await running_task
+            except asyncio.CancelledError:
+                pass
 
 
 # -----------------------------
