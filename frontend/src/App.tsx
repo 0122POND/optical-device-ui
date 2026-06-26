@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
+import { useWebSocket } from "./hooks/useWebSocket";
+import type { PlotType, HistorySource } from "./types";
 import "./App.css";
-
-const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
 // 1ピクセルあたりのµm換算係数（軸ごとに異なる）のデフォルト値
 const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
@@ -110,8 +110,6 @@ function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
-  // WebSocket
-  const wsRef = useRef<WebSocket | null>(null);
 
   // 表示モード
   type ViewMode = "3D" | "2D-camera";
@@ -134,10 +132,6 @@ function App() {
   const [algorithm, setAlgorithm] = useState<
     "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi"
   >("coin");
-  // connectWebSocket は [] 依存で一度だけ生成され、onmessage が初期の algorithm を握り続ける
-  // （stale closure）。WS再接続を避けつつ最新値を読むため ref に毎レンダー同期する。
-  const algorithmRef = useRef(algorithm);
-  algorithmRef.current = algorithm;
 
   // 3Dグラフを表示するかどうか
   const [showPlot, setShowPlot] = useState(false);
@@ -276,11 +270,9 @@ function App() {
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
-  type PlotType = "scatter3d" | "surface";
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）
-  type HistorySource = "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi" | "csv" | "ai";
   type CloudHistoryEntry = {
     cloud: PointCloud;
     measuredAt: string;
@@ -403,10 +395,32 @@ function App() {
       ].slice(0, 5)
     );
   };
-  // connectWebSocket は [] 依存で一度だけ生成されるため、最新の applyCloudResult を
-  // ref 経由で読む（依存に入れると再接続チャーンが起きるため。algorithmRef と同パターン）
-  const applyCloudResultRef = useRef(applyCloudResult);
-  applyCloudResultRef.current = applyCloudResult;
+  // WebSocket 接続・onmessage ルーティングは useWebSocket フックへ集約。
+  // 完了時の点群反映は applyCloudResult、進捗・状態・エラーはコールバックで App 側へ委譲。
+  const { connect } = useWebSocket({
+    algorithm,
+    applyCloudResult,
+    onProgress: (p) => {
+      setProgressStep(p.step);
+      setProgressTotal(p.total);
+      setProgressMessage(p.message);
+      setProgressPercent(p.percent);
+    },
+    onStatus: (value) => setStatus(value),
+    onError: (kind, msg) => {
+      if (kind === "ai") setIsLoadingAI(false);
+      else setIsAcquiring(false); // acquire / generic とも取得中フラグを下ろす
+      setStatus("READY");
+      if (kind !== "generic") setShowPlot(false); // generic(error型)は従来どおり非表示にしない
+      alert(
+        kind === "ai"
+          ? `AI結果の点群生成に失敗しました: ${msg}`
+          : kind === "acquire"
+            ? `点群生成に失敗しました: ${msg}`
+            : `エラー: ${msg}`
+      );
+    },
+  });
 
   // 進捗表示用
   const [progressStep, setProgressStep] = useState(0);
@@ -548,123 +562,6 @@ function App() {
     padding: "0 12px",
     boxSizing: "border-box",
   };
-
-  // WebSocket接続
-  const connectWebSocket = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      return wsRef.current;
-    }
-
-    const ws = new WebSocket(WS_URL);
-
-    ws.onopen = () => {
-      console.log("WebSocket connected");
-    };
-
-    ws.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("WS message:", data);
-
-        if (data.type === "progress") {
-          setProgressStep(data.step);
-          setProgressTotal(data.total);
-          setProgressMessage(data.message);
-          setProgressPercent(data.percent);
-        } else if (data.type === "ai_inference_complete") {
-          console.log("AI推論完了:", data.count, "files", "device:", data.device);
-          try {
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
-              folderUrl: "/data/mask_result",
-              threshold: 128,
-              samplePerSlice: 4000,
-              flipZ: false,
-              colorMode: "z",
-              ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-            });
-
-            applyCloudResultRef.current(newCloud, newGrid, {
-              plotType: "scatter3d",
-              source: "ai",
-              progress: { message: `AI推論完了 (${data.device})`, percent: 100 },
-              clearLoading: "ai",
-            });
-            console.log("AI点群生成完了", { points: newCloud.x.length });
-          } catch (e) {
-            console.error(e);
-            setIsLoadingAI(false);
-            setStatus("READY");
-            setShowPlot(false);
-            alert(`AI結果の点群生成に失敗しました: ${(e as Error).message}`);
-          }
-        } else if (data.type === "preprocess_complete") {
-          console.log("画像処理完了:", data.count, "files");
-          // 処理完了後、点群を読み込み
-          try {
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
-              folderUrl: "/data/result",
-              threshold: 128,
-              samplePerSlice: 4000,
-              flipZ: false,
-              colorMode: "z",
-              ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-            });
-
-            applyCloudResultRef.current(newCloud, newGrid, {
-              plotType: "scatter3d",
-              source: algorithmRef.current,
-              progress: { message: "完了", percent: 100 },
-              clearLoading: "acquire",
-            });
-            console.log("点群生成完了", { points: newCloud.x.length });
-          } catch (e) {
-            console.error(e);
-            setIsAcquiring(false);
-            setStatus("READY");
-            setShowPlot(false);
-            alert(`点群生成に失敗しました: ${(e as Error).message}`);
-          }
-        } else if (data.type === "status") {
-          if (data.value === "RUNNING") {
-            setStatus("RUNNING");
-          } else if (data.value === "COMPLETE") {
-            // preprocess_completeで処理するので、ここでは何もしない
-          } else if (data.value === "READY") {
-            setStatus("READY");
-          }
-        } else if (data.type === "error") {
-          console.error("Server error:", data.message);
-          setIsAcquiring(false);
-          setStatus("READY");
-          alert(`エラー: ${data.message}`);
-        }
-      } catch (e) {
-        console.error("Failed to parse WS message:", e);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-    };
-
-    ws.onclose = () => {
-      console.log("WebSocket disconnected");
-      wsRef.current = null;
-    };
-
-    wsRef.current = ws;
-    return ws;
-  }, []);
-
-  // コンポーネントマウント時にWebSocket接続
-  useEffect(() => {
-    connectWebSocket();
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [connectWebSocket]);
 
   useEffect(() => {
     const timerRef = acquireTimerRef;
@@ -2008,7 +1905,7 @@ function App() {
       console.log("画像処理開始...");
 
       // WebSocketでpreprocessコマンドを送信
-      const ws = connectWebSocket();
+      const ws = connect();
 
       const sendCommand = () => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -2045,7 +1942,7 @@ function App() {
 
       console.log("AI推論開始...");
 
-      const ws = connectWebSocket();
+      const ws = connect();
 
       const sendCommand = () => {
         if (ws.readyState === WebSocket.OPEN) {
