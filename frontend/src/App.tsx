@@ -361,6 +361,53 @@ function App() {
     return canvas.toDataURL("image/png");
   };
 
+  // 取得した点群を状態へ反映する共通処理（WS完了 / CSV取込 / マスク読込で共有）。
+  // 共通コア（cloud/zData/status/履歴/計測回数）に加え、plotType・source・進捗・
+  // ロード解除フラグを opts で出し分ける。showPlot/showSlice は呼び出し側の責務。
+  const applyCloudResult = (
+    newCloud: PointCloud,
+    grid: (number | null)[][] | null,
+    opts: {
+      plotType: PlotType;
+      source: HistorySource;
+      name?: string;
+      progress?: { message: string; percent: number };
+      clearLoading?: "ai" | "acquire";
+    }
+  ) => {
+    setCloud(newCloud);
+    setZData(grid);
+    setPlotType(opts.plotType);
+    setStatus("COMPLETE");
+    if (opts.progress) {
+      setProgressMessage(opts.progress.message);
+      setProgressPercent(opts.progress.percent);
+    }
+    if (opts.clearLoading === "ai") setIsLoadingAI(false);
+    else if (opts.clearLoading === "acquire") setIsAcquiring(false);
+    const now = new Date().toLocaleString("ja-JP");
+    setLastMeasuredAt(now);
+    setMeasureCount((c) => c + 1);
+    const thumb = generateThumbnail(newCloud);
+    setCloudHistory((prev) =>
+      [
+        {
+          cloud: newCloud,
+          measuredAt: now,
+          points: newCloud.x.length,
+          thumbnail: thumb,
+          name: opts.name ?? "",
+          source: opts.source,
+        },
+        ...prev,
+      ].slice(0, 5)
+    );
+  };
+  // connectWebSocket は [] 依存で一度だけ生成されるため、最新の applyCloudResult を
+  // ref 経由で読む（依存に入れると再接続チャーンが起きるため。algorithmRef と同パターン）
+  const applyCloudResultRef = useRef(applyCloudResult);
+  applyCloudResultRef.current = applyCloudResult;
+
   // 進捗表示用
   const [progressStep, setProgressStep] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
@@ -536,30 +583,12 @@ function App() {
               ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
-            setCloud(newCloud);
-            setZData(newGrid);
-            setPlotType("scatter3d");
-            setIsLoadingAI(false);
-            setStatus("COMPLETE");
-            setProgressMessage(`AI推論完了 (${data.device})`);
-            setProgressPercent(100);
-            const now = new Date().toLocaleString("ja-JP");
-            setLastMeasuredAt(now);
-            setMeasureCount((c) => c + 1);
-            const thumb = generateThumbnail(newCloud);
-            setCloudHistory((prev) =>
-              [
-                {
-                  cloud: newCloud,
-                  measuredAt: now,
-                  points: newCloud.x.length,
-                  thumbnail: thumb,
-                  name: "",
-                  source: "ai" as HistorySource,
-                },
-                ...prev,
-              ].slice(0, 5)
-            );
+            applyCloudResultRef.current(newCloud, newGrid, {
+              plotType: "scatter3d",
+              source: "ai",
+              progress: { message: `AI推論完了 (${data.device})`, percent: 100 },
+              clearLoading: "ai",
+            });
             console.log("AI点群生成完了", { points: newCloud.x.length });
           } catch (e) {
             console.error(e);
@@ -581,30 +610,12 @@ function App() {
               ...(algorithmRef.current === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             });
 
-            setCloud(newCloud);
-            setZData(newGrid);
-            setPlotType("scatter3d");
-            setIsAcquiring(false);
-            setStatus("COMPLETE");
-            setProgressMessage("完了");
-            setProgressPercent(100);
-            const now = new Date().toLocaleString("ja-JP");
-            setLastMeasuredAt(now);
-            setMeasureCount((c) => c + 1);
-            const thumb = generateThumbnail(newCloud);
-            setCloudHistory((prev) =>
-              [
-                {
-                  cloud: newCloud,
-                  measuredAt: now,
-                  points: newCloud.x.length,
-                  thumbnail: thumb,
-                  name: "",
-                  source: algorithmRef.current,
-                },
-                ...prev,
-              ].slice(0, 5)
-            );
+            applyCloudResultRef.current(newCloud, newGrid, {
+              plotType: "scatter3d",
+              source: algorithmRef.current,
+              progress: { message: "完了", percent: 100 },
+              clearLoading: "acquire",
+            });
             console.log("点群生成完了", { points: newCloud.x.length });
           } catch (e) {
             console.error(e);
@@ -2124,28 +2135,8 @@ function App() {
     }
     const newCloud = { x: cx, y: cy, z: cz, c: cx };
     setShowSlice(false);
-    setZData(grid);
-    setCloud(newCloud);
-    setPlotType("surface");
     setShowPlot(true);
-    setStatus("COMPLETE");
-    const now = new Date().toLocaleString("ja-JP");
-    setLastMeasuredAt(now);
-    setMeasureCount((c) => c + 1);
-    const thumb = generateThumbnail(newCloud);
-    setCloudHistory((prev) =>
-      [
-        {
-          cloud: newCloud,
-          measuredAt: now,
-          points: newCloud.x.length,
-          thumbnail: thumb,
-          name: "",
-          source,
-        },
-        ...prev,
-      ].slice(0, 5)
-    );
+    applyCloudResult(newCloud, grid, { plotType: "surface", source });
   };
 
   // CSV読み込み処理
@@ -2185,28 +2176,11 @@ function App() {
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       });
 
-      setCloud(newCloud);
-      setZData(newGrid);
-      setPlotType("surface");
-      setStatus("COMPLETE");
-      setLastMeasuredAt(new Date().toLocaleString("ja-JP"));
-      setMeasureCount((c) => c + 1);
-
-      // サムネイル生成＆履歴追加
-      const thumb = generateThumbnail(newCloud);
-      setCloudHistory((prev) =>
-        [
-          {
-            cloud: newCloud,
-            measuredAt: new Date().toLocaleString("ja-JP"),
-            points: newCloud.x.length,
-            thumbnail: thumb,
-            name: "mask_result",
-            source: "coin" as HistorySource,
-          },
-          ...prev,
-        ].slice(0, 5)
-      );
+      applyCloudResult(newCloud, newGrid, {
+        plotType: "surface",
+        source: "coin",
+        name: "mask_result",
+      });
     } catch (e) {
       console.error(e);
       setStatus("READY");
