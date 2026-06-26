@@ -193,6 +193,10 @@ function App() {
   // 現在マウント中のプロット種別。同種なら Plotly.react で差分更新、種別が変わる時だけ
   // purge + newPlot でハンドラを貼り直す
   const plotKindRef = useRef<"dim" | "surface" | "points" | null>(null);
+  // 寸法線ドラッグ時の plotly_relayout 処理を rAF で間引くための予約ID
+  const dimRafRef = useRef<number | null>(null);
+  // 自前の Plotly.relayout が誘発する plotly_relayout を無視するためのフラグ
+  const dimApplyingRef = useRef(false);
   // 寸法読み取り値（サイドパネル表示用。線ごと）
   const [dimReadouts, setDimReadouts] = useState<
     {
@@ -688,6 +692,7 @@ function App() {
   useEffect(() => {
     const el = plotRef.current;
     return () => {
+      if (dimRafRef.current != null) cancelAnimationFrame(dimRafRef.current);
       if (el) Plotly.purge(el);
     };
   }, []);
@@ -998,6 +1003,12 @@ function App() {
 
       // 寸法測定の relayout ハンドラは tol などその場のクロージャに依存するため、
       // react での流用はせず常に貼り直す（purge で旧ハンドラ・旧トレースを除去）
+      // 旧 plotEl を掴む保留中の rAF が残っていれば破棄する
+      if (dimRafRef.current != null) {
+        cancelAnimationFrame(dimRafRef.current);
+        dimRafRef.current = null;
+      }
+      dimApplyingRef.current = false;
       Plotly.purge(plotEl);
       Plotly.newPlot(plotEl, dimData, dimLayout, dimConfig);
       plotKindRef.current = "dim";
@@ -1020,8 +1031,10 @@ function App() {
         Math.abs(mx - fx) < Math.abs(my - fy)
           ? { x: fx, y: my } // X差が小 → 垂直に固定
           : { x: mx, y: fy }; // Y差が小 → 水平に固定
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (plotEl as any).on("plotly_relayout", () => {
+      // ドラッグ中は plotly_relayout が毎フレーム多発するため、rAF で1フレーム1回に間引く。
+      // 自前の Plotly.relayout が誘発する relayout は dimApplyingRef で弾きループを断つ。
+      const processRelayout = () => {
+        dimRafRef.current = null;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const layout = (plotEl as any).layout;
         const shapes = layout?.shapes;
@@ -1111,10 +1124,26 @@ function App() {
         if (!changed) return;
         dimLinesRef.current = updated;
         setDimReadouts(toReadouts(updated));
+        // この relayout 自身が誘発する plotly_relayout は無視する（フラグは完了後に解除）
+        dimApplyingRef.current = true;
         Plotly.relayout(plotEl, {
           shapes: buildShapes(updated),
           annotations: buildAnnotations(updated),
-        });
+        }).then(
+          () => {
+            dimApplyingRef.current = false;
+          },
+          () => {
+            dimApplyingRef.current = false;
+          }
+        );
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_relayout", () => {
+        if (dimApplyingRef.current) return; // 自前の relayout が起こしたイベントは処理しない
+        if (dimRafRef.current != null) return; // 同フレーム内の多重発火を1回に集約
+        dimRafRef.current = requestAnimationFrame(processRelayout);
       });
 
       // 再描画ごとの purge はしない（次回 effect 冒頭の種別判定で制御）
