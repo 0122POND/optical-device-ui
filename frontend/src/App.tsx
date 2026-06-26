@@ -4,6 +4,7 @@ import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { useElapsedTimer } from "./hooks/useElapsedTimer";
 import {
   DEFAULT_UM_PER_PIXEL_X,
   DEFAULT_UM_PER_PIXEL_Y,
@@ -341,21 +342,7 @@ function App() {
   const [progressPercent, setProgressPercent] = useState(0);
 
   // 処理経過時間（RUNNING中はカウントアップ、終了時に確定）
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const runStartRef = useRef<number>(0);
-
-  useEffect(() => {
-    if (status !== "RUNNING") return;
-    runStartRef.current = Date.now();
-    setElapsedMs(0);
-    const id = window.setInterval(() => {
-      setElapsedMs(Date.now() - runStartRef.current);
-    }, 100);
-    return () => {
-      window.clearInterval(id);
-      setElapsedMs(Date.now() - runStartRef.current);
-    };
-  }, [status]);
+  const elapsedMs = useElapsedTimer(status);
 
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
