@@ -5,6 +5,7 @@ import { downloadCSV, parseCSV } from "./utils/csv";
 import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useElapsedTimer } from "./hooks/useElapsedTimer";
+import { useCloudHistory } from "./hooks/useCloudHistory";
 import {
   DEFAULT_UM_PER_PIXEL_X,
   DEFAULT_UM_PER_PIXEL_Y,
@@ -185,16 +186,8 @@ function App() {
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
-  // 測定履歴（最大5件）
-  type CloudHistoryEntry = {
-    cloud: PointCloud;
-    measuredAt: string;
-    points: number;
-    thumbnail: string;
-    name: string;
-    source: HistorySource;
-  };
-  const [cloudHistory, setCloudHistory] = useState<CloudHistoryEntry[]>([]);
+  // 測定履歴（最大5件）。データ管理は useCloudHistory に集約、UI状態(編集/削除)は App 保持
+  const { history: cloudHistory, pushEntry, renameEntry, removeEntry } = useCloudHistory();
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
@@ -294,19 +287,14 @@ function App() {
     setLastMeasuredAt(now);
     setMeasureCount((c) => c + 1);
     const thumb = generateThumbnail(newCloud);
-    setCloudHistory((prev) =>
-      [
-        {
-          cloud: newCloud,
-          measuredAt: now,
-          points: newCloud.x.length,
-          thumbnail: thumb,
-          name: opts.name ?? "",
-          source: opts.source,
-        },
-        ...prev,
-      ].slice(0, 5)
-    );
+    pushEntry({
+      cloud: newCloud,
+      measuredAt: now,
+      points: newCloud.x.length,
+      thumbnail: thumb,
+      name: opts.name ?? "",
+      source: opts.source,
+    });
   };
   // WebSocket 接続・onmessage ルーティングは useWebSocket フックへ集約。
   // 完了時の点群反映は applyCloudResult、進捗・状態・エラーはコールバックで App 側へ委譲。
@@ -3566,13 +3554,7 @@ function App() {
                                           value={editingNameValue}
                                           onChange={(e) => setEditingNameValue(e.target.value)}
                                           onBlur={() => {
-                                            setCloudHistory((prev) =>
-                                              prev.map((h, idx) =>
-                                                idx === i
-                                                  ? { ...h, name: editingNameValue.trim() }
-                                                  : h
-                                              )
-                                            );
+                                            renameEntry(i, editingNameValue.trim());
                                             setEditingNameIdx(null);
                                           }}
                                           onKeyDown={(e) => {
@@ -3944,7 +3926,7 @@ function App() {
                   cursor: "pointer",
                 }}
                 onClick={() => {
-                  setCloudHistory((prev) => prev.filter((_, j) => j !== deleteConfirmIdx));
+                  if (deleteConfirmIdx !== null) removeEntry(deleteConfirmIdx);
                   setDeleteConfirmIdx(null);
                 }}
               >
