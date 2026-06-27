@@ -4,6 +4,9 @@ import type { PointCloud } from "./utils/pointCloud";
 // 3D表示のプロット種別
 export type PlotType = "scatter3d" | "surface";
 
+// 表示モード（3D / 2Dカメラ）
+export type ViewMode = "3D" | "2D-camera";
+
 // 測定履歴の取得元（算法名 / CSV / AI）
 export type HistorySource = "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi" | "csv" | "ai";
 
