@@ -16,6 +16,8 @@ import {
 } from "./utils/constants";
 import { formatElapsed } from "./utils/format";
 import { Header } from "./components/Header";
+import { SettingsTab } from "./components/SettingsTab";
+import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
 import type { PlotType, HistorySource, MeasureStatus } from "./types";
 import "./App.css";
 
@@ -372,69 +374,6 @@ function App() {
 
   // setTimeout のID保持（連打対策 & アンマウント対策）
   const acquireTimerRef = useRef<number | null>(null);
-
-  const inputStyle: React.CSSProperties = {
-    height: "44px",
-    padding: "8px 12px",
-    borderRadius: "6px",
-    border: `1px solid ${colors.border}`,
-    backgroundColor: colors.bgDark,
-    color: colors.text,
-    fontSize: "13px",
-    fontFamily: fontFamily,
-    outline: "none",
-    transition: "border-color 0.2s",
-  };
-
-  const unitSelectStyle: React.CSSProperties = {
-    height: "44px",
-    padding: "0 12px",
-    borderRadius: "6px",
-    border: `1px solid ${colors.border}`,
-    backgroundColor: colors.bgDark,
-    color: colors.text,
-    fontSize: "13px",
-    fontFamily: fontFamily,
-    cursor: "pointer",
-    outline: "none",
-  };
-
-  const buttonPrimaryStyle: React.CSSProperties = {
-    height: "44px",
-    borderRadius: "8px",
-    border: "none",
-    backgroundColor: colors.primary,
-    color: colors.text,
-    fontSize: "14px",
-    fontWeight: 600,
-    fontFamily: fontFamily,
-    cursor: "pointer",
-    transition: "background-color 0.2s, opacity 0.2s",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "0 12px",
-    boxSizing: "border-box",
-  };
-
-  const buttonSecondaryStyle: React.CSSProperties = {
-    height: "44px",
-    borderRadius: "6px",
-    border: `1px solid ${colors.border}`,
-    backgroundColor: colors.bgDark,
-    color: colors.text,
-    fontSize: "13px",
-    fontWeight: 500,
-    fontFamily: fontFamily,
-    cursor: "pointer",
-    transition: "background-color 0.2s",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "8px",
-    padding: "0 12px",
-    boxSizing: "border-box",
-  };
 
   useEffect(() => {
     const timerRef = acquireTimerRef;
@@ -2517,78 +2456,16 @@ function App() {
 
             {/* 設定タブ */}
             {sideTab === "settings" && (
-              <>
-                {/* 掃引間隔 */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "13px", color: colors.textMuted }}>掃引間隔</label>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input
-                      type="text"
-                      placeholder="入力してください"
-                      value={sweepInterval}
-                      onChange={(e) => setSweepInterval(e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        width: "100px",
-                        height: "32px",
-                        padding: "4px 10px",
-                      }}
-                    />
-                    <select
-                      value={sweepIntervalUnit}
-                      onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
-                      style={{ ...unitSelectStyle, height: "32px", padding: "4px 8px" }}
-                    >
-                      <option value="um">µm</option>
-                      <option value="mm">mm</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* X軸 µm/pix */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                    X軸 µm/pix（深さ方向）
-                  </label>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input
-                      type="text"
-                      placeholder={String(DEFAULT_UM_PER_PIXEL_X)}
-                      value={umPerPixelXInput}
-                      onChange={(e) => setUmPerPixelXInput(e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        width: "100px",
-                        height: "32px",
-                        padding: "4px 10px",
-                      }}
-                    />
-                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
-                  </div>
-                </div>
-
-                {/* Y軸 µm/pix */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "13px", color: colors.textMuted }}>
-                    Y軸 µm/pix（縦方向）
-                  </label>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input
-                      type="text"
-                      placeholder={String(DEFAULT_UM_PER_PIXEL_Y)}
-                      value={umPerPixelYInput}
-                      onChange={(e) => setUmPerPixelYInput(e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        width: "100px",
-                        height: "32px",
-                        padding: "4px 10px",
-                      }}
-                    />
-                    <span style={{ fontSize: "13px", color: colors.textMuted }}>µm/pix</span>
-                  </div>
-                </div>
-              </>
+              <SettingsTab
+                sweepInterval={sweepInterval}
+                setSweepInterval={setSweepInterval}
+                sweepIntervalUnit={sweepIntervalUnit}
+                setSweepIntervalUnit={setSweepIntervalUnit}
+                umPerPixelXInput={umPerPixelXInput}
+                setUmPerPixelXInput={setUmPerPixelXInput}
+                umPerPixelYInput={umPerPixelYInput}
+                setUmPerPixelYInput={setUmPerPixelYInput}
+              />
             )}
 
             {/* 操作タブ */}
