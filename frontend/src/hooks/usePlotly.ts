@@ -90,6 +90,11 @@ export function usePlotly(args: {
   const plotKindRef = useRef<"dim" | "surface" | "points" | null>(null);
   const dimRafRef = useRef<number | null>(null);
   const dimApplyingRef = useRef(false);
+  // viewMode 切替を検出してカメラを reset するため、前回の viewMode を覚えておく
+  const lastViewModeRef = useRef(viewMode);
+  // ユーザー操作(plotly_relayout)で確定した3Dカメラを保存し、再描画時に維持する
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const savedCameraRef = useRef<any>(null);
 
   // クリックハンドラ内で参照する状態を毎レンダーで最新化（Plotly.react でハンドラを
   // 貼り直さないため）。カメラ位置は layout.scene.uirevision により Plotly 側で保持される。
@@ -162,6 +167,17 @@ export function usePlotly(args: {
       plotKindRef.current = null;
       return;
     }
+
+    // クリック等で点群以外のトレースが増減する再描画では _scene が作り直され、
+    // uirevision だけではズーム/パンが初期視点に戻ってしまう。そこでユーザー操作
+    // (plotly_relayout) 時の実カメラを savedCameraRef に保存し、それを再適用して維持する。
+    // 毎回 getCamera で読み直すと微小にドリフトするため、保存済みカメラを冪等に使う。
+    // viewMode 切替時のみ savedCameraRef を捨てて各ビューの既定カメラ(cam)へリセット。
+    if (viewMode !== lastViewModeRef.current) {
+      savedCameraRef.current = null;
+      lastViewModeRef.current = viewMode;
+    }
+    const keepCamera = savedCameraRef.current;
 
     // ---- 寸法測定モード（2D 本物のヒートマップ + ドラッグ可能な両矢印）----
     // 3Dシーンには編集可能図形が無いため、寸法測定中だけ真の2Dヒートマップで描画する。
@@ -732,7 +748,7 @@ export function usePlotly(args: {
                   y: yRange / xyMax,
                   z: Math.max(hRange / xyMax, 0.15),
                 },
-          camera: cam,
+          camera: keepCamera || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
@@ -787,11 +803,10 @@ export function usePlotly(args: {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
-      // 同種(surface)で再描画する場合は react で差分更新（WebGL再構築を避け凍結を防ぐ）。
-      // 種別が変わる時だけ purge + newPlot し、クリックハンドラを貼り直す。
-      if (plotKindRef.current === "surface") {
-        Plotly.react(plotEl, surfData, surfLayout, config);
-      } else {
+      // surface は react だとクリックのヒットテストが更新されず、2点目が1点目と同じ座標を
+      // 返す不具合がある。グリッドは軽いので常に purge+newPlot で作り直す（カメラは
+      // savedCameraRef→layout.camera で維持されるため視点は戻らない）。
+      {
         Plotly.purge(plotEl);
         Plotly.newPlot(plotEl, surfData, surfLayout, config);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -832,6 +847,12 @@ export function usePlotly(args: {
               setSliceLineEnd(pt);
             }
           }
+        });
+        // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_relayout", (e: any) => {
+          const c = e?.["scene.camera"];
+          if (c) savedCameraRef.current = c;
         });
         plotKindRef.current = "surface";
       }
@@ -1001,7 +1022,7 @@ export function usePlotly(args: {
               z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
-          camera: cam,
+          camera: keepCamera || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
           // 2D-cameraではドラッグ回転を無効化
@@ -1099,6 +1120,12 @@ export function usePlotly(args: {
             setSliceLineEnd(pt);
           }
         }
+      });
+      // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_relayout", (e: any) => {
+        const c = e?.["scene.camera"];
+        if (c) savedCameraRef.current = c;
       });
       plotKindRef.current = "points";
     }
