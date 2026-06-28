@@ -67,6 +67,9 @@ function App() {
   // 断層ライン始点・終点（2クリックで決定）
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
   const [sliceLineEnd, setSliceLineEnd] = useState<{ y: number; z: number } | null>(null);
+  // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
+  const [sliceMeasureStart, setSliceMeasureStart] = useState<{ t: number; d: number } | null>(null);
+  const [sliceMeasureEnd, setSliceMeasureEnd] = useState<{ t: number; d: number } | null>(null);
 
   // 距離計測
   const [measureMode, setMeasureMode] = useState(false);
@@ -432,7 +435,17 @@ function App() {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureStart,
+    sliceMeasureEnd,
+    setSliceMeasureStart,
+    setSliceMeasureEnd,
   });
+
+  // 断面線の選び直し・断層非表示時は、旧座標系の距離計測をクリアする
+  useEffect(() => {
+    setSliceMeasureStart(null);
+    setSliceMeasureEnd(null);
+  }, [sliceLineStart, sliceLineEnd, showSlice]);
 
   const handleConfirmOk = async () => {
     if (confirmMode === "plot") {

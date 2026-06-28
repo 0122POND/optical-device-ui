@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import Plotly from "plotly.js-dist-min";
 import { colors, fontFamily } from "../utils/constants";
@@ -20,6 +20,11 @@ export function useSlicePlot(args: {
   umPerPixelY: number;
   flipX: boolean;
   plotType: PlotType;
+  // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
+  sliceMeasureStart: { t: number; d: number } | null;
+  sliceMeasureEnd: { t: number; d: number } | null;
+  setSliceMeasureStart: (p: { t: number; d: number } | null) => void;
+  setSliceMeasureEnd: (p: { t: number; d: number } | null) => void;
 }) {
   const {
     sliceRef,
@@ -34,7 +39,14 @@ export function useSlicePlot(args: {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureStart,
+    sliceMeasureEnd,
+    setSliceMeasureStart,
+    setSliceMeasureEnd,
   } = args;
+
+  // クリック二重発火/ハンドラ多重化(HMR)でも1クリック=1点になるよう短時間ロック
+  const clickLockRef = useRef(false);
 
   useEffect(() => {
     const sliceEl = sliceRef.current;
@@ -271,10 +283,75 @@ export function useSlicePlot(args: {
       font: { color: colors.text, family: fontFamily },
     };
 
+    // 2点間距離計測: 両矢印（対向annotation 2本）＋ 距離ラベルを矢印の直上に描く。
+    if (sliceMeasureStart && sliceMeasureEnd) {
+      const a = sliceMeasureStart;
+      const b = sliceMeasureEnd;
+      const dist = Math.sqrt((b.t - a.t) ** 2 + (b.d - a.d) ** 2);
+      const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(3)} mm` : `${v.toFixed(2)} µm`);
+      const arrowColor = "#f59e0b";
+      const arrow = (x: number, y: number, ax: number, ay: number) => ({
+        x,
+        y,
+        ax,
+        ay,
+        xref: "x",
+        yref: "y",
+        axref: "x",
+        ayref: "y",
+        showarrow: true,
+        arrowhead: 3,
+        arrowsize: 1.4,
+        arrowwidth: 2,
+        arrowcolor: arrowColor,
+        text: "",
+      });
+      layout.annotations = [
+        // 両端に外向きの矢じり → 合わせて両方向矢印になる
+        arrow(a.t, a.d, b.t, b.d),
+        arrow(b.t, b.d, a.t, a.d),
+        // 距離ラベル（矢印の中点直上）
+        {
+          x: (a.t + b.t) / 2,
+          y: (a.d + b.d) / 2,
+          xref: "x",
+          yref: "y",
+          text: `${fmt(dist)}<br>Δ深さ ${fmt(Math.abs(b.d - a.d))}`,
+          align: "center",
+          showarrow: false,
+          yshift: 18,
+          font: { color: "#ffffff", size: 13, family: fontFamily },
+          bgcolor: "rgba(0,0,0,0.7)",
+          bordercolor: arrowColor,
+          borderwidth: 1,
+          borderpad: 3,
+        },
+      ];
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false };
 
     Plotly.newPlot(sliceEl, data, layout, config);
+
+    // 断層曲線上をクリックして2点を選ぶ → 3点目で新たに測り直し
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sliceEl as any).on("plotly_click", (ev: any) => {
+      if (!ev?.points || ev.points.length === 0) return;
+      if (clickLockRef.current) return;
+      clickLockRef.current = true;
+      setTimeout(() => {
+        clickLockRef.current = false;
+      }, 300);
+      const p = ev.points[0];
+      const pt = { t: p.x as number, d: p.y as number };
+      if (!sliceMeasureStart || (sliceMeasureStart && sliceMeasureEnd)) {
+        setSliceMeasureStart(pt);
+        setSliceMeasureEnd(null);
+      } else {
+        setSliceMeasureEnd(pt);
+      }
+    });
 
     return () => {
       Plotly.purge(sliceEl);
@@ -292,5 +369,9 @@ export function useSlicePlot(args: {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureStart,
+    sliceMeasureEnd,
+    setSliceMeasureStart,
+    setSliceMeasureEnd,
   ]);
 }
