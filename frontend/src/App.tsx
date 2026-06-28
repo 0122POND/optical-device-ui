@@ -68,6 +68,8 @@ function App() {
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
   const [sliceLineEnd, setSliceLineEnd] = useState<{ y: number; z: number } | null>(null);
   // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
+  // sliceMeasureMode: ボタンで有効化したときだけクリックで2点を選べる
+  const [sliceMeasureMode, setSliceMeasureMode] = useState(false);
   const [sliceMeasureStart, setSliceMeasureStart] = useState<{ t: number; d: number } | null>(null);
   const [sliceMeasureEnd, setSliceMeasureEnd] = useState<{ t: number; d: number } | null>(null);
 
@@ -435,17 +437,23 @@ function App() {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
     setSliceMeasureStart,
     setSliceMeasureEnd,
   });
 
-  // 断面線の選び直し・断層非表示時は、旧座標系の距離計測をクリアする
+  // 断面線の選び直し・断層非表示・計測モードOFF時は、距離計測をクリアする
   useEffect(() => {
     setSliceMeasureStart(null);
     setSliceMeasureEnd(null);
-  }, [sliceLineStart, sliceLineEnd, showSlice]);
+  }, [sliceLineStart, sliceLineEnd, showSlice, sliceMeasureMode]);
+
+  // 断層を閉じたら計測モードも解除
+  useEffect(() => {
+    if (!showSlice) setSliceMeasureMode(false);
+  }, [showSlice]);
 
   const handleConfirmOk = async () => {
     if (confirmMode === "plot") {
@@ -1148,8 +1156,64 @@ function App() {
 
             {/* 下：2D 断層グラフ */}
             {showSlice && (
-              <div style={{ height: "260px", flexShrink: 0 }}>
+              <div style={{ height: "260px", flexShrink: 0, position: "relative" }}>
                 <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
+                {/* 2点間距離計測の操作（ON/OFFトグル＋クリア） */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "6px",
+                    right: "10px",
+                    zIndex: 5,
+                    display: "flex",
+                    gap: "6px",
+                  }}
+                >
+                  {/* 計測中で2点が確定済みのときだけ「クリア」を出す（やり直し用） */}
+                  {sliceMeasureMode && sliceMeasureStart && sliceMeasureEnd && (
+                    <button
+                      onClick={() => {
+                        setSliceMeasureStart(null);
+                        setSliceMeasureEnd(null);
+                      }}
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        fontFamily,
+                        borderRadius: "4px",
+                        border: `1px solid ${colors.border}`,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        color: colors.text,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      クリア
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSliceMeasureMode((v) => !v)}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      fontFamily,
+                      borderRadius: "4px",
+                      border: `1px solid ${sliceMeasureMode ? "#f59e0b" : colors.border}`,
+                      backgroundColor: sliceMeasureMode ? "#f59e0b" : "rgba(0,0,0,0.5)",
+                      color: sliceMeasureMode ? "#1a2332" : colors.text,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {!sliceMeasureMode
+                      ? "距離計測"
+                      : sliceMeasureStart && sliceMeasureEnd
+                        ? "計測中（端点ドラッグで調整）"
+                        : "計測中（2点クリック）"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

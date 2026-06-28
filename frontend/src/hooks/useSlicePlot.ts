@@ -21,6 +21,7 @@ export function useSlicePlot(args: {
   flipX: boolean;
   plotType: PlotType;
   // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
+  sliceMeasureMode: boolean;
   sliceMeasureStart: { t: number; d: number } | null;
   sliceMeasureEnd: { t: number; d: number } | null;
   setSliceMeasureStart: (p: { t: number; d: number } | null) => void;
@@ -39,6 +40,7 @@ export function useSlicePlot(args: {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
     setSliceMeasureStart,
@@ -283,14 +285,30 @@ export function useSlicePlot(args: {
       font: { color: colors.text, family: fontFamily },
     };
 
-    // 2点間距離計測: 両矢印（対向annotation 2本）＋ 距離ラベルを矢印の直上に描く。
-    if (sliceMeasureStart && sliceMeasureEnd) {
+    // 2点間距離計測: ドラッグ可能な線(shape)＋両端の矢じり＋距離ラベル。
+    // shape を edits.shapePosition で端点ドラッグ可能にし、長さ・位置を後から調整できる。
+    if (sliceMeasureMode && sliceMeasureStart && sliceMeasureEnd) {
       const a = sliceMeasureStart;
       const b = sliceMeasureEnd;
       const dist = Math.sqrt((b.t - a.t) ** 2 + (b.d - a.d) ** 2);
       const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(3)} mm` : `${v.toFixed(2)} µm`);
       const arrowColor = "#f59e0b";
-      const arrow = (x: number, y: number, ax: number, ay: number) => ({
+      // ドラッグで端点を動かせる線本体
+      layout.shapes = [
+        {
+          type: "line",
+          xref: "x",
+          yref: "y",
+          x0: a.t,
+          y0: a.d,
+          x1: b.t,
+          y1: b.d,
+          line: { color: arrowColor, width: 2 },
+        },
+      ];
+      // 両端の矢じり（尾は内側へ短く＝データ座標なので画面上の向きは線に一致）。
+      const f = 0.15;
+      const head = (x: number, y: number, ax: number, ay: number) => ({
         x,
         y,
         ax,
@@ -307,10 +325,9 @@ export function useSlicePlot(args: {
         text: "",
       });
       layout.annotations = [
-        // 両端に外向きの矢じり → 合わせて両方向矢印になる
-        arrow(a.t, a.d, b.t, b.d),
-        arrow(b.t, b.d, a.t, a.d),
-        // 距離ラベル（矢印の中点直上）
+        head(a.t, a.d, a.t + (b.t - a.t) * f, a.d + (b.d - a.d) * f),
+        head(b.t, b.d, b.t + (a.t - b.t) * f, b.d + (a.d - b.d) * f),
+        // 距離ラベル（中点直上）
         {
           x: (a.t + b.t) / 2,
           y: (a.d + b.d) / 2,
@@ -330,30 +347,73 @@ export function useSlicePlot(args: {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = { responsive: true, displaylogo: false };
+    const config: any = {
+      responsive: true,
+      displaylogo: false,
+      // 計測モード中のみ線の端点ドラッグを許可
+      edits: { shapePosition: sliceMeasureMode },
+    };
 
     Plotly.newPlot(sliceEl, data, layout, config);
 
-    // 断層曲線上をクリックして2点を選ぶ → 3点目で新たに測り直し
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (sliceEl as any).on("plotly_click", (ev: any) => {
-      if (!ev?.points || ev.points.length === 0) return;
+    // 計測モードONのときだけ、プロット領域内の任意クリックで2点を選ぶ → 3点目で測り直し。
+    // plotly_click は trace 上の点でしか発火しないため、ネイティブclickでピクセル→データ
+    // 座標(p2d)に変換し、曲線上でなくグラフ内ならどこでも計測できるようにする。
+    const onAreaClick = (evt: MouseEvent) => {
+      if (!sliceMeasureMode) return;
       if (clickLockRef.current) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fl = (sliceEl as any)._fullLayout;
+      const xa = fl?.xaxis;
+      const ya = fl?.yaxis;
+      if (!xa || !ya) return;
+      const bb = sliceEl.getBoundingClientRect();
+      const px = evt.clientX - bb.left - xa._offset;
+      const py = evt.clientY - bb.top - ya._offset;
+      // プロット領域（軸の内側）外＝余白・軸ラベル上のクリックは無視
+      if (px < 0 || px > xa._length || py < 0 || py > ya._length) return;
+      const t = xa.p2d(px);
+      const d = ya.p2d(py);
+      if (!isFinite(t) || !isFinite(d)) return;
+      // 2点が確定済みなら、以降のクリックは無視（端点ドラッグで調整／クリアでやり直し）。
+      // これで矢印確定後の誤クリックで測り直しになるのを防ぐ。
+      if (sliceMeasureStart && sliceMeasureEnd) return;
       clickLockRef.current = true;
       setTimeout(() => {
         clickLockRef.current = false;
       }, 300);
-      const p = ev.points[0];
-      const pt = { t: p.x as number, d: p.y as number };
-      if (!sliceMeasureStart || (sliceMeasureStart && sliceMeasureEnd)) {
+      const pt = { t, d };
+      if (!sliceMeasureStart) {
         setSliceMeasureStart(pt);
         setSliceMeasureEnd(null);
       } else {
         setSliceMeasureEnd(pt);
       }
-    });
+    };
+    sliceEl.addEventListener("click", onAreaClick);
+
+    // 端点ドラッグ後の座標を取り込んで距離・矢じり・ラベルを更新する。
+    // ズーム/パンの relayout では shape 座標が変わらないため compare で弾く。
+    const onRelayout = () => {
+      if (!sliceMeasureMode || !sliceMeasureStart || !sliceMeasureEnd) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sh = (sliceEl as any).layout?.shapes?.[0];
+      if (!sh || sh.x0 == null || sh.y0 == null || sh.x1 == null || sh.y1 == null) return;
+      const eps = 1e-6;
+      const changed =
+        Math.abs(sh.x0 - sliceMeasureStart.t) > eps ||
+        Math.abs(sh.y0 - sliceMeasureStart.d) > eps ||
+        Math.abs(sh.x1 - sliceMeasureEnd.t) > eps ||
+        Math.abs(sh.y1 - sliceMeasureEnd.d) > eps;
+      if (!changed) return;
+      setSliceMeasureStart({ t: sh.x0, d: sh.y0 });
+      setSliceMeasureEnd({ t: sh.x1, d: sh.y1 });
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sliceEl as any).on("plotly_relayout", onRelayout);
 
     return () => {
+      sliceEl.removeEventListener("click", onAreaClick);
       Plotly.purge(sliceEl);
     };
   }, [
@@ -369,6 +429,7 @@ export function useSlicePlot(args: {
     umPerPixelY,
     flipX,
     plotType,
+    sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
     setSliceMeasureStart,
