@@ -1696,6 +1696,13 @@ function App() {
                         if (!v) {
                           setSliceLineStart(null);
                           setSliceLineEnd(null);
+                          // 競合する他モード（寸法測定・距離計測）を解除
+                          setDimensionMode(false);
+                          setDimReadouts([]);
+                          setMeasureMode(false);
+                          measureStateRef.current = { mode: false, pt1: null, pt2: null };
+                          setMeasurePt1(null);
+                          setMeasurePt2(null);
                         }
                         return !v;
                       });
