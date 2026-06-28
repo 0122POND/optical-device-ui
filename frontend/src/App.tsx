@@ -678,7 +678,6 @@ function App() {
             display: "grid",
             gridTemplateColumns: "1fr 320px",
             height: "100%",
-            borderBottom: `1px solid ${colors.border}`,
           }}
         >
           <div
@@ -690,6 +689,7 @@ function App() {
               backgroundColor: "#aab2be",
             }}
           >
+            borderBottom: `1px solid ${colors.border}`,
             <div
               style={{
                 display: "flex",
@@ -748,7 +748,6 @@ function App() {
                 </button>
               ))}
             </div>
-
             {/* セパレータ */}
             <div
               style={{
@@ -758,7 +757,6 @@ function App() {
                 margin: "0 4px",
               }}
             />
-
             {/* Plotlyツールバーボタン群 */}
             {(() => {
               const tbBtnStyle = (active?: boolean): React.CSSProperties => ({
@@ -1049,7 +1047,8 @@ function App() {
               );
             })()}
           </div>
-          <div style={{ backgroundColor: colors.bgLight }} />
+          {/* 右セルはサイドパネルと背景・左ボーダーを揃え、上の隙間を解消して連続させる */}
+          <div style={{ backgroundColor: "#2c3e56", borderLeft: `1px solid #3a5068` }} />
         </div>
 
         {/* メインエリア */}
