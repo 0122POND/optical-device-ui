@@ -1127,6 +1127,10 @@ export function usePlotly(args: {
         if (measureStateRef.current.mode) {
           const s = measureStateRef.current;
           if (s.pt1 && s.pt2) return;
+          // ハンドラ多重化(HMR等)やクリック二重発火でも1クリック=1点になるよう、
+          // surface側と同じく短時間ロックで二重登録を防ぐ。
+          if (measureLockRef.current) return;
+          measureLockRef.current = true;
           const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
           if (!s.pt1) {
             measureStateRef.current = { ...s, pt1: pt3 };
@@ -1135,6 +1139,9 @@ export function usePlotly(args: {
             measureStateRef.current = { ...s, pt2: pt3 };
             setMeasurePt2(pt3);
           }
+          setTimeout(() => {
+            measureLockRef.current = false;
+          }, 300);
           return;
         }
 
