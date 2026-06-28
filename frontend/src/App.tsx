@@ -1823,27 +1823,13 @@ function App() {
                       <>
                         <div
                           style={{
-                            display: "flex",
-                            justifyContent: "space-between",
+                            color: colors.textMuted,
+                            fontSize: "11px",
                             borderTop: `1px solid #3a5068`,
                             paddingTop: "6px",
-                            fontWeight: 600,
-                            color: "#f59e0b",
                           }}
                         >
-                          <span>距離</span>
-                          <span>
-                            {(() => {
-                              const d = Math.sqrt(
-                                (measurePt2.x - measurePt1.x) ** 2 +
-                                  (measurePt2.y - measurePt1.y) ** 2 +
-                                  (measurePt2.z - measurePt1.z) ** 2
-                              );
-                              return d >= 1000
-                                ? `${(d / 1000).toFixed(3)} mm`
-                                : `${d.toFixed(2)} µm`;
-                            })()}
-                          </span>
+                          距離はグラフ上（計測線の中点）に表示されます
                         </div>
                         <button
                           onClick={() => {

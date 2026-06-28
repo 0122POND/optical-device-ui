@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import Plotly from "plotly.js-dist-min";
-import { DIM_COLORS } from "../utils/constants";
+import { DIM_COLORS, fontFamily } from "../utils/constants";
 import type { PointCloud } from "../utils/pointCloud";
 import type {
   DimLine,
@@ -178,6 +178,35 @@ export function usePlotly(args: {
       lastViewModeRef.current = viewMode;
     }
     const keepCamera = savedCameraRef.current;
+
+    // 距離計測の数値ラベル: 2点が揃ったら計測線(破線)の中点に距離を浮かせる。
+    // 3Dシーンの scene.annotations を使い、右パネルではなくグラフ上(棒の上)に表示する。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const measureSceneAnnotations: any[] =
+      measureMode && measurePt1 && measurePt2
+        ? [
+            {
+              x: (measurePt1.x + measurePt2.x) / 2,
+              y: (measurePt1.y + measurePt2.y) / 2,
+              z: (measurePt1.z + measurePt2.z) / 2,
+              text: (() => {
+                const d = Math.sqrt(
+                  (measurePt2.x - measurePt1.x) ** 2 +
+                    (measurePt2.y - measurePt1.y) ** 2 +
+                    (measurePt2.z - measurePt1.z) ** 2
+                );
+                return d >= 1000 ? `${(d / 1000).toFixed(3)} mm` : `${d.toFixed(2)} µm`;
+              })(),
+              showarrow: false,
+              font: { color: "#ffffff", size: 13, family: fontFamily },
+              bgcolor: "rgba(0,0,0,0.7)",
+              bordercolor: "#f59e0b",
+              borderwidth: 1,
+              borderpad: 3,
+              yshift: 12,
+            },
+          ]
+        : [];
 
     // ---- 寸法測定モード（2D 本物のヒートマップ + ドラッグ可能な両矢印）----
     // 3Dシーンには編集可能図形が無いため、寸法測定中だけ真の2Dヒートマップで描画する。
@@ -751,6 +780,7 @@ export function usePlotly(args: {
           camera: keepCamera || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
+          annotations: measureSceneAnnotations,
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
       };
@@ -1025,6 +1055,7 @@ export function usePlotly(args: {
           camera: keepCamera || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
+          annotations: measureSceneAnnotations,
           // 2D-cameraではドラッグ回転を無効化
           ...(viewMode === "2D-camera" ? { dragmode: "pan" } : {}),
         },
