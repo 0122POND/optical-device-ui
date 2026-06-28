@@ -687,9 +687,9 @@ function App() {
               gap: "8px",
               padding: "0 12px",
               backgroundColor: "#aab2be",
+              borderBottom: `1px solid ${colors.border}`,
             }}
           >
-            borderBottom: `1px solid ${colors.border}`,
             <div
               style={{
                 display: "flex",
