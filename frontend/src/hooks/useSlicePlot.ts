@@ -15,7 +15,6 @@ export function useSlicePlot(args: {
   sliceLineStart: { y: number; z: number } | null;
   sliceLineEnd: { y: number; z: number } | null;
   sweepInterval: string;
-  sweepIntervalUnit: "um" | "mm";
   umPerPixelX: number;
   umPerPixelY: number;
   flipX: boolean;
@@ -35,7 +34,6 @@ export function useSlicePlot(args: {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     flipX,
@@ -59,14 +57,10 @@ export function useSlicePlot(args: {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
+    // Z軸の換算係数: 掃引間隔[µm/スライス] (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep
-      ? sweepIntervalUnit === "mm"
-        ? sweepVal * 1000
-        : sweepVal
-      : umPerPixelY;
+    const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
 
     // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
     const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
@@ -424,7 +418,6 @@ export function useSlicePlot(args: {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     flipX,

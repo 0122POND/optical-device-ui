@@ -12,9 +12,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/three": "^0.160.0",
     "plotly.js-dist-min": "^3.3.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "three": "^0.160.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

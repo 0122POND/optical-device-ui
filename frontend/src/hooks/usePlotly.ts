@@ -25,6 +25,8 @@ export function usePlotly(args: {
   shiftHeldRef: RefObject<boolean>;
   showPlot: boolean;
   axisVisible: boolean;
+  // true のとき点群(scatter3d)は three.js 側で描くので Plotly では描画しない
+  renderPointsWithThree: boolean;
   cloud: PointCloud | null;
   flipX: boolean;
   viewMode: ViewMode;
@@ -32,7 +34,6 @@ export function usePlotly(args: {
   sliceLineStart: { y: number; z: number } | null;
   sliceLineEnd: { y: number; z: number } | null;
   sweepInterval: string;
-  sweepIntervalUnit: "um" | "mm";
   umPerPixelX: number;
   umPerPixelY: number;
   plotType: PlotType;
@@ -57,6 +58,7 @@ export function usePlotly(args: {
     shiftHeldRef,
     showPlot,
     axisVisible,
+    renderPointsWithThree,
     cloud,
     flipX,
     viewMode,
@@ -64,7 +66,6 @@ export function usePlotly(args: {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     plotType,
@@ -128,14 +129,10 @@ export function usePlotly(args: {
           return cloud.x.map((v) => maxX - v);
         })()
       : cloud.x;
-    // Z軸の換算係数: 掃引間隔 → µm/スライス (未入力時は umPerPixelY を仮定)
+    // Z軸の換算係数: 掃引間隔[µm/スライス] (未入力時は umPerPixelY を仮定)
     const sweepVal = parseFloat(sweepInterval);
     const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep
-      ? sweepIntervalUnit === "mm"
-        ? sweepVal * 1000
-        : sweepVal
-      : umPerPixelY;
+    const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
     // 物理単位（µm）に変換
     const xDataUm = xData.map((v) => v * umPerPixelX);
     const yDataUm = cloud.y.map((v) => v * umPerPixelY);
@@ -156,13 +153,20 @@ export function usePlotly(args: {
       if (zDataUm[i] > zUmMax) zUmMax = zDataUm[i];
     }
     return { xDataUm, yDataUm, zDataUm, xUmMin, xUmMax, yUmMin, yUmMax, zUmMin, zUmMax };
-  }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval, sweepIntervalUnit]);
+  }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
 
   useEffect(() => {
     const plotEl = plotRef.current;
     if (!plotEl) return;
 
     if (!showPlot) {
+      Plotly.purge(plotEl);
+      plotKindRef.current = null;
+      return;
+    }
+
+    // three.js エンジンが点群を担当する間は Plotly を描かない（二重描画・負荷回避）
+    if (renderPointsWithThree && plotType === "scatter3d") {
       Plotly.purge(plotEl);
       plotKindRef.current = null;
       return;
@@ -216,11 +220,7 @@ export function usePlotly(args: {
 
       const sweepVal = parseFloat(sweepInterval);
       const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-      const zUmPerSlice = hasSweep
-        ? sweepIntervalUnit === "mm"
-          ? sweepVal * 1000
-          : sweepVal
-        : umPerPixelY;
+      const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
 
       const isOpticalDevice = cloud !== null && cloud.x.length > 0;
 
@@ -619,11 +619,7 @@ export function usePlotly(args: {
       // 掃引間隔（µm/スライス）
       const sweepVal = parseFloat(sweepInterval);
       const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-      const zUmPerSlice = hasSweep
-        ? sweepIntervalUnit === "mm"
-          ? sweepVal * 1000
-          : sweepVal
-        : umPerPixelY;
+      const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
 
       // データソース判定: 値がピクセル座標っぽい（小さい値）なら光学デバイス、大きい値ならCSV（Keyence等）
       // 光学デバイスのgrid値はX重心(0〜画像幅≒1000px)、KeyenceのCSV値は高さ(µm、数百〜)
@@ -1173,6 +1169,7 @@ export function usePlotly(args: {
   }, [
     showPlot,
     axisVisible,
+    renderPointsWithThree,
     cloud,
     flipX,
     viewMode,
@@ -1180,7 +1177,6 @@ export function usePlotly(args: {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     plotType,

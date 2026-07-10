@@ -1,13 +1,11 @@
 import { colors } from "../utils/constants";
 import { DEFAULT_UM_PER_PIXEL_X, DEFAULT_UM_PER_PIXEL_Y } from "../utils/constants";
-import { inputStyle, unitSelectStyle } from "../utils/styles";
+import { inputStyle } from "../utils/styles";
 
 // サイドパネル「設定」タブ：掃引間隔・X/Y軸の µm/pix 換算係数の入力
 export function SettingsTab({
   sweepInterval,
   setSweepInterval,
-  sweepIntervalUnit,
-  setSweepIntervalUnit,
   umPerPixelXInput,
   setUmPerPixelXInput,
   umPerPixelYInput,
@@ -15,8 +13,6 @@ export function SettingsTab({
 }: {
   sweepInterval: string;
   setSweepInterval: (v: string) => void;
-  sweepIntervalUnit: "um" | "mm";
-  setSweepIntervalUnit: (v: "um" | "mm") => void;
   umPerPixelXInput: string;
   setUmPerPixelXInput: (v: string) => void;
   umPerPixelYInput: string;
@@ -40,14 +36,7 @@ export function SettingsTab({
               padding: "4px 10px",
             }}
           />
-          <select
-            value={sweepIntervalUnit}
-            onChange={(e) => setSweepIntervalUnit(e.target.value as "um" | "mm")}
-            style={{ ...unitSelectStyle, height: "32px", padding: "4px 8px" }}
-          >
-            <option value="um">µm</option>
-            <option value="mm">mm</option>
-          </select>
+          <span style={{ fontSize: "13px", color: colors.textMuted }}>µm</span>
         </div>
       </div>
 

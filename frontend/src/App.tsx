@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
-import { buildPointCloudFromFolder, type PointCloud } from "./utils/pointCloud";
+import {
+  buildPointCloudFromFolder,
+  densePointsFromGrid,
+  type PointCloud,
+} from "./utils/pointCloud";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useElapsedTimer } from "./hooks/useElapsedTimer";
 import { useCloudHistory } from "./hooks/useCloudHistory";
@@ -20,6 +24,7 @@ import { SettingsTab } from "./components/SettingsTab";
 import { ResultTab } from "./components/ResultTab";
 import { useSlicePlot } from "./hooks/useSlicePlot";
 import { usePlotly } from "./hooks/usePlotly";
+import { ThreePointCloudView } from "./components/ThreePointCloudView";
 import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
 import type {
   PlotType,
@@ -157,9 +162,8 @@ function App() {
 
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
-  // 掃引関連の入力値 & 単位
+  // 掃引間隔の入力値（単位は µm 固定）
   const [sweepInterval, setSweepInterval] = useState("100");
-  const [sweepIntervalUnit, setSweepIntervalUnit] = useState<"um" | "mm">("um");
   // X/Y軸 µm/pix 換算係数（可変設定）
   const [umPerPixelXInput, setUmPerPixelXInput] = useState(String(DEFAULT_UM_PER_PIXEL_X));
   const [umPerPixelYInput, setUmPerPixelYInput] = useState(String(DEFAULT_UM_PER_PIXEL_Y));
@@ -174,6 +178,14 @@ function App() {
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
+
+  // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
+  const [pointEngine, setPointEngine] = useState<"plotly" | "three">("plotly");
+  const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
+  const [isBuildingThree, setIsBuildingThree] = useState(false);
+  // three用に高密度クラウドを再生成するためのソースを保持（フォルダ or CSVグリッド）
+  const lastFolderSourceRef = useRef<Parameters<typeof buildPointCloudFromFolder>[0] | null>(null);
+  const lastCsvGridRef = useRef<(number | null)[][] | null>(null);
 
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
@@ -399,6 +411,7 @@ function App() {
     shiftHeldRef,
     showPlot,
     axisVisible,
+    renderPointsWithThree: pointEngine === "three",
     cloud,
     flipX,
     viewMode,
@@ -406,7 +419,6 @@ function App() {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     plotType,
@@ -432,7 +444,6 @@ function App() {
     sliceLineStart,
     sliceLineEnd,
     sweepInterval,
-    sweepIntervalUnit,
     umPerPixelX,
     umPerPixelY,
     flipX,
@@ -557,6 +568,9 @@ function App() {
       alert("CSVデータが空です");
       return;
     }
+    // three用: CSVグリッドを保持し、フォルダソースはクリア（three高密度はCSV経路を使う）
+    lastCsvGridRef.current = grid;
+    lastFolderSourceRef.current = null;
     // 展開とランダム間引きを1パスで行う（reservoir sampling）。
     // 全有効点を一旦配列に展開→全インデックスをシャッフルする旧方式は、巨大CSVで
     // メインスレッドを数秒凍結させた。上限 CSV_MAX_TOTAL_POINTS 件だけを保持しながら
@@ -638,14 +652,17 @@ function App() {
     setStatus("RUNNING");
 
     try {
-      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
+      const src: Parameters<typeof buildPointCloudFromFolder>[0] = {
         folderUrl: "/data/mask_result",
         threshold: 128,
         samplePerSlice: 4000,
         flipZ: false,
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-      });
+      };
+      lastFolderSourceRef.current = src;
+      lastCsvGridRef.current = null;
+      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
 
       applyCloudResult(newCloud, newGrid, {
         plotType: "surface",
@@ -661,6 +678,43 @@ function App() {
       setIsLoadingMask(false);
     }
   };
+
+  // three.js エンジン選択時、フォルダ由来の点群を高密度(最大100万点)で再生成する。
+  // Plotly 用の cloud(最大12万点) はそのまま残し、three にだけ高密度版を渡す。
+  useEffect(() => {
+    if (pointEngine !== "three" || plotType !== "scatter3d") return;
+
+    // CSV由来: グリッドから高密度点群を同期生成
+    const csvGrid = lastCsvGridRef.current;
+    if (csvGrid) {
+      setThreeCloud(densePointsFromGrid(csvGrid));
+      return;
+    }
+
+    // フォルダ由来: 最大100万点で再取得
+    const src = lastFolderSourceRef.current;
+    if (!src) {
+      // それ以外(WebSocket等)は再生成できないので既存 cloud を流用
+      setThreeCloud(cloud);
+      return;
+    }
+    let cancelled = false;
+    setIsBuildingThree(true);
+    buildPointCloudFromFolder({ ...src, maxTotalPoints: 1_000_000 })
+      .then((r) => {
+        if (!cancelled) setThreeCloud(r.cloud);
+      })
+      .catch((e) => {
+        console.error(e);
+        if (!cancelled) setThreeCloud(cloud);
+      })
+      .finally(() => {
+        if (!cancelled) setIsBuildingThree(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pointEngine, plotType, cloud]);
 
   return (
     <>
@@ -1101,6 +1155,18 @@ function App() {
                   </div>
                 )}
 
+                {/* three.js エンジン: 点群(scatter3d)のとき Plotly の上に高密度描画を重ねる */}
+                {pointEngine === "three" && plotType === "scatter3d" && showPlot && (
+                  <ThreePointCloudView
+                    cloud={threeCloud}
+                    flipX={flipX}
+                    umPerPixelX={umPerPixelX}
+                    umPerPixelY={umPerPixelY}
+                    sweepInterval={sweepInterval}
+                    isBuilding={isBuildingThree}
+                  />
+                )}
+
                 {(isAcquiring || isLoadingAI) && (
                   <div
                     style={{
@@ -1276,8 +1342,6 @@ function App() {
               <SettingsTab
                 sweepInterval={sweepInterval}
                 setSweepInterval={setSweepInterval}
-                sweepIntervalUnit={sweepIntervalUnit}
-                setSweepIntervalUnit={setSweepIntervalUnit}
                 umPerPixelXInput={umPerPixelXInput}
                 setUmPerPixelXInput={setUmPerPixelXInput}
                 umPerPixelYInput={umPerPixelYInput}
@@ -1960,6 +2024,44 @@ function App() {
                         </button>
                       ))}
                     </div>
+
+                    {/* 点群エンジン切替（Point Cloud のときのみ） */}
+                    {plotType === "scatter3d" && (
+                      <>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: colors.textMuted,
+                            margin: "10px 0 6px",
+                          }}
+                        >
+                          点群エンジン
+                        </div>
+                        <div style={{ display: "flex", gap: "4px" }}>
+                          {(["plotly", "three"] as const).map((eng) => (
+                            <button
+                              key={eng}
+                              onClick={() => setPointEngine(eng)}
+                              style={{
+                                flex: 1,
+                                height: "32px",
+                                borderRadius: "6px",
+                                border: `1px solid ${pointEngine === eng ? colors.primary : colors.border}`,
+                                backgroundColor:
+                                  pointEngine === eng ? colors.primary + "22" : "transparent",
+                                color: pointEngine === eng ? colors.primary : colors.textMuted,
+                                fontSize: "12px",
+                                fontWeight: pointEngine === eng ? 600 : 400,
+                                fontFamily: fontFamily,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {eng === "plotly" ? "Plotly (12万点)" : "three.js (高密度)"}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </>

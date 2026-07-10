@@ -265,3 +265,29 @@ export async function buildPointCloudFromFolder(options: {
 
   return { cloud: { x, y, z, c }, grid, width, height, depth: D };
 }
+
+// CSV由来の2Dグリッド(高さマップ)から高密度点群を作る。
+// three.js 用に上限を大きく取り、超過時は 2D グリッドを均一ストライドで間引く
+// （ランダムでなく等間隔なので密度が保たれる）。x=高さ値, y=列, z=行, c=高さ値。
+export function densePointsFromGrid(grid: (number | null)[][], maxPoints = 2_000_000): PointCloud {
+  let valid = 0;
+  for (const row of grid) for (const v of row) if (v != null) valid++;
+  const step = valid > maxPoints ? Math.max(1, Math.round(Math.sqrt(valid / maxPoints))) : 1;
+
+  const x: number[] = [];
+  const y: number[] = [];
+  const z: number[] = [];
+  const c: number[] = [];
+  for (let r = 0; r < grid.length; r += step) {
+    const gr = grid[r];
+    for (let col = 0; col < gr.length; col += step) {
+      const v = gr[col];
+      if (v == null) continue;
+      x.push(v);
+      y.push(col);
+      z.push(r);
+      c.push(v);
+    }
+  }
+  return { x, y, z, c };
+}
