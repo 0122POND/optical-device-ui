@@ -75,6 +75,90 @@ function samplePointsFromImageData(
   return { xs, ys, cs, zIndex };
 }
 
+// ボクセル(グリッド)間引き: 空間を格子で区切り、各セルにつき代表1点だけ残す。
+// ランダム間引きと違い密度が均一になり、面としての見栄えが保たれる。
+function voxelDownsample(
+  x: number[],
+  y: number[],
+  z: number[],
+  c: number[],
+  targetCount: number
+): PointCloud {
+  const n = x.length;
+  if (n <= targetCount) return { x, y, z, c };
+
+  // バウンディングボックス
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (x[i] < minX) minX = x[i];
+    if (x[i] > maxX) maxX = x[i];
+    if (y[i] < minY) minY = y[i];
+    if (y[i] > maxY) maxY = y[i];
+    if (z[i] < minZ) minZ = z[i];
+    if (z[i] > maxZ) maxZ = z[i];
+  }
+  const dx = Math.max(1e-6, maxX - minX);
+  const dy = Math.max(1e-6, maxY - minY);
+  const dz = Math.max(1e-6, maxZ - minZ);
+
+  // 各ボクセルの先頭点を代表として拾う（vv = ボクセル一辺）
+  const pick = (vv: number): number[] => {
+    const inv = 1 / vv;
+    const ny = Math.floor(dy * inv) + 1;
+    const nz = Math.floor(dz * inv) + 1;
+    const map = new Map<number, number>();
+    for (let i = 0; i < n; i++) {
+      const ix = Math.floor((x[i] - minX) * inv);
+      const iy = Math.floor((y[i] - minY) * inv);
+      const iz = Math.floor((z[i] - minZ) * inv);
+      const key = (ix * ny + iy) * nz + iz;
+      if (!map.has(key)) map.set(key, i);
+    }
+    return Array.from(map.values());
+  };
+
+  // 占有ボクセル数が targetCount 前後になる一辺を反復探索（占有数は vv に対し単調減少）
+  let vv = Math.cbrt((dx * dy * dz) / targetCount) || 1;
+  let selected = pick(vv);
+  for (
+    let iter = 0;
+    iter < 8 && (selected.length > targetCount * 1.15 || selected.length < targetCount * 0.7);
+    iter++
+  ) {
+    vv *= Math.cbrt(selected.length / targetCount);
+    if (!isFinite(vv) || vv <= 0) break;
+    selected = pick(vv);
+  }
+
+  // 上限を厳守（超過時は均一ストライドで削る＝密度を保ったまま数を合わせる）
+  if (selected.length > targetCount) {
+    const step = selected.length / targetCount;
+    const trimmed: number[] = [];
+    for (let i = 0; i < targetCount; i++) trimmed.push(selected[Math.floor(i * step)]);
+    selected = trimmed;
+  }
+
+  // スライス(配列)順に安定ソートしてから詰め直す
+  selected.sort((a, b) => a - b);
+  const rx = new Array(selected.length);
+  const ry = new Array(selected.length);
+  const rz = new Array(selected.length);
+  const rc = new Array(selected.length);
+  for (let i = 0; i < selected.length; i++) {
+    const idx = selected[i];
+    rx[i] = x[idx];
+    ry[i] = y[idx];
+    rz[i] = z[idx];
+    rc[i] = c[idx];
+  }
+  return { x: rx, y: ry, z: rz, c: rc };
+}
+
 async function loadImageAsImageData(url: string): Promise<ImageData> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch: ${url}`);
@@ -122,8 +206,10 @@ export async function buildPointCloudFromFolder(options: {
 
   const D = files.length;
 
-  // スライス枚数に応じて1枚あたりのサンプル数を自動調整
-  const effectiveSamplePerSlice = Math.min(samplePerSlice, Math.floor(maxTotalPoints / D));
+  // ボクセル間引き前に、最終目標の約3倍まで収集して均一化の余地を残す
+  // （スライス数Dで割ってメモリ上限も兼ねる）
+  const collectPerSlice = Math.max(1, Math.ceil((maxTotalPoints * 3) / D));
+  const effectiveSamplePerSlice = Math.min(samplePerSlice, collectPerSlice);
 
   const x: number[] = [];
   const y: number[] = [];
@@ -170,28 +256,11 @@ export async function buildPointCloudFromFolder(options: {
   // flipZ時はグリッド行も反転
   const grid: DepthGrid = flipZ ? gridRows.reverse() : gridRows;
 
-  // 総点数が上限を超えた場合、ランダムサンプリングで間引く
+  // 総点数が上限を超えた場合、ボクセル(グリッド)間引きで均一に減らす。
+  // ランダム間引きは密度ムラで面が「ノイズ」に見えるため廃止。
   if (x.length > maxTotalPoints) {
-    const indices = Array.from({ length: x.length }, (_, i) => i);
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    indices.length = maxTotalPoints;
-    indices.sort((a, b) => a - b);
-
-    const sx = new Array(maxTotalPoints);
-    const sy = new Array(maxTotalPoints);
-    const sz = new Array(maxTotalPoints);
-    const sc = new Array(maxTotalPoints);
-    for (let i = 0; i < maxTotalPoints; i++) {
-      const idx = indices[i];
-      sx[i] = x[idx];
-      sy[i] = y[idx];
-      sz[i] = z[idx];
-      sc[i] = c[idx];
-    }
-    return { cloud: { x: sx, y: sy, z: sz, c: sc }, grid, width, height, depth: D };
+    const cloud = voxelDownsample(x, y, z, c, maxTotalPoints);
+    return { cloud, grid, width, height, depth: D };
   }
 
   return { cloud: { x, y, z, c }, grid, width, height, depth: D };
