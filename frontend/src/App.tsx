@@ -1604,6 +1604,7 @@ function App() {
                         fontSize: "12px",
                       }}
                       onClick={handleShowAIResult}
+                      title="AI推論でマスク画像から3次元形状を再構成して表示する"
                     >
                       <svg
                         width="16"
@@ -1625,7 +1626,7 @@ function App() {
                         <line x1="7" y1="17" x2="10" y2="14" />
                         <line x1="14" y1="14" x2="17" y2="17" />
                       </svg>
-                      {isLoadingAI ? "読込中..." : "AI"}
+                      {isLoadingAI ? "読込中..." : "AI計測"}
                     </button>
 
                     {/* CSV出力ボタン */}
