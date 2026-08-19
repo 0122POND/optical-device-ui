@@ -12,8 +12,13 @@ CSV配列の対応（スライス再構成された高さマップの場合）:
 
 使い方:
     python tools/analyze_csv_quality.py file1.csv [file2.csv ...]
+
+    # 中央窓を左に114列ずらす（被写体がグリッド中央より左にある場合）
+    python tools/analyze_csv_quality.py file1.csv --col-shift -114
+    # --col-shift 正=右/負=左, --row-shift 正=下/負=上
 """
 
+import re
 import sys
 
 import numpy as np
@@ -111,13 +116,19 @@ def compute_metrics(valid):
     return m, {"valid": valid, "interior_holes": interior_map, "noise": noise_pts}
 
 
-def analyze(path):
-    """1ファイルを全体グリッドと中央50%領域の両方で分析する。"""
+def analyze(path, col_shift=0, row_shift=0):
+    """1ファイルを全体グリッドと中央50%領域の両方で分析する。
+
+    col_shift / row_shift で中央窓を平行移動できる（正=右/下, 負=左/上）。
+    被写体がグリッド中央からずれている場合に窓を被写体へ寄せる用途。
+    """
     data = np.loadtxt(path, delimiter=",")
     h, w = data.shape
     valid = data > MISSING_TH
-    r0, r1 = h // 4, h - h // 4
-    c0, c1 = w // 4, w - w // 4
+    win_h, win_w = h // 2, w // 2
+    r0 = min(max(h // 4 + row_shift, 0), h - win_h)
+    c0 = min(max(w // 4 + col_shift, 0), w - win_w)
+    r1, c1 = r0 + win_h, c0 + win_w
     full_m, full_maps = compute_metrics(valid)
     center_m, center_maps = compute_metrics(valid[r0:r1, c0:c1])
     return {
@@ -128,12 +139,23 @@ def analyze(path):
 
 
 def _short_name(path):
+    base = path.split("/")[-1]
+    # ファイル名に Ra等級(例 Ra0.05) があればそれをラベルにする（複数Raの比較用）
+    m = re.search(r"Ra\d+(?:\.\d+)?", base)
+    if m:
+        tag = m.group(0)
+        low = base.lower()
+        if "cleaned" in low:
+            tag += "(c)"
+        elif "denoised" in low:
+            tag += "(dn)"
+        return tag
     p = path.lower()
     if "denoised" in p:
         return "denoised"
     if "cleaned" in p:
         return "cleaned"
-    return path.split("/")[-1]
+    return base
 
 
 def print_region_table(results, region_key, title):
@@ -213,10 +235,21 @@ def save_visualization(results, region_key, out_path):
 
 
 def main():
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    col_shift = row_shift = 0
+    paths = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--col-shift":
+            col_shift = int(args[i + 1]); i += 2
+        elif args[i] == "--row-shift":
+            row_shift = int(args[i + 1]); i += 2
+        else:
+            paths.append(args[i]); i += 1
+    if not paths:
         print(__doc__)
         sys.exit(1)
-    results = [analyze(p) for p in sys.argv[1:]]
+    results = [analyze(p, col_shift, row_shift) for p in paths]
     print_report(results)
     save_visualization(results, "full", "out/csv_quality_analysis.png")
     save_visualization(results, "center", "out/csv_quality_analysis_center.png")

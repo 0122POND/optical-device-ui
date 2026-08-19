@@ -1,6 +1,6 @@
 # 開発ガイド
 
-このドキュメントでは、プロジェクトへの貢献方法について説明します。
+このドキュメントでは、プロジェクトへの貢献方法と開発環境のセットアップについて説明します。
 
 ## 開発環境セットアップ
 
@@ -9,6 +9,8 @@
 - Node.js 20以上
 - Python 3.10以上
 - Git
+- （オプション）CUDA 対応 GPU + CuPy（GPU 前処理を使う場合）
+- （オプション）PyTorch 対応 GPU（AI 推論を使う場合）
 
 ### 初回セットアップ
 
@@ -17,28 +19,64 @@
 git clone https://github.com/0122POND/optical-device-ui.git
 cd optical-device-ui
 
-# フロントエンドの依存関係インストール
+# ルートの依存関係（Husky / lint-staged）
+npm install
+
+# フロントエンドの依存関係
 cd frontend
 npm install
-
-# ルートの依存関係インストール（Husky/lint-staged）
 cd ..
-npm install
 
-# バックエンドの依存関係インストール
-pip3 install fastapi uvicorn websockets numpy Pillow scipy
+# バックエンドの依存関係（requirements.txt 一括インストール推奨）
+pip3 install -r backend/requirements.txt
+```
+
+`backend/requirements.txt` には次が含まれます：
+
+- **コア**: numpy / scipy / opencv-python / fastapi / uvicorn / websockets / python-multipart / Pillow / h5py
+- **AI推論**: torch / segmentation-models-pytorch / albumentations / timm / transformers
+
+**GPU 利用時の追加インストール**（CUDA バージョンに合わせて）：
+
+```bash
+# CUDA 11.x
+pip install cupy-cuda11x
+
+# CUDA 12.x
+pip install cupy-cuda12x
 ```
 
 ### 開発サーバー起動
 
+#### 簡単起動（推奨）
+
+| OS | コマンド |
+|----|---------|
+| macOS / Linux | `./start_mac.sh` |
+| Windows | `start_win.bat` をダブルクリック |
+
+スクリプトはバックエンド（uvicorn）とフロントエンド（Vite）を同時に起動し、ブラウザを自動で開きます。前回プロセスが残っている場合は 8000 / 5173 番ポートを解放してから起動します。
+
+#### 終了
+
+| OS | コマンド |
+|----|---------|
+| macOS / Linux | `./stop_mac.sh` または `Ctrl+C` |
+| Windows | `stop_win.bat` |
+
+#### 手動起動
+
 ```bash
 # ターミナル1: バックエンド
-python3 -m uvicorn backend.app:app --reload --port 8000
+cd backend
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 # ターミナル2: フロントエンド
 cd frontend
 npm run dev
 ```
+
+ブラウザ: <http://localhost:5173>
 
 ## ブランチ戦略
 
@@ -50,8 +88,8 @@ main
   └── refactor/xxx   # リファクタリング
 ```
 
-- `main`ブランチへの直接プッシュは禁止
-- 必ずPull Requestを作成してマージ
+- `main` ブランチへの直接プッシュは禁止
+- 必ず Pull Request を作成してマージ
 
 ## コミット規約
 
@@ -67,19 +105,21 @@ main
 | `[refactor]` | リファクタリング |
 | `[docs]` | ドキュメント更新 |
 
+メッセージ本文は日本語で記述する。
+
 ### 例
 
 ```
-[add] ダークモード切り替え機能を追加
-[fix] 点群描画時のメモリリークを修正
-[update] 進捗バーのアニメーションを改善
+[add] AI推論用の SegFormer-B2 モデルを追加
+[fix] AI推論の入力画像ソートを辞書式から自然順に修正
+[change] 未使用の3D表示スクリプト view_tgv4.py を削除
 ```
 
 ## コード品質
 
 ### 自動チェック（コミット時）
 
-コミット時にHusky + lint-stagedが自動で実行されます：
+ルートの `package.json` で Husky + lint-staged が設定されています。コミット時に `frontend/src/**/*.{ts,tsx}` に対して以下が自動実行されます：
 
 1. **Prettier** - コードフォーマット
 2. **ESLint** - コード品質チェック
@@ -95,24 +135,33 @@ npm run format:check
 # フォーマット適用
 npm run format
 
-# Lintチェック
+# Lint チェック
 npm run lint
 
-# ビルド（TypeScriptチェック含む）
+# ビルド（TypeScript 型チェック含む）
 npm run build
 ```
 
+### TypeScript 設定
+
+- strict モード有効
+- `noUnusedLocals` / `noUnusedParameters` 有効
+
+### Python コード（参考）
+
+公式の lint 設定は導入していないが、フォーマットには `black`、型チェックには `mypy` の利用を推奨。
+
 ## Pull Request
 
-### PRの作成手順
+### PR の作成手順
 
-1. featureブランチを作成
+1. feature ブランチを作成
 2. 変更をコミット
-3. GitHubでPRを作成
-4. CIが通ることを確認
+3. GitHub で PR を作成
+4. CI が通ることを確認
 5. レビュー後にマージ
 
-### PRテンプレート
+### PR テンプレート
 
 ```markdown
 ## Summary
@@ -123,14 +172,34 @@ npm run build
 - [ ] テスト項目2
 ```
 
-## CI/CD
+## CI / CD
 
-GitHub Actionsで以下が自動実行されます：
+GitHub Actions で以下が自動実行されます：
 
 | チェック | 内容 |
 |---------|------|
 | Prettier | フォーマットチェック |
 | ESLint | コード品質チェック |
-| Build | TypeScript型チェック + Viteビルド |
+| Build | TypeScript 型チェック + Vite ビルド |
 
-PRがマージされる前に、すべてのチェックが通る必要があります。
+PR がマージされる前に、すべてのチェックが通る必要があります。
+
+## ディレクトリ構成（参考）
+
+```
+optical-device-ui/
+├── frontend/          # React + Vite フロントエンド
+├── backend/           # FastAPI バックエンド
+│   ├── app.py
+│   ├── ai_inference.py
+│   ├── depth_inference.py / depth_calibration.py
+│   ├── preprocessing_*.py
+│   ├── models/
+│   └── requirements.txt
+├── tools/             # 補間 / 品質分析 / 評価用 CLI スクリプト
+├── data/              # 入力画像・結果（gitignore）
+├── docs/              # ドキュメント
+├── start_mac.sh / start_win.bat
+├── stop_mac.sh / stop_win.bat
+└── CLAUDE.md          # Claude Code 用ガイド
+```
