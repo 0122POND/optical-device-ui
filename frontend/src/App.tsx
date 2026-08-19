@@ -185,8 +185,7 @@ function App() {
 
   // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
   const [pointEngine, setPointEngine] = useState<"plotly" | "three">("plotly");
-  // 展示デモ: 走査再現の積み上げ再生（ループ）と自動回転。three.js点群ビューで動作
-  const [demoMode, setDemoMode] = useState(false);
+  // 自動回転（表示中の Surface / 点群をターンテーブルのように水平周回）
   const [autoRotate, setAutoRotate] = useState(false);
   const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
   const [isBuildingThree, setIsBuildingThree] = useState(false);
@@ -703,28 +702,6 @@ function App() {
       setIsLoadingMask(false);
     }
   };
-
-  // デモ用に three.js 点群ビューへ切り替え、競合する操作モードを解除する
-  const switchToThreeView = () => {
-    setViewMode("3D");
-    setPlotType("scatter3d");
-    setPointEngine("three");
-    setShowSlice(false);
-    setDimensionMode(false);
-    setDimReadouts([]);
-    setMeasureMode(false);
-    measureStateRef.current = { mode: false, pt1: null, pt2: null };
-    setMeasurePt1(null);
-    setMeasurePt2(null);
-  };
-
-  // three.js点群ビューから離れたら（surface切替・別エンジン・プロット非表示）
-  // デモ再生を解除する。自動回転は Surface(Plotly) でも動くので継続させる
-  useEffect(() => {
-    if (!showPlot || pointEngine !== "three" || plotType !== "scatter3d") {
-      setDemoMode(false);
-    }
-  }, [showPlot, pointEngine, plotType]);
 
   // プロット非表示・2D表示に切り替えたら自動回転を解除する
   useEffect(() => {
@@ -1251,7 +1228,6 @@ function App() {
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
-                    demoMode={demoMode}
                     autoRotate={autoRotate}
                   />
                 )}
@@ -2022,45 +1998,6 @@ function App() {
                         <line x1="9" y1="14" x2="15" y2="14" />
                       </svg>
                       {isLoadingMask ? "読込中..." : "マスク読込"}
-                    </button>
-
-                    {/* デモ再生ボタン（展示用: 走査再現の積み上げ表示をループ再生） */}
-                    <button
-                      disabled={!cloud && !zData}
-                      onClick={() => {
-                        if (!cloud && !zData) return;
-                        const next = !demoMode;
-                        if (next) {
-                          switchToThreeView();
-                          setAutoRotate(true);
-                        } else {
-                          setAutoRotate(false);
-                        }
-                        setDemoMode(next);
-                      }}
-                      style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: demoMode ? "#15803d" : "#16a34a",
-                        border: demoMode ? "1px solid #4ade80" : "none",
-                        cursor: cloud || zData ? "pointer" : "not-allowed",
-                        opacity: cloud || zData ? 1 : 0.5,
-                        fontSize: "12px",
-                      }}
-                      title="走査計測の様子を再現するアニメーションをループ再生する（three.js点群表示に切り替わります）"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polygon points="6 4 20 12 6 20" />
-                      </svg>
-                      {demoMode ? "デモ停止" : "デモ再生"}
                     </button>
 
                     {/* 自動回転トグルボタン（表示中の Surface / 点群をそのまま回す） */}
