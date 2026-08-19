@@ -102,6 +102,19 @@ export function usePlotly(args: {
   // ユーザー操作(plotly_relayout)で確定した3Dカメラを保存し、再描画時に維持する
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const savedCameraRef = useRef<any>(null);
+  // 自前の Plotly.react/newPlot によるgl3dシーン再構築中は true。この間に発火する
+  // plotly_relayout の scene.camera は Plotly が内部生成した異常値のことがあり、
+  // 保存するとクリック後の再描画で視点が飛ぶ（断層の点選択で画面が真っ黒になる症状）。
+  const glCamApplyingRef = useRef(false);
+  // シーン再構築後の非同期イベントまで抑制期間に含めるための共通ヘルパー
+  const markGlCamApplying = () => {
+    glCamApplyingRef.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        glCamApplyingRef.current = false;
+      });
+    });
+  };
 
   // クリックハンドラ内で参照する状態を毎レンダーで最新化（Plotly.react でハンドラを
   // 貼り直さないため）。カメラ位置は layout.scene.uirevision により Plotly 側で保持される。
@@ -187,7 +200,6 @@ export function usePlotly(args: {
       savedCameraRef.current = null;
       lastViewModeRef.current = viewMode;
     }
-    const keepCamera = savedCameraRef.current;
 
     // 距離計測の数値ラベル: 2点が揃ったら計測線(破線)の中点に距離を浮かせる。
     // 3Dシーンの scene.annotations を使い、右パネルではなくグラフ上(棒の上)に表示する。
@@ -730,6 +742,10 @@ export function usePlotly(args: {
         },
       ];
 
+      // 描画種別の切替(points⇄surface)ではカメラ規約が異なる（surfaceはz方向・points
+      // はx方向から見る）ため、保存カメラを破棄してこのビューの既定カメラから始める
+      if (plotKindRef.current !== "surface") savedCameraRef.current = null;
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const surfLayout: any = {
         title: "",
@@ -771,7 +787,7 @@ export function usePlotly(args: {
                   y: yRange / xyMax,
                   z: Math.max(hRange / xyMax, 0.15),
                 },
-          camera: keepCamera || cam,
+          camera: savedCameraRef.current || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
           annotations: measureSceneAnnotations,
@@ -831,6 +847,7 @@ export function usePlotly(args: {
       // 返す不具合がある。グリッドは軽いので常に purge+newPlot で作り直す（カメラは
       // savedCameraRef→layout.camera で維持されるため視点は戻らない）。
       {
+        markGlCamApplying();
         Plotly.purge(plotEl);
         Plotly.newPlot(plotEl, surfData, surfLayout, config);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -872,9 +889,11 @@ export function usePlotly(args: {
             }
           }
         });
-        // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する
+        // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する。
+        // シーン再構築中に Plotly 自身が発火させる relayout は保存しない
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (plotEl as any).on("plotly_relayout", (e: any) => {
+          if (glCamApplyingRef.current) return;
           const c = e?.["scene.camera"];
           if (c) savedCameraRef.current = c;
         });
@@ -995,6 +1014,9 @@ export function usePlotly(args: {
         },
       ];
 
+      // 描画種別の切替(surface⇄points)ではカメラ規約が異なるため、保存カメラを破棄
+      if (plotKindRef.current !== "points") savedCameraRef.current = null;
+
       layout = {
         title: "",
         autosize: true,
@@ -1048,7 +1070,7 @@ export function usePlotly(args: {
               z: Math.max(zRange / xyMax, 0.15),
             };
           })(),
-          camera: keepCamera || cam,
+          camera: savedCameraRef.current || cam,
           // viewMode が同じ間は react 後もカメラ操作を保持し、切替時のみ cam にリセット
           uirevision: viewMode,
           annotations: measureSceneAnnotations,
@@ -1108,10 +1130,17 @@ export function usePlotly(args: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
 
+    // クリックのヒットテスト鮮度が必要な間（断層の点選択・距離計測）は、surface と
+    // 同様に purge+newPlot で作り直す。react 差分更新では gl3d のピッキングが更新されず、
+    // 2点目のクリックが1点目と同じ座標を返す（線長0になり断層グラフが出ない）ため。
+    const needsFreshHitTest = measureMode || (viewMode === "2D-camera" && showSlice);
+
     // 点群(scatter3d, 最大12万点)は WebGL 再構築コストが大きいため、同種なら react 差分更新。
-    if (plotKindRef.current === "points") {
+    if (plotKindRef.current === "points" && !needsFreshHitTest) {
+      markGlCamApplying();
       Plotly.react(plotEl, data, layout, config);
     } else {
+      markGlCamApplying();
       Plotly.purge(plotEl);
       Plotly.newPlot(plotEl, data, layout, config);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1155,9 +1184,11 @@ export function usePlotly(args: {
           }
         }
       });
-      // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する
+      // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する。
+      // シーン再構築中に Plotly 自身が発火させる relayout は保存しない
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (plotEl as any).on("plotly_relayout", (e: any) => {
+        if (glCamApplyingRef.current) return;
         const c = e?.["scene.camera"];
         if (c) savedCameraRef.current = c;
       });
