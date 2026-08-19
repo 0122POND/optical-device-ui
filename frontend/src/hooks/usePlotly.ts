@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import Plotly from "plotly.js-dist-min";
 import { DIM_COLORS, fontFamily } from "../utils/constants";
+import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
 import type {
   DimLine,
@@ -36,6 +37,9 @@ export function usePlotly(args: {
   sweepInterval: string;
   umPerPixelX: number;
   umPerPixelY: number;
+  // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
+  colorRangeMin: string;
+  colorRangeMax: string;
   plotType: PlotType;
   zData: (number | null)[][] | null;
   measureMode: boolean;
@@ -68,6 +72,8 @@ export function usePlotly(args: {
     sweepInterval,
     umPerPixelX,
     umPerPixelY,
+    colorRangeMin,
+    colorRangeMax,
     plotType,
     zData,
     measureMode,
@@ -264,19 +270,16 @@ export function usePlotly(args: {
         planeUnit = "px";
       }
 
-      let hMin = Infinity,
-        hMax = -Infinity;
+      // カラーレンジ（手動指定 or 自動ロバスト、レンジ外はグレー）
+      const dimVals: number[] = [];
       for (const row of surfaceZ) {
         for (const v of row) {
-          if (v == null) continue;
-          if (v < hMin) hMin = v;
-          if (v > hMax) hMax = v;
+          if (v != null) dimVals.push(v);
         }
       }
-      if (!isFinite(hMin)) {
-        hMin = 0;
-        hMax = 1;
-      }
+      const dimColor = buildClippedColorscale(
+        resolveColorRange(dimVals, colorRangeMin, colorRangeMax)
+      );
 
       const xMin = Math.min(surfXCoords[0], surfXCoords[surfXCoords.length - 1]);
       const xMax = Math.max(surfXCoords[0], surfXCoords[surfXCoords.length - 1]);
@@ -399,15 +402,9 @@ export function usePlotly(args: {
           x: surfXCoords,
           y: surfYCoords,
           z: surfaceZ,
-          colorscale: [
-            [0, "#0000ff"],
-            [0.25, "#00bfff"],
-            [0.5, "#00ff00"],
-            [0.75, "#ffbf00"],
-            [1, "#ff0000"],
-          ],
-          zmin: hMin,
-          zmax: hMax,
+          colorscale: dimColor.colorscale,
+          zmin: dimColor.cmin,
+          zmax: dimColor.cmax,
           zsmooth: false,
           connectgaps: false,
           colorbar: {
@@ -667,16 +664,23 @@ export function usePlotly(args: {
         zLabel = "Height [µm]";
       }
 
-      // 高さ範囲を計算（変換後の値から）
+      // 高さ範囲を計算（変換後の値から。hMin/hMax はアスペクト比等のジオメトリ用）
       let hMin = Infinity,
         hMax = -Infinity;
+      const surfVals: number[] = [];
       for (const row of surfaceZ) {
         for (const v of row) {
           if (v == null) continue;
           if (v < hMin) hMin = v;
           if (v > hMax) hMax = v;
+          surfVals.push(v);
         }
       }
+
+      // カラーレンジ（手動指定 or 自動ロバスト、レンジ外はグレー）
+      const surfColor = buildClippedColorscale(
+        resolveColorRange(surfVals, colorRangeMin, colorRangeMax)
+      );
 
       // 軸の物理範囲
       const xRange = surfXCoords[surfXCoords.length - 1] - surfXCoords[0] || 1;
@@ -708,15 +712,9 @@ export function usePlotly(args: {
           x: surfXCoords,
           y: surfYCoords,
           z: surfaceZ,
-          colorscale: [
-            [0, "#0000ff"],
-            [0.25, "#00bfff"],
-            [0.5, "#00ff00"],
-            [0.75, "#ffbf00"],
-            [1, "#ff0000"],
-          ],
-          cmin: hMin,
-          cmax: hMax,
+          colorscale: surfColor.colorscale,
+          cmin: surfColor.cmin,
+          cmax: surfColor.cmax,
           showscale: true,
           colorbar: {
             x: -0.05,
@@ -929,10 +927,16 @@ export function usePlotly(args: {
               };
             })();
 
-      // カラーバーのカスタムtick（最大値のみ単位表示、colorDataはµm単位）
+      // カラーレンジ（手動指定 or 自動ロバスト、レンジ外はグレー）
+      const pointColor = buildClippedColorscale(
+        resolveColorRange(xDataUm, colorRangeMin, colorRangeMax)
+      );
+
+      // カラーバーのカスタムtick（最大値のみ単位表示、colorDataはµm単位）。
+      // tickはグレー帯を除いたグラデーション範囲 [lo, hi] に振る
       const colorData = xDataUm;
-      const cMin = xUmMin;
-      const cMax = xUmMax;
+      const cMin = pointColor.lo;
+      const cMax = pointColor.hi;
       // mm超えたらmm表示
       const useMillimeter = cMax >= 1000;
       const unitLabel = useMillimeter ? "mm" : "µm";
@@ -974,13 +978,9 @@ export function usePlotly(args: {
             size: viewMode === "2D-camera" ? 1.5 : 1,
             opacity: viewMode === "2D-camera" ? 0.15 : 0.08,
             color: colorData,
-            colorscale: [
-              [0, "#0000ff"],
-              [0.25, "#00bfff"],
-              [0.5, "#00ff00"],
-              [0.75, "#ffbf00"],
-              [1, "#ff0000"],
-            ],
+            colorscale: pointColor.colorscale,
+            cmin: pointColor.cmin,
+            cmax: pointColor.cmax,
             showscale: true,
             colorbar: {
               x: -0.05,
@@ -1179,6 +1179,8 @@ export function usePlotly(args: {
     sweepInterval,
     umPerPixelX,
     umPerPixelY,
+    colorRangeMin,
+    colorRangeMax,
     plotType,
     zData,
     pointGeom,

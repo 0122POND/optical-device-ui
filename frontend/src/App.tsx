@@ -24,6 +24,7 @@ import { SettingsTab } from "./components/SettingsTab";
 import { ResultTab } from "./components/ResultTab";
 import { useSlicePlot } from "./hooks/useSlicePlot";
 import { usePlotly } from "./hooks/usePlotly";
+import { usePlotlyAutoRotate } from "./hooks/usePlotlyAutoRotate";
 import { ThreePointCloudView } from "./components/ThreePointCloudView";
 import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
 import type {
@@ -60,7 +61,7 @@ function App() {
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
   const [algorithm, setAlgorithm] = useState<
-    "coin" | "coin2" | "tgv" | "elec" | "medical" | "semi"
+    "coin" | "coin2" | "coin_paper" | "tgv" | "elec" | "medical" | "semi"
   >("coin");
 
   // 3Dグラフを表示するかどうか
@@ -164,6 +165,9 @@ function App() {
 
   // 掃引間隔の入力値（単位は µm 固定）
   const [sweepInterval, setSweepInterval] = useState("100");
+  // ヒートマップのカラーレンジ手動指定（µm, 空文字=自動）。範囲外はグレー表示
+  const [colorRangeMin, setColorRangeMin] = useState("");
+  const [colorRangeMax, setColorRangeMax] = useState("");
   // X/Y軸 µm/pix 換算係数（可変設定）
   const [umPerPixelXInput, setUmPerPixelXInput] = useState(String(DEFAULT_UM_PER_PIXEL_X));
   const [umPerPixelYInput, setUmPerPixelYInput] = useState(String(DEFAULT_UM_PER_PIXEL_Y));
@@ -181,6 +185,9 @@ function App() {
 
   // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
   const [pointEngine, setPointEngine] = useState<"plotly" | "three">("plotly");
+  // 展示デモ: 走査再現の積み上げ再生（ループ）と自動回転。three.js点群ビューで動作
+  const [demoMode, setDemoMode] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(false);
   const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
   const [isBuildingThree, setIsBuildingThree] = useState(false);
   // three用に高密度クラウドを再生成するためのソースを保持（フォルダ or CSVグリッド）
@@ -421,6 +428,8 @@ function App() {
     sweepInterval,
     umPerPixelX,
     umPerPixelY,
+    colorRangeMin,
+    colorRangeMax,
     plotType,
     zData,
     measureMode,
@@ -433,6 +442,16 @@ function App() {
     setMeasurePt2,
     setSliceLineStart,
     setSliceLineEnd,
+  });
+
+  // --- Plotly表示（Surface / Plotly点群）の自動回転。three.js表示中はthree側が回す ---
+  usePlotlyAutoRotate({
+    plotRef,
+    active:
+      autoRotate &&
+      showPlot &&
+      viewMode === "3D" &&
+      !(plotType === "scatter3d" && pointEngine === "three"),
   });
 
   // --- 2D 断層グラフ描画（sliceRef へ） ---
@@ -678,6 +697,35 @@ function App() {
       setIsLoadingMask(false);
     }
   };
+
+  // デモ用に three.js 点群ビューへ切り替え、競合する操作モードを解除する
+  const switchToThreeView = () => {
+    setViewMode("3D");
+    setPlotType("scatter3d");
+    setPointEngine("three");
+    setShowSlice(false);
+    setDimensionMode(false);
+    setDimReadouts([]);
+    setMeasureMode(false);
+    measureStateRef.current = { mode: false, pt1: null, pt2: null };
+    setMeasurePt1(null);
+    setMeasurePt2(null);
+  };
+
+  // three.js点群ビューから離れたら（surface切替・別エンジン・プロット非表示）
+  // デモ再生を解除する。自動回転は Surface(Plotly) でも動くので継続させる
+  useEffect(() => {
+    if (!showPlot || pointEngine !== "three" || plotType !== "scatter3d") {
+      setDemoMode(false);
+    }
+  }, [showPlot, pointEngine, plotType]);
+
+  // プロット非表示・2D表示に切り替えたら自動回転を解除する
+  useEffect(() => {
+    if (!showPlot || viewMode === "2D-camera") {
+      setAutoRotate(false);
+    }
+  }, [showPlot, viewMode]);
 
   // three.js エンジン選択時、フォルダ由来の点群を高密度(最大100万点)で再生成する。
   // Plotly 用の cloud(最大12万点) はそのまま残し、three にだけ高密度版を渡す。
@@ -1163,7 +1211,11 @@ function App() {
                     umPerPixelX={umPerPixelX}
                     umPerPixelY={umPerPixelY}
                     sweepInterval={sweepInterval}
+                    colorRangeMin={colorRangeMin}
+                    colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
+                    demoMode={demoMode}
+                    autoRotate={autoRotate}
                   />
                 )}
 
@@ -1346,6 +1398,10 @@ function App() {
                 setUmPerPixelXInput={setUmPerPixelXInput}
                 umPerPixelYInput={umPerPixelYInput}
                 setUmPerPixelYInput={setUmPerPixelYInput}
+                colorRangeMin={colorRangeMin}
+                setColorRangeMin={setColorRangeMin}
+                colorRangeMax={colorRangeMax}
+                setColorRangeMax={setColorRangeMax}
               />
             )}
 
@@ -1373,13 +1429,15 @@ function App() {
                         ? "硬貨"
                         : algorithm === "coin2"
                           ? "硬貨(別アプローチ)"
-                          : algorithm === "tgv"
-                            ? "TGV"
-                            : algorithm === "elec"
-                              ? "エレキ"
-                              : algorithm === "medical"
-                                ? "医療"
-                                : "半導体"}
+                          : algorithm === "coin_paper"
+                            ? "論文硬貨"
+                            : algorithm === "tgv"
+                              ? "TGV"
+                              : algorithm === "elec"
+                                ? "エレキ"
+                                : algorithm === "medical"
+                                  ? "医療"
+                                  : "半導体"}
                     </span>
                   </span>
                   <svg
@@ -1410,100 +1468,112 @@ function App() {
                     transition: "max-height 0.25s ease",
                   }}
                 >
-                  {(["coin", "coin2", "tgv", "elec", "medical", "semi"] as const).map((alg) => {
-                    const label =
-                      alg === "coin"
-                        ? "硬貨"
-                        : alg === "coin2"
-                          ? "硬貨(別アプローチ)"
-                          : alg === "tgv"
-                            ? "TGV"
-                            : alg === "elec"
-                              ? "エレキ"
-                              : alg === "medical"
-                                ? "医療"
-                                : "半導体";
-                    const icon =
-                      alg === "coin" || alg === "coin2" ? (
-                        <>
-                          <circle cx="12" cy="12" r="9" />
-                          <circle cx="12" cy="12" r="5" />
-                        </>
-                      ) : alg === "tgv" ? (
-                        <>
-                          <rect x="2" y="6" width="20" height="12" rx="1" />
-                          <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
-                        </>
-                      ) : alg === "elec" ? (
-                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                      ) : alg === "medical" ? (
-                        <>
-                          <line x1="12" y1="4" x2="12" y2="20" />
-                          <line x1="4" y1="12" x2="20" y2="12" />
-                        </>
-                      ) : (
-                        <>
-                          <rect x="4" y="4" width="16" height="16" rx="2" />
-                          <rect x="8" y="8" width="8" height="8" rx="1" />
-                          <line x1="8" y1="2" x2="8" y2="4" />
-                          <line x1="12" y1="2" x2="12" y2="4" />
-                          <line x1="16" y1="2" x2="16" y2="4" />
-                          <line x1="8" y1="20" x2="8" y2="22" />
-                          <line x1="12" y1="20" x2="12" y2="22" />
-                          <line x1="16" y1="20" x2="16" y2="22" />
-                          <line x1="2" y1="8" x2="4" y2="8" />
-                          <line x1="2" y1="12" x2="4" y2="12" />
-                          <line x1="2" y1="16" x2="4" y2="16" />
-                          <line x1="20" y1="8" x2="22" y2="8" />
-                          <line x1="20" y1="12" x2="22" y2="12" />
-                          <line x1="20" y1="16" x2="22" y2="16" />
-                        </>
-                      );
-                    const disabled = alg !== "coin";
-                    return (
-                      <button
-                        key={alg}
-                        onClick={() => {
-                          if (disabled) return;
-                          setAlgorithm(alg);
-                        }}
-                        disabled={disabled}
-                        title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
-                        style={{
-                          height: "44px",
-                          borderRadius: "6px",
-                          border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
-                          backgroundColor:
-                            algorithm === alg ? colors.primary + "22" : "transparent",
-                          color: algorithm === alg ? colors.primary : colors.textMuted,
-                          fontSize: "11px",
-                          fontWeight: algorithm === alg ? 600 : 400,
-                          fontFamily: fontFamily,
-                          cursor: disabled ? "not-allowed" : "pointer",
-                          opacity: disabled ? 0.4 : 1,
-                          transition: "all 0.15s",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "4px",
-                        }}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                  {(["coin", "coin2", "coin_paper", "tgv", "elec", "medical", "semi"] as const).map(
+                    (alg) => {
+                      const label =
+                        alg === "coin"
+                          ? "硬貨"
+                          : alg === "coin2"
+                            ? "硬貨(別アプローチ)"
+                            : alg === "coin_paper"
+                              ? "論文硬貨"
+                              : alg === "tgv"
+                                ? "TGV"
+                                : alg === "elec"
+                                  ? "エレキ"
+                                  : alg === "medical"
+                                    ? "医療"
+                                    : "半導体";
+                      const icon =
+                        alg === "coin" || alg === "coin2" ? (
+                          <>
+                            <circle cx="12" cy="12" r="9" />
+                            <circle cx="12" cy="12" r="5" />
+                          </>
+                        ) : alg === "coin_paper" ? (
+                          <>
+                            <circle cx="9" cy="12" r="7" />
+                            <path d="M15 5h6v14h-6" />
+                            <line x1="17" y1="9" x2="19" y2="9" />
+                            <line x1="17" y1="12" x2="19" y2="12" />
+                            <line x1="17" y1="15" x2="19" y2="15" />
+                          </>
+                        ) : alg === "tgv" ? (
+                          <>
+                            <rect x="2" y="6" width="20" height="12" rx="1" />
+                            <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
+                          </>
+                        ) : alg === "elec" ? (
+                          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        ) : alg === "medical" ? (
+                          <>
+                            <line x1="12" y1="4" x2="12" y2="20" />
+                            <line x1="4" y1="12" x2="20" y2="12" />
+                          </>
+                        ) : (
+                          <>
+                            <rect x="4" y="4" width="16" height="16" rx="2" />
+                            <rect x="8" y="8" width="8" height="8" rx="1" />
+                            <line x1="8" y1="2" x2="8" y2="4" />
+                            <line x1="12" y1="2" x2="12" y2="4" />
+                            <line x1="16" y1="2" x2="16" y2="4" />
+                            <line x1="8" y1="20" x2="8" y2="22" />
+                            <line x1="12" y1="20" x2="12" y2="22" />
+                            <line x1="16" y1="20" x2="16" y2="22" />
+                            <line x1="2" y1="8" x2="4" y2="8" />
+                            <line x1="2" y1="12" x2="4" y2="12" />
+                            <line x1="2" y1="16" x2="4" y2="16" />
+                            <line x1="20" y1="8" x2="22" y2="8" />
+                            <line x1="20" y1="12" x2="22" y2="12" />
+                            <line x1="20" y1="16" x2="22" y2="16" />
+                          </>
+                        );
+                      const disabled = alg !== "coin" && alg !== "coin_paper";
+                      return (
+                        <button
+                          key={alg}
+                          onClick={() => {
+                            if (disabled) return;
+                            setAlgorithm(alg);
+                          }}
+                          disabled={disabled}
+                          title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
+                          style={{
+                            height: "44px",
+                            borderRadius: "6px",
+                            border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                            backgroundColor:
+                              algorithm === alg ? colors.primary + "22" : "transparent",
+                            color: algorithm === alg ? colors.primary : colors.textMuted,
+                            fontSize: "11px",
+                            fontWeight: algorithm === alg ? 600 : 400,
+                            fontFamily: fontFamily,
+                            cursor: disabled ? "not-allowed" : "pointer",
+                            opacity: disabled ? 0.4 : 1,
+                            transition: "all 0.15s",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "4px",
+                          }}
                         >
-                          {icon}
-                        </svg>
-                        {label}
-                      </button>
-                    );
-                  })}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            {icon}
+                          </svg>
+                          {label}
+                        </button>
+                      );
+                    }
+                  )}
                 </div>
 
                 {/* ボタングリッド（2列） */}
@@ -1915,6 +1985,88 @@ function App() {
                     </svg>
                     {isLoadingMask ? "読込中..." : "マスク読込"}
                   </button>
+
+                  {/* デモ再生ボタン（展示用: 走査再現の積み上げ表示をループ再生） */}
+                  <button
+                    disabled={!cloud && !zData}
+                    onClick={() => {
+                      if (!cloud && !zData) return;
+                      const next = !demoMode;
+                      if (next) {
+                        switchToThreeView();
+                        setAutoRotate(true);
+                      } else {
+                        setAutoRotate(false);
+                      }
+                      setDemoMode(next);
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: demoMode ? "#15803d" : "#16a34a",
+                      border: demoMode ? "1px solid #4ade80" : "none",
+                      cursor: cloud || zData ? "pointer" : "not-allowed",
+                      opacity: cloud || zData ? 1 : 0.5,
+                      fontSize: "12px",
+                    }}
+                    title="走査計測の様子を再現するアニメーションをループ再生する（three.js点群表示に切り替わります）"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polygon points="6 4 20 12 6 20" />
+                    </svg>
+                    {demoMode ? "デモ停止" : "デモ再生"}
+                  </button>
+
+                  {/* 自動回転トグルボタン（表示中の Surface / 点群をそのまま回す） */}
+                  <button
+                    disabled={!cloud && !zData}
+                    onClick={() => {
+                      if (!cloud && !zData) return;
+                      const next = !autoRotate;
+                      if (next) {
+                        // 3D表示に切り替え、回転と噛み合わない2D系モードを解除
+                        //（Surface/Point Cloud の表示タイプは変えずに今の見た目で回す）
+                        setViewMode("3D");
+                        setShowSlice(false);
+                        setDimensionMode(false);
+                        setDimReadouts([]);
+                      }
+                      setAutoRotate(next);
+                    }}
+                    style={{
+                      ...buttonSecondaryStyle,
+                      backgroundColor: autoRotate ? "#4a6280" : "#1e2d42",
+                      border: `1px solid #3a5068`,
+                      cursor: cloud || zData ? "pointer" : "not-allowed",
+                      opacity: cloud || zData ? 1 : 0.5,
+                      fontSize: "12px",
+                    }}
+                    title="表示中の3Dグラフ（Surface / 点群）をターンテーブルのように自動回転させる"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+                      <polyline points="21 2 21 6 17 6" />
+                      <ellipse cx="12" cy="12" rx="5" ry="2" />
+                    </svg>
+                    {autoRotate ? "回転停止" : "自動回転"}
+                  </button>
                 </div>
 
                 {/* 距離計測結果 */}
@@ -2239,7 +2391,9 @@ function App() {
                           ? "半導体"
                           : algorithm === "coin2"
                             ? "硬貨(別アプローチ)"
-                            : "硬貨"}
+                            : algorithm === "coin_paper"
+                              ? "論文硬貨"
+                              : "硬貨"}
                   ）
                 </>
               )}

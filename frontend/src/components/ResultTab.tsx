@@ -76,7 +76,17 @@ export function ResultTab({
             測定履歴（最新5件）
           </div>
           {(
-            ["coin", "coin2", "tgv", "elec", "medical", "semi", "csv", "ai"] as HistorySource[]
+            [
+              "coin",
+              "coin2",
+              "coin_paper",
+              "tgv",
+              "elec",
+              "medical",
+              "semi",
+              "csv",
+              "ai",
+            ] as HistorySource[]
           ).map((src) => {
             const entries = history
               .map((e, i) => ({ entry: e, idx: i }))
@@ -87,15 +97,17 @@ export function ResultTab({
                 ? "硬貨"
                 : src === "coin2"
                   ? "硬貨(別アプローチ)"
-                  : src === "tgv"
-                    ? "TGV"
-                    : src === "elec"
-                      ? "エレキ"
-                      : src === "medical"
-                        ? "医療"
-                        : src === "semi"
-                          ? "半導体"
-                          : "CSVインポート";
+                  : src === "coin_paper"
+                    ? "論文硬貨"
+                    : src === "tgv"
+                      ? "TGV"
+                      : src === "elec"
+                        ? "エレキ"
+                        : src === "medical"
+                          ? "医療"
+                          : src === "semi"
+                            ? "半導体"
+                            : "CSVインポート";
             return (
               <div key={src} style={{ marginBottom: "10px" }}>
                 <div

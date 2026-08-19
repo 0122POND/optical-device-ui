@@ -303,6 +303,9 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import run_preprocess
                 else:
                     from preprocessing_coin2_cpu import run_preprocess
+            elif algorithm == "coin_paper":
+                # 論文掲載用（CPU版のみ）
+                from preprocessing_coin2_paper_cpu import run_preprocess
             elif algorithm in ("elec", "medical", "semi"):
                 if use_gpu:
                     from preprocessing_gpu import run_preprocess
@@ -394,6 +397,8 @@ async def ws_endpoint(ws: WebSocket):
                     from preprocessing_coin2_gpu import save_peak_results
                 else:
                     from preprocessing_coin2_cpu import save_peak_results
+            elif algorithm == "coin_paper":
+                from preprocessing_coin2_paper_cpu import save_peak_results
             elif algorithm in ("elec", "medical", "semi"):
                 if use_gpu:
                     from preprocessing_gpu import save_peak_results

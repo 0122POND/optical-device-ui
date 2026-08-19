@@ -1,32 +1,36 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { colorForValue, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
 
-// 既存 Plotly と同じ5段カラースケール（青→水色→緑→橙→赤）
-const STOPS: Array<[number, [number, number, number]]> = [
-  [0.0, [0, 0, 255]],
-  [0.25, [0, 191, 255]],
-  [0.5, [0, 255, 0]],
-  [0.75, [255, 191, 0]],
-  [1.0, [255, 0, 0]],
-];
+// 展示デモ: 積み上げ再生の所要時間と、全点表示のまま保持する時間（秒）
+const DEMO_BUILD_SEC = 8;
+const DEMO_HOLD_SEC = 4;
+// 自動回転の速さ（OrbitControls.autoRotateSpeed 単位。2.0 ≒ 60fpsで1周30秒）
+const AUTO_ROTATE_SPEED = 2.5;
 
-function colorAt(t: number): [number, number, number] {
-  const tt = Math.max(0, Math.min(1, t));
-  for (let i = 1; i < STOPS.length; i++) {
-    if (tt <= STOPS[i][0]) {
-      const [t0, c0] = STOPS[i - 1];
-      const [t1, c1] = STOPS[i];
-      const f = (tt - t0) / (t1 - t0 || 1);
-      return [
-        (c0[0] + (c1[0] - c0[0]) * f) / 255,
-        (c0[1] + (c1[1] - c0[1]) * f) / 255,
-        (c0[2] + (c1[2] - c0[2]) * f) / 255,
-      ];
-    }
+// 走査面（シート本体＋子のエッジライン）のジオメトリ・マテリアルを破棄する
+function disposeScanPlane(plane: THREE.Mesh) {
+  plane.geometry.dispose();
+  (plane.material as THREE.Material).dispose();
+  for (const ch of plane.children) {
+    const line = ch as THREE.LineSegments;
+    line.geometry?.dispose();
+    (line.material as THREE.Material)?.dispose();
   }
-  return [1, 0, 0];
+}
+
+// 深さ配列に対しカラーレンジ（手動 or 自動ロバスト）を解決し、色バッファへ
+// 書き込む（レンジ外はグレー）
+function fillColors(depthUm: Float64Array, arr: Float32Array, min: string, max: string) {
+  const range = resolveColorRange(depthUm, min, max);
+  for (let i = 0; i < depthUm.length; i++) {
+    const [r, g, b] = colorForValue(depthUm[i], range.lo, range.hi);
+    arr[i * 3] = r;
+    arr[i * 3 + 1] = g;
+    arr[i * 3 + 2] = b;
+  }
 }
 
 // three.js による点群ビューア（Plotly版の代替）。数十万〜百万点でも WebGL バッファを
@@ -37,17 +41,48 @@ export function ThreePointCloudView(props: {
   umPerPixelX: number;
   umPerPixelY: number;
   sweepInterval: string;
+  // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
+  colorRangeMin: string;
+  colorRangeMax: string;
   isBuilding?: boolean;
+  // 展示デモ: 走査再現の積み上げ再生をループする
+  demoMode?: boolean;
+  // ターンテーブル自動回転（高さ軸まわりに点群側を回す）
+  autoRotate?: boolean;
 }) {
-  const { cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval, isBuilding } = props;
+  const {
+    cloud,
+    flipX,
+    umPerPixelX,
+    umPerPixelY,
+    sweepInterval,
+    colorRangeMin,
+    colorRangeMax,
+    isBuilding,
+    demoMode,
+    autoRotate,
+  } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     scene: THREE.Scene;
     camera: THREE.PerspectiveCamera;
     controls: OrbitControls;
+    // 点群と走査面をまとめて入れ替え・破棄するためのコンテナ
+    group: THREE.Group;
     points?: THREE.Points;
+    scanPlane?: THREE.Mesh;
+    depthUm?: Float64Array;
   } | null>(null);
+  // 自動回転・デモ再生の最新状態。描画ループ（マウント時に1回だけ生成）から
+  // 参照するため ref に持つ
+  const rotateRef = useRef(false);
+  rotateRef.current = !!autoRotate;
+  const demoRef = useRef({ active: false, start: 0 });
+  // カラーレンジの最新値。ジオメトリ再構築effectの依存に入れずに読むための ref
+  // （依存に入れるとレンジ入力のたびに再構築＋カメラリセットが起きる）
+  const rangeRef = useRef({ min: colorRangeMin, max: colorRangeMax });
+  rangeRef.current = { min: colorRangeMin, max: colorRangeMax };
 
   // 初期化（マウント時に1回）
   useEffect(() => {
@@ -73,7 +108,38 @@ export function ThreePointCloudView(props: {
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
 
-    let raf = requestAnimationFrame(function loop() {
+    const group = new THREE.Group();
+    scene.add(group);
+
+    let raf = requestAnimationFrame(function loop(now) {
+      const st = stateRef.current;
+      if (st) {
+        // 自動回転: カメラを注視点まわりに水平周回させる（画面の縦軸まわり）。
+        // どの視点からでも「水平方向の回転」に見え、ドラッグ操作中は自動で一時停止する
+        controls.autoRotate = rotateRef.current;
+        controls.autoRotateSpeed = AUTO_ROTATE_SPEED;
+
+        // デモ再生: 走査順（点は行=スライス順に並ぶ）に drawRange を進めて
+        // 「計測で点が積み上がる」様子を再現。完了後は少し保持して先頭からループ
+        const demo = demoRef.current;
+        if (demo.active && st.points) {
+          const posAttr = st.points.geometry.getAttribute("position") as THREE.BufferAttribute;
+          const nPts = posAttr.count;
+          const t = (now - demo.start) / 1000;
+          if (t < DEMO_BUILD_SEC) {
+            const count = Math.max(1, Math.min(nPts, Math.floor((t / DEMO_BUILD_SEC) * nPts)));
+            st.points.geometry.setDrawRange(0, count);
+            if (st.scanPlane) {
+              st.scanPlane.position.z = posAttr.getZ(count - 1);
+              st.scanPlane.visible = true;
+            }
+          } else {
+            st.points.geometry.setDrawRange(0, Infinity);
+            if (st.scanPlane) st.scanPlane.visible = false;
+            if (t >= DEMO_BUILD_SEC + DEMO_HOLD_SEC) demo.start = now;
+          }
+        }
+      }
       controls.update();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(loop);
@@ -88,7 +154,7 @@ export function ThreePointCloudView(props: {
     });
     ro.observe(container);
 
-    stateRef.current = { renderer, scene, camera, controls };
+    stateRef.current = { renderer, scene, camera, controls, group };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -99,6 +165,8 @@ export function ThreePointCloudView(props: {
         pts.geometry.dispose();
         (pts.material as THREE.Material).dispose();
       }
+      const plane = stateRef.current?.scanPlane;
+      if (plane) disposeScanPlane(plane);
       renderer.dispose();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -112,12 +180,18 @@ export function ThreePointCloudView(props: {
     const st = stateRef.current;
     if (!st) return;
 
-    // 既存点群を破棄
+    // 既存点群・走査面を破棄
     if (st.points) {
-      st.scene.remove(st.points);
+      st.group.remove(st.points);
       st.points.geometry.dispose();
       (st.points.material as THREE.Material).dispose();
       st.points = undefined;
+      st.depthUm = undefined;
+    }
+    if (st.scanPlane) {
+      st.group.remove(st.scanPlane);
+      disposeScanPlane(st.scanPlane);
+      st.scanPlane = undefined;
     }
     if (!cloud || cloud.x.length === 0) return;
 
@@ -129,18 +203,11 @@ export function ThreePointCloudView(props: {
     const sweepVal = parseFloat(sweepInterval);
     const zUmPerSlice = !isNaN(sweepVal) && sweepVal > 0 ? sweepVal : umPerPixelY;
 
-    // c の範囲（色付け用）
-    let cMin = Infinity;
-    let cMax = -Infinity;
-    for (let i = 0; i < n; i++) {
-      const v = cloud.c[i];
-      if (v < cMin) cMin = v;
-      if (v > cMax) cMax = v;
-    }
-    const cRange = cMax - cMin || 1;
-
     const pos = new Float32Array(n * 3);
     const col = new Float32Array(n * 3);
+    // 色付けは Plotly 点群と同じ「深さ[µm]（X深度）」基準。先に座標変換して
+    // 深さ配列を作り、カラーレンジ（手動 or 自動ロバスト）を解決してから塗る
+    const depthUm = new Float64Array(n);
     let minX = Infinity,
       minY = Infinity,
       minZ = Infinity;
@@ -154,10 +221,7 @@ export function ThreePointCloudView(props: {
       pos[i * 3] = xu;
       pos[i * 3 + 1] = yu;
       pos[i * 3 + 2] = zu;
-      const [r, g, b] = colorAt((cloud.c[i] - cMin) / cRange);
-      col[i * 3] = r;
-      col[i * 3 + 1] = g;
-      col[i * 3 + 2] = b;
+      depthUm[i] = xu;
       if (xu < minX) minX = xu;
       if (xu > maxXu) maxXu = xu;
       if (yu < minY) minY = yu;
@@ -165,6 +229,8 @@ export function ThreePointCloudView(props: {
       if (zu < minZ) minZ = zu;
       if (zu > maxZu) maxZu = zu;
     }
+
+    fillColors(depthUm, col, rangeRef.current.min, rangeRef.current.max);
 
     // 原点中心化（大きな µm 座標での精度・カメラ設定を安定させる）
     const cx = (minX + maxXu) / 2;
@@ -181,8 +247,38 @@ export function ThreePointCloudView(props: {
     geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
     const mat = new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true });
     const points = new THREE.Points(geom, mat);
-    st.scene.add(points);
+    st.group.add(points);
     st.points = points;
+    st.depthUm = depthUm;
+
+    // 走査面: デモ再生中に現在の走査位置(z=行方向)を示す半透明の光シート。
+    // 高さ(x)スパンは薄いので、視認できる最低幅を確保する
+    const spanX = maxXu - minX;
+    const spanY = maxYu - minY;
+    const planeGeom = new THREE.PlaneGeometry(Math.max(spanX * 1.4, spanY * 0.12), spanY * 1.02);
+    const planeMat = new THREE.MeshBasicMaterial({
+      color: 0x4a90e2,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const scanPlane = new THREE.Mesh(planeGeom, planeMat);
+    // シート本体は半透明で控えめなので、縁に明るいエッジラインを重ねて走査位置を強調
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(planeGeom),
+      new THREE.LineBasicMaterial({ color: 0x7ec8ff, transparent: true, opacity: 0.9 })
+    );
+    scanPlane.add(edges);
+    scanPlane.visible = false;
+    st.group.add(scanPlane);
+    st.scanPlane = scanPlane;
+
+    // デモ再生中にデータが（再）構築されたら、最初から積み上げ直す
+    if (demoRef.current.active) {
+      demoRef.current.start = performance.now();
+      geom.setDrawRange(0, 0);
+    }
 
     // カメラをデータ範囲にフィット
     const radius = Math.max(maxXu - minX, maxYu - minY, maxZu - minZ, 1);
@@ -194,9 +290,49 @@ export function ThreePointCloudView(props: {
     st.controls.update();
   }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
 
+  // カラーレンジ変更時は色バッファのみ更新（ジオメトリ・カメラは維持）
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st?.points || !st.depthUm) return;
+    const attr = st.points.geometry.getAttribute("color") as THREE.BufferAttribute;
+    fillColors(st.depthUm, attr.array as Float32Array, colorRangeMin, colorRangeMax);
+    attr.needsUpdate = true;
+  }, [colorRangeMin, colorRangeMax]);
+
+  // デモ再生の開始/停止。開始時は0点から積み上げ、停止時は全点表示へ戻す
+  useEffect(() => {
+    const demo = demoRef.current;
+    demo.active = !!demoMode;
+    const st = stateRef.current;
+    if (demoMode) {
+      demo.start = performance.now();
+      st?.points?.geometry.setDrawRange(0, 0);
+    } else {
+      st?.points?.geometry.setDrawRange(0, Infinity);
+      if (st?.scanPlane) st.scanPlane.visible = false;
+    }
+  }, [demoMode]);
+
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 5 }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+      {demoMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            padding: "4px 10px",
+            background: "rgba(74, 144, 226, 0.85)",
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 6,
+          }}
+        >
+          デモ再生中: 走査計測シミュレーション
+        </div>
+      )}
       {isBuilding && (
         <div
           style={{
