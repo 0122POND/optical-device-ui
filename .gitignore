@@ -23,14 +23,31 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# 画像データ（サイズが大きいため除外）
-data/row_data/
-data/result/
-data/result_coin_ai/
-data/result_coin_ruined/
+# データディレクトリ全体（大容量の計測・処理データのため除外。追跡済みファイルはそのまま残る）
+data/
 
 # HDF5キャッシュ（過去の自動生成残骸）
 data/*.h5
+
+# ルート直下の計測データ・解析成果物（硬貨CSV・レポート画像など）
+/*.csv
+/*.png
+/*.bmp
+/*_pose.json
+/Untitled
+
+# 計測データ・解析結果フォルダ（ルート直下）
+/WI5000/
+/CoinScanPy/
+/CoinScanPy_mask/
+/mask_result_ai/
+/overlay_row_data_ai/
+/out/
+/10円玉表干渉10um/
+/1円表やり直し/
+/3倍系_ミラー/
+/フィルムサンプル①/
+/粗さ標準機/
 
 # Claude Code
 CLAUDE.md

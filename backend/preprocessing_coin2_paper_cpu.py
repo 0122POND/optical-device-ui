@@ -1,3 +1,16 @@
+"""硬貨計測の干渉縞画像処理（論文掲載用、CPU版）。
+
+干渉縞画像スタックから各フレームの縞ピーク位置を抽出する。
+
+処理手順:
+  1. 画像スタックの読み込み
+  2. 中央値による背景画像の推定
+  3. 背景差分
+  4. 横方向差分とガンマ強調
+  5. ガウス窓（X方向）の適用
+  6. 2次元ガウス平滑化とコントラスト正規化
+  7. 行ごとのargmaxによるピーク検出
+"""
 import os
 import re
 import json
@@ -7,29 +20,24 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, List
 
 import cv2
-from scipy.ndimage import gaussian_filter1d
 
 
 # --- デフォルト設定 ---
 _DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_DATA_PATH = str(_DATA_DIR / "row_data") + "/"
-DEFAULT_RESULT_PATH = str(_DATA_DIR / "result") + "/"
+DEFAULT_RESULT_PATH = str(_DATA_DIR / "result_paper") + "/"
 DEFAULT_PEAK_THRESHOLD = 10
 
 
 def create_gauss_window(h, w, sigma_scale=6):
-    """ガウス窓を作成"""
-    cy, cx = h // 2, w // 2
-    sigma_y = h / sigma_scale
+    """ガウス窓を作成（X方向のみ、Y方向は均一）"""
+    cx = w // 2
     sigma_x = w / sigma_scale
 
-    y = np.arange(h, dtype=np.float32) - cy
     x = np.arange(w, dtype=np.float32) - cx
-
-    gy = np.exp(-y**2 / (2 * sigma_y**2))
     gx = np.exp(-x**2 / (2 * sigma_x**2))
 
-    gauss = np.outer(gy, gx)
+    gauss = np.tile(gx, (h, 1))
     gauss /= gauss.max()
     return gauss
 
@@ -40,24 +48,6 @@ def _load_image(path: str) -> np.ndarray:
     if img is None:
         raise ValueError(f"画像を読み込めません: {path}")
     return img.astype(np.float32)
-
-
-def _apply_peak_mask(peak_data: np.ndarray, keep_px: int = 45) -> np.ndarray:
-    """ピーク検出結果にマスクを適用（基準列の左右keep_px以外をゼロに）"""
-    n_images, h, w = peak_data.shape
-
-    # 各画像の列ごとの白画素数 (n_images, w)
-    col_counts = np.count_nonzero(peak_data > 128, axis=1)
-
-    # 各画像の基準列（白画素が最も多い列） (n_images,)
-    x0 = np.argmax(col_counts, axis=1)
-
-    # マスク: 基準列の左右keep_px内のみ保持 (n_images, 1, w)
-    col_idx = np.arange(w)[np.newaxis, :]
-    x0_col = x0[:, np.newaxis]
-    keep_mask = (col_idx >= x0_col - keep_px) & (col_idx <= x0_col + keep_px)
-
-    return np.where(keep_mask[:, np.newaxis, :], peak_data, 0)
 
 
 def _save_image(args: tuple) -> str:
@@ -85,7 +75,7 @@ def run_preprocess(
     Returns:
         {"peak_data": np.ndarray, "image_files": list, "output_files": list}
     """
-    total_steps = 8
+    total_steps = 7
 
     def report(step: int, message: str):
         if progress_callback:
@@ -139,21 +129,15 @@ def run_preprocess(
     gausswin = np.minimum(enhanced * gauss_window, 255)
     del enhanced
 
-    # Step 6: スタックブラー（3次元ガウスフィルタ）
-    # OpenCV + scipy.ndimage.gaussian_filter1d で高速化
-    report(6, "3次元スタックブラーを適用中...")
+    # Step 6: 2次元ガウス平滑化
+    report(6, "2次元ガウス平滑化を適用中...")
 
-    # axis=0 (画像間方向) に sigma=1 のガウスフィルタ
-    temp = gaussian_filter1d(gausswin, sigma=1, axis=0)
-    del gausswin
-
-    # axis=1,2 (2D画像) に sigma=7 のガウスフィルタ（OpenCVで高速化）
     def blur_2d(img):
         return cv2.GaussianBlur(img.astype(np.float32), (0, 0), sigmaX=7, sigmaY=7)
 
     with ThreadPoolExecutor() as executor:
-        blurred_list = list(executor.map(blur_2d, temp))
-    del temp
+        blurred_list = list(executor.map(blur_2d, gausswin))
+    del gausswin
     blurred_stack = np.stack(blurred_list)
     del blurred_list
 
@@ -184,15 +168,11 @@ def run_preprocess(
     peak_result[valid_img, valid_row, valid_col] = 255
     peak_result[:, :, :-1] |= peak_result[:, :, 1:]
 
-    # Step 8: ピークマスク適用
-    report(8, "ピークマスクを適用中...")
-    peak_result = _apply_peak_mask(peak_result)
-
     # 出力ファイル名リストを生成（保存は呼び出し側で行う）
     output_files = []
     for fname in image_files:
         base_name = os.path.splitext(fname)[0]
-        save_name = f"{base_name}_gausswin_stackblur_contrast_peak.png"
+        save_name = f"{base_name}_gausswin_2dblur_contrast_peak.png"
         output_files.append(save_name)
 
     return {
@@ -220,7 +200,7 @@ def save_peak_results(
     output_files = []
     for i, fname in enumerate(image_files):
         base_name = os.path.splitext(fname)[0]
-        save_name = f"{base_name}_gausswin_stackblur_contrast_peak.png"
+        save_name = f"{base_name}_gausswin_2dblur_contrast_peak.png"
         save_path = os.path.join(result_path, save_name)
         save_args.append((save_path, peak_data[i]))
         output_files.append(save_name)

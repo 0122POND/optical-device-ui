@@ -105,7 +105,7 @@ optical-device-ui/
 │   └── public/
 ├── backend/
 │   ├── app.py             # FastAPI サーバー（静的ファイル配信含む）
-│   └── preprocessing.py   # 画像処理モジュール
+│   └── preprocessing_*.py # 画像処理モジュール（algorithm×GPU/CPU別）
 ├── docs/                   # ドキュメント
 ├── start_win.bat          # 起動スクリプト（Windows用）
 ├── start_mac.sh           # 起動スクリプト（macOS/Linux用）
