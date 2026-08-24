@@ -25,6 +25,7 @@ import { ResultTab } from "./components/ResultTab";
 import { useSlicePlot } from "./hooks/useSlicePlot";
 import { usePlotly } from "./hooks/usePlotly";
 import { usePlotlyAutoRotate } from "./hooks/usePlotlyAutoRotate";
+import { useWakeLock } from "./hooks/useWakeLock";
 import { ThreePointCloudView } from "./components/ThreePointCloudView";
 import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
 import type {
@@ -448,6 +449,9 @@ function App() {
     setSliceLineStart,
     setSliceLineEnd,
   });
+
+  // 自動回転中は画面をスリープさせない（Plotly / three.js どちらの回転でも有効）
+  useWakeLock(autoRotate);
 
   // --- Plotly表示（Surface / Plotly点群）の自動回転。three.js表示中はthree側が回す ---
   usePlotlyAutoRotate({
