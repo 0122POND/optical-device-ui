@@ -1365,6 +1365,9 @@ function App() {
                 backgroundColor: "#2c3e56",
                 boxSizing: "border-box",
                 borderLeft: `1px solid #3a5068`,
+                // 縦解像度が低い環境（Windowsのスケール125%等）では収まらないため
+                // あふれた分だけ縦スクロールできるようにする
+                overflowY: "auto",
               }}
             >
               {/* タブヘッダー */}
