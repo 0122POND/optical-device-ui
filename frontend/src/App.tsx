@@ -787,7 +787,9 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: sidePanelVisible ? "1fr 320px" : "1fr",
+            // 左列は minmax(0, 1fr)。素の 1fr は中身の最小幅（Plotlyの描画幅など）より縮まず、
+            // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
+            gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
             height: "100%",
           }}
         >
@@ -797,6 +799,8 @@ function App() {
               alignItems: "center",
               gap: "8px",
               padding: "0 12px",
+              minWidth: 0,
+              overflowX: "auto",
               backgroundColor: "#aab2be",
               borderBottom: `1px solid ${colors.border}`,
             }}
@@ -1197,7 +1201,9 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: sidePanelVisible ? "1fr 320px" : "1fr",
+            // 左列は minmax(0, 1fr)。素の 1fr は中身の最小幅（Plotlyの描画幅など）より縮まず、
+            // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
+            gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
             height: "100%",
             overflow: "hidden",
           }}
@@ -1207,6 +1213,7 @@ function App() {
             style={{
               width: "100%",
               height: "100%",
+              minWidth: 0,
               padding: "12px",
               boxSizing: "border-box",
               display: "flex",
