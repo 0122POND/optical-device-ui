@@ -377,6 +377,14 @@ function App() {
 
   // アルゴリズム選択アコーディオンの開閉
   const [showAlgorithms, setShowAlgorithms] = useState(false);
+  useEffect(() => {
+    if (!showAlgorithms) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowAlgorithms(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showAlgorithms]);
 
   // 最終計測日時
   const [lastMeasuredAt, setLastMeasuredAt] = useState<string | null>(null);
@@ -1426,13 +1434,14 @@ function App() {
               {/* 操作タブ */}
               {sideTab === "actions" && (
                 <>
-                  {/* アルゴリズム選択（アコーディオン） */}
+                  {/* アルゴリズム選択（クリックでポップアップ） */}
                   <div
-                    onClick={() => setShowAlgorithms((v) => !v)}
+                    onClick={() => setShowAlgorithms(true)}
+                    title="クリックしてアルゴリズムを変更"
                     style={{
                       fontSize: "11px",
                       color: colors.textMuted,
-                      marginBottom: showAlgorithms ? "6px" : "12px",
+                      marginBottom: "12px",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
@@ -1467,131 +1476,9 @@ function App() {
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      style={{
-                        transition: "transform 0.2s ease",
-                        transform: showAlgorithms ? "rotate(180deg)" : "rotate(0deg)",
-                      }}
                     >
-                      <polyline points="6 9 12 15 18 9" />
+                      <polyline points="9 18 15 12 9 6" />
                     </svg>
-                  </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "4px",
-                      marginBottom: "12px",
-                      maxHeight: showAlgorithms ? "300px" : "0px",
-                      overflow: "hidden",
-                      transition: "max-height 0.25s ease",
-                    }}
-                  >
-                    {(
-                      ["coin", "coin2", "coin_paper", "tgv", "elec", "medical", "semi"] as const
-                    ).map((alg) => {
-                      const label =
-                        alg === "coin"
-                          ? "硬貨"
-                          : alg === "coin2"
-                            ? "硬貨(別アプローチ)"
-                            : alg === "coin_paper"
-                              ? "論文硬貨"
-                              : alg === "tgv"
-                                ? "TGV"
-                                : alg === "elec"
-                                  ? "エレキ"
-                                  : alg === "medical"
-                                    ? "医療"
-                                    : "半導体";
-                      const icon =
-                        alg === "coin" || alg === "coin2" ? (
-                          <>
-                            <circle cx="12" cy="12" r="9" />
-                            <circle cx="12" cy="12" r="5" />
-                          </>
-                        ) : alg === "coin_paper" ? (
-                          <>
-                            <circle cx="9" cy="12" r="7" />
-                            <path d="M15 5h6v14h-6" />
-                            <line x1="17" y1="9" x2="19" y2="9" />
-                            <line x1="17" y1="12" x2="19" y2="12" />
-                            <line x1="17" y1="15" x2="19" y2="15" />
-                          </>
-                        ) : alg === "tgv" ? (
-                          <>
-                            <rect x="2" y="6" width="20" height="12" rx="1" />
-                            <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
-                          </>
-                        ) : alg === "elec" ? (
-                          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                        ) : alg === "medical" ? (
-                          <>
-                            <line x1="12" y1="4" x2="12" y2="20" />
-                            <line x1="4" y1="12" x2="20" y2="12" />
-                          </>
-                        ) : (
-                          <>
-                            <rect x="4" y="4" width="16" height="16" rx="2" />
-                            <rect x="8" y="8" width="8" height="8" rx="1" />
-                            <line x1="8" y1="2" x2="8" y2="4" />
-                            <line x1="12" y1="2" x2="12" y2="4" />
-                            <line x1="16" y1="2" x2="16" y2="4" />
-                            <line x1="8" y1="20" x2="8" y2="22" />
-                            <line x1="12" y1="20" x2="12" y2="22" />
-                            <line x1="16" y1="20" x2="16" y2="22" />
-                            <line x1="2" y1="8" x2="4" y2="8" />
-                            <line x1="2" y1="12" x2="4" y2="12" />
-                            <line x1="2" y1="16" x2="4" y2="16" />
-                            <line x1="20" y1="8" x2="22" y2="8" />
-                            <line x1="20" y1="12" x2="22" y2="12" />
-                            <line x1="20" y1="16" x2="22" y2="16" />
-                          </>
-                        );
-                      const disabled = alg !== "coin" && alg !== "coin_paper";
-                      return (
-                        <button
-                          key={alg}
-                          onClick={() => {
-                            if (disabled) return;
-                            setAlgorithm(alg);
-                          }}
-                          disabled={disabled}
-                          title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
-                          style={{
-                            height: "44px",
-                            borderRadius: "6px",
-                            border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
-                            backgroundColor:
-                              algorithm === alg ? colors.primary + "22" : "transparent",
-                            color: algorithm === alg ? colors.primary : colors.textMuted,
-                            fontSize: "11px",
-                            fontWeight: algorithm === alg ? 600 : 400,
-                            fontFamily: fontFamily,
-                            cursor: disabled ? "not-allowed" : "pointer",
-                            opacity: disabled ? 0.4 : 1,
-                            transition: "all 0.15s",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: "4px",
-                          }}
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            {icon}
-                          </svg>
-                          {label}
-                        </button>
-                      );
-                    })}
                   </div>
 
                   {/* ボタングリッド（2列） */}
@@ -2295,6 +2182,173 @@ function App() {
           )}
         </div>
       </div>
+
+      {/* アルゴリズム選択ポップアップ */}
+      {showAlgorithms && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowAlgorithms(false)}
+        >
+          <div
+            style={{
+              width: "360px",
+              backgroundColor: colors.bgLight,
+              borderRadius: "10px",
+              padding: "20px 24px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+              boxSizing: "border-box",
+              border: `1px solid ${colors.border}`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: "15px", fontWeight: 500, marginBottom: "16px" }}>
+              アルゴリズムを選択
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+              }}
+            >
+              {(["coin", "coin2", "coin_paper", "tgv", "elec", "medical", "semi"] as const).map(
+                (alg) => {
+                  const label =
+                    alg === "coin"
+                      ? "硬貨"
+                      : alg === "coin2"
+                        ? "硬貨(別アプローチ)"
+                        : alg === "coin_paper"
+                          ? "論文硬貨"
+                          : alg === "tgv"
+                            ? "TGV"
+                            : alg === "elec"
+                              ? "エレキ"
+                              : alg === "medical"
+                                ? "医療"
+                                : "半導体";
+                  const icon =
+                    alg === "coin" || alg === "coin2" ? (
+                      <>
+                        <circle cx="12" cy="12" r="9" />
+                        <circle cx="12" cy="12" r="5" />
+                      </>
+                    ) : alg === "coin_paper" ? (
+                      <>
+                        <circle cx="9" cy="12" r="7" />
+                        <path d="M15 5h6v14h-6" />
+                        <line x1="17" y1="9" x2="19" y2="9" />
+                        <line x1="17" y1="12" x2="19" y2="12" />
+                        <line x1="17" y1="15" x2="19" y2="15" />
+                      </>
+                    ) : alg === "tgv" ? (
+                      <>
+                        <rect x="2" y="6" width="20" height="12" rx="1" />
+                        <circle cx="12" cy="12" r="4" strokeDasharray="3 2" />
+                      </>
+                    ) : alg === "elec" ? (
+                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                    ) : alg === "medical" ? (
+                      <>
+                        <line x1="12" y1="4" x2="12" y2="20" />
+                        <line x1="4" y1="12" x2="20" y2="12" />
+                      </>
+                    ) : (
+                      <>
+                        <rect x="4" y="4" width="16" height="16" rx="2" />
+                        <rect x="8" y="8" width="8" height="8" rx="1" />
+                        <line x1="8" y1="2" x2="8" y2="4" />
+                        <line x1="12" y1="2" x2="12" y2="4" />
+                        <line x1="16" y1="2" x2="16" y2="4" />
+                        <line x1="8" y1="20" x2="8" y2="22" />
+                        <line x1="12" y1="20" x2="12" y2="22" />
+                        <line x1="16" y1="20" x2="16" y2="22" />
+                        <line x1="2" y1="8" x2="4" y2="8" />
+                        <line x1="2" y1="12" x2="4" y2="12" />
+                        <line x1="2" y1="16" x2="4" y2="16" />
+                        <line x1="20" y1="8" x2="22" y2="8" />
+                        <line x1="20" y1="12" x2="22" y2="12" />
+                        <line x1="20" y1="16" x2="22" y2="16" />
+                      </>
+                    );
+                  const disabled = alg !== "coin" && alg !== "coin_paper";
+                  return (
+                    <button
+                      key={alg}
+                      onClick={() => {
+                        if (disabled) return;
+                        setAlgorithm(alg);
+                        setShowAlgorithms(false);
+                      }}
+                      disabled={disabled}
+                      title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
+                      style={{
+                        height: "44px",
+                        borderRadius: "6px",
+                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
+                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
+                        color: algorithm === alg ? colors.primary : colors.textMuted,
+                        fontSize: "11px",
+                        fontWeight: algorithm === alg ? 600 : 400,
+                        fontFamily: fontFamily,
+                        cursor: disabled ? "not-allowed" : "pointer",
+                        opacity: disabled ? 0.4 : 1,
+                        transition: "all 0.15s",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        {icon}
+                      </svg>
+                      {label}
+                    </button>
+                  );
+                }
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+              <button
+                style={{
+                  height: "44px",
+                  padding: "0 18px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: colors.secondary,
+                  color: colors.text,
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  fontFamily: fontFamily,
+                  cursor: "pointer",
+                  transition: "background-color 0.2s",
+                }}
+                onClick={() => setShowAlgorithms(false)}
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 確認モーダル */}
       {showConfirm && confirmMode && (
