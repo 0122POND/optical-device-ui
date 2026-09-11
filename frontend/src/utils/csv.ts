@@ -9,19 +9,22 @@ declare global {
   }
 }
 
-/** CSVテキストをパースして2Dグリッドに変換（-9999.9 と空セルは null） */
+/**
+ * CSVテキストをパースして2Dグリッドに変換（-9999.9 と空セルは null）。
+ * 空白のみのテキストは空配列を返す。行は一切間引かない
+ * （全欠損行も硬貨内側に実在し、落とすと走査方向の寸法が狂うため）。
+ */
 export function parseCSV(text: string): (number | null)[][] {
-  return text
-    .trim()
-    .split("\n")
-    .map((line) =>
-      line.split(",").map((cell) => {
-        const s = cell.trim();
-        if (s === "" || s === "-9999.9") return null;
-        const n = Number(s);
-        return isNaN(n) ? null : n;
-      })
-    );
+  const trimmed = text.trim();
+  if (trimmed === "") return [];
+  return trimmed.split("\n").map((line) =>
+    line.split(",").map((cell) => {
+      const s = cell.trim();
+      if (s === "" || s === "-9999.9") return null;
+      const n = Number(s);
+      return isNaN(n) ? null : n;
+    })
+  );
 }
 
 export async function downloadCSV(zData: (number | null)[][], filename = "surface.csv") {

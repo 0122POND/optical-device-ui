@@ -291,3 +291,51 @@ export function densePointsFromGrid(grid: (number | null)[][], maxPoints = 2_000
   }
   return { x, y, z, c };
 }
+
+// CSV由来の2Dグリッドから、有効点を最大 maxPoints 個までランダムに間引いた点群を作る
+// （Plotly surface/scatter3d 用）。展開と間引きを1パスで行う reservoir sampling。
+// 全有効点を一旦配列に展開→全インデックスをシャッフルする旧方式は、巨大CSVで
+// メインスレッドを数秒凍結させた。上限件数だけを保持しながら走査することで、
+// 確保するメモリ・計算量を点数ではなく上限値に比例させる。
+// 間引きが発生した場合はサンプルを元の出現順（行→列）に並べ直して返す。
+// x=高さ値, y=列, z=行, c=高さ値（c は x と同一配列を共有）。有効点が0なら空の点群。
+// rng はテスト用に差し替え可能（既定 Math.random）。
+export function sampledPointsFromGrid(
+  grid: (number | null)[][],
+  maxPoints: number,
+  rng: () => number = Math.random
+): PointCloud {
+  const sx: number[] = [];
+  const sy: number[] = [];
+  const sz: number[] = [];
+  const sseq: number[] = []; // 各サンプルの元の出現順（間引き後に並び順を復元するため）
+  let seen = 0; // これまでに見た有効点の数
+  for (let row = 0; row < grid.length; row++) {
+    const gridRow = grid[row];
+    for (let col = 0; col < gridRow.length; col++) {
+      const v = gridRow[col];
+      if (v == null) continue;
+      if (seen < maxPoints) {
+        sx.push(v);
+        sy.push(col);
+        sz.push(row);
+        sseq.push(seen);
+      } else {
+        // 既に上限に達している場合は確率 maxPoints/(seen+1) で既存サンプルと置換
+        const j = Math.floor(rng() * (seen + 1));
+        if (j < maxPoints) {
+          sx[j] = v;
+          sy[j] = col;
+          sz[j] = row;
+          sseq[j] = seen;
+        }
+      }
+      seen++;
+    }
+  }
+  if (seen <= maxPoints) return { x: sx, y: sy, z: sz, c: sx };
+
+  const order = Array.from({ length: maxPoints }, (_, i) => i).sort((a, b) => sseq[a] - sseq[b]);
+  const cx = order.map((i) => sx[i]);
+  return { x: cx, y: order.map((i) => sy[i]), z: order.map((i) => sz[i]), c: cx };
+}
