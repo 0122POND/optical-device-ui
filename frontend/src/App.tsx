@@ -5,6 +5,7 @@ import { downloadCSV, parseCSV } from "./utils/csv";
 import {
   buildPointCloudFromFolder,
   densePointsFromGrid,
+  sampledPointsFromGrid,
   type PointCloud,
 } from "./utils/pointCloud";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -604,57 +605,16 @@ function App() {
       alert("CSVデータが空です");
       return;
     }
-    // three用: CSVグリッドを保持し、フォルダソースはクリア（three高密度はCSV経路を使う）
-    lastCsvGridRef.current = grid;
-    lastFolderSourceRef.current = null;
-    // 展開とランダム間引きを1パスで行う（reservoir sampling）。
-    // 全有効点を一旦配列に展開→全インデックスをシャッフルする旧方式は、巨大CSVで
-    // メインスレッドを数秒凍結させた。上限 CSV_MAX_TOTAL_POINTS 件だけを保持しながら
-    // 走査することで、確保するメモリ・計算量を点数ではなく上限値に比例させる。
-    const MAX = CSV_MAX_TOTAL_POINTS;
-    const sx: number[] = [];
-    const sy: number[] = [];
-    const sz: number[] = [];
-    const sseq: number[] = []; // 各サンプルの元の出現順（間引き後に並び順を復元するため）
-    let seen = 0; // これまでに見た有効点の数
-    for (let row = 0; row < grid.length; row++) {
-      const gridRow = grid[row];
-      for (let col = 0; col < gridRow.length; col++) {
-        const v = gridRow[col];
-        if (v == null) continue;
-        if (seen < MAX) {
-          sx.push(v);
-          sy.push(col);
-          sz.push(row);
-          sseq.push(seen);
-        } else {
-          // 既に上限に達している場合は確率 MAX/(seen+1) で既存サンプルと置換
-          const j = Math.floor(Math.random() * (seen + 1));
-          if (j < MAX) {
-            sx[j] = v;
-            sy[j] = col;
-            sz[j] = row;
-            sseq[j] = seen;
-          }
-        }
-        seen++;
-      }
-    }
-    if (seen === 0) {
+    // 展開とランダム間引き（reservoir sampling、上限 CSV_MAX_TOTAL_POINTS 件）
+    const newCloud = sampledPointsFromGrid(grid, CSV_MAX_TOTAL_POINTS);
+    if (newCloud.x.length === 0) {
       alert("有効なデータがありません");
       return;
     }
-    // 間引きが発生した場合のみ、サンプルを元の出現順に並べ直す（c は値=深さなので x と共有）
-    let cx = sx,
-      cy = sy,
-      cz = sz;
-    if (seen > MAX) {
-      const order = Array.from({ length: MAX }, (_, i) => i).sort((a, b) => sseq[a] - sseq[b]);
-      cx = order.map((i) => sx[i]);
-      cy = order.map((i) => sy[i]);
-      cz = order.map((i) => sz[i]);
-    }
-    const newCloud = { x: cx, y: cy, z: cz, c: cx };
+    // three用: CSVグリッドを保持し、フォルダソースはクリア（three高密度はCSV経路を使う）。
+    // 有効データの確認より前に書くと、無効CSVでも直前のフォルダ由来ソースが消えてしまう。
+    lastCsvGridRef.current = grid;
+    lastFolderSourceRef.current = null;
     setShowSlice(false);
     setShowPlot(true);
     applyCloudResult(newCloud, grid, { plotType: "surface", source });

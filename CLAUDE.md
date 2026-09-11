@@ -15,6 +15,8 @@ npm install          # 依存関係インストール
 npm run dev          # 開発サーバー起動 (http://localhost:5173)
 npm run build        # 本番ビルド（TypeScriptチェック + Viteビルド）
 npm run lint         # ESLint実行
+npm test             # ユニットテスト (vitest, src/utils/*.test.ts)
+npm run test:watch   # テストをwatchモードで実行
 ```
 
 ### バックエンド（backend/ディレクトリで実行）
