@@ -163,13 +163,18 @@ npm run build
 
 ### PR テンプレート
 
+`.github/PULL_REQUEST_TEMPLATE.md` が PR 作成時に自動で本文に入ります。
+
 ```markdown
 ## Summary
-- 変更内容を箇条書きで記載
+- 変更内容を箇条書きで記載（関連 Issue があれば Closes #123）
 
 ## Test plan
-- [ ] テスト項目1
-- [ ] テスト項目2
+- [ ] `cd frontend && npm run format:check && npm run lint && npm test && npm run build`
+- [ ] 手動で確認した項目
+
+## 補足
+- スクリーンショット、見てほしい箇所、依存する PR など（不要なら削除）
 ```
 
 ## CI / CD
@@ -180,6 +185,7 @@ GitHub Actions で以下が自動実行されます：
 |---------|------|
 | Prettier | フォーマットチェック |
 | ESLint | コード品質チェック |
+| Unit tests | vitest（`frontend/src/**/*.test.ts`） |
 | Build | TypeScript 型チェック + Vite ビルド |
 
 PR がマージされる前に、すべてのチェックが通る必要があります。
