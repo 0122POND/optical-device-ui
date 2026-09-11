@@ -11,6 +11,11 @@ updates:
     commit-message:
       prefix: "[chore]"
     open-pull-requests-limit: 10
+    # minor / patch は1本のPRにまとめる（major は個別PRのまま）。
+    # 個別PRが枠(limit)を埋めて新規更新が止まる状態を防ぐ
+    groups:
+      frontend-minor-patch:
+        update-types: ["minor", "patch"]
 
   # ルート（npm - Husky/lint-staged）
   - package-ecosystem: "npm"
@@ -23,6 +28,11 @@ updates:
     commit-message:
       prefix: "[chore]"
     open-pull-requests-limit: 5
+    # minor / patch は1本のPRにまとめる（major は個別PRのまま）。
+    # 個別PRが枠(limit)を埋めて新規更新が止まる状態を防ぐ
+    groups:
+      tooling-minor-patch:
+        update-types: ["minor", "patch"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -34,3 +44,6 @@ updates:
       - "ci"
     commit-message:
       prefix: "[chore]"
+    groups:
+      actions:
+        patterns: ["*"]
