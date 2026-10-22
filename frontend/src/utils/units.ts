@@ -16,6 +16,10 @@ export interface ScaleInputs {
   sweepInterval: string; // デバイス: 掃引間隔 µm/スライス（空欄=未指定）
   csvPitchX: number; // CSV: 列方向 µm/px
   csvPitchY: number; // CSV: 行方向 µm/px
+  // CSV: 高さの単位。px のとき csvUmPerHeightPx があれば µm に換算し、無ければ未校正の px のまま扱う
+  // （HDD掃引の奥行きのように、高さ軸が未校正の画素のデータがあるため）
+  csvHeightUnit: "um" | "px";
+  csvUmPerHeightPx: number | null;
 }
 
 // グリッドの「値・列・行」それぞれの µm 換算係数
@@ -25,11 +29,22 @@ export interface GridScale {
   row: number;
   // 行方向のピッチが未指定で、仮の値（デバイスの画像y µm/px）を使っているか
   rowAssumed: boolean;
+  // 値（高さ）が µm に校正されているか。false のときは未校正の px で、距離計測に高さを含めると無意味
+  valueCalibrated: boolean;
+  valueUnit: "µm" | "px";
 }
 
 export function gridScale(source: DataSource, s: ScaleInputs): GridScale {
   if (source === "csv") {
-    return { value: 1, col: s.csvPitchX, row: s.csvPitchY, rowAssumed: false };
+    const pxUncal = s.csvHeightUnit === "px" && s.csvUmPerHeightPx == null;
+    return {
+      value: s.csvHeightUnit === "px" ? (s.csvUmPerHeightPx ?? 1) : 1,
+      col: s.csvPitchX,
+      row: s.csvPitchY,
+      rowAssumed: false,
+      valueCalibrated: !pxUncal,
+      valueUnit: pxUncal ? "px" : "µm",
+    };
   }
   const sweep = parseFloat(s.sweepInterval);
   const hasSweep = !isNaN(sweep) && sweep > 0;
@@ -38,6 +53,8 @@ export function gridScale(source: DataSource, s: ScaleInputs): GridScale {
     col: s.umPerPixelY,
     row: hasSweep ? sweep : s.umPerPixelY,
     rowAssumed: !hasSweep,
+    valueCalibrated: true,
+    valueUnit: "µm",
   };
 }
 
@@ -92,9 +109,15 @@ export function physicalGrid(
     z,
     xLabel: "X [µm]",
     yLabel: sc.rowAssumed ? "Y (仮定値) [µm]" : "Y [µm]",
-    zLabel: source === "device" ? "Z (Depth) [µm]" : "Height [µm]",
+    zLabel: heightLabel(source, s),
     rowAssumed: sc.rowAssumed,
   };
+}
+
+// 高さ（値）軸のラベル。未校正の px なら明示する
+export function heightLabel(source: DataSource, s: ScaleInputs): string {
+  if (source === "device") return "Z (Depth) [µm]";
+  return gridScale(source, s).valueCalibrated ? "Height [µm]" : "Height [px・未校正]";
 }
 
 // 点群（x=値, y=列, z=行 の規約）を物理単位(µm)へ変換する。反転の意味は physicalGrid と同じ
@@ -152,9 +175,24 @@ export function parsePitchFromFilename(name: string): { x: number; y: number } |
   return x > 0 && y > 0 ? { x, y } : null;
 }
 
-// ピッチをファイル名に埋め込む（小数は最大3桁、末尾の0は落とす）
-export function pitchFilename(base: string, pitchX: number, pitchY: number): string {
+// ピッチ（と高さの単位）をファイル名に埋め込む（小数は最大3桁、末尾の0は落とす）。
+// 高さが未校正の px なら `_zpx` を付け、読み戻し時に px として扱えるようにする
+export function pitchFilename(
+  base: string,
+  pitchX: number,
+  pitchY: number,
+  heightUnit: "µm" | "px" = "µm"
+): string {
   const f = (v: number) => String(Number(v.toFixed(3)));
-  const stem = base.replace(/\.csv$/i, "").replace(/_pitch[\d.]+x[\d.]+um/i, "");
-  return `${stem}_pitch${f(pitchX)}x${f(pitchY)}um.csv`;
+  const stem = base
+    .replace(/\.csv$/i, "")
+    .replace(/_pitch[\d.]+x[\d.]+um/i, "")
+    .replace(/_z(um|px)(?=$|_)/i, "");
+  return `${stem}_pitch${f(pitchX)}x${f(pitchY)}um_z${heightUnit === "px" ? "px" : "um"}.csv`;
+}
+
+// ファイル名の高さ単位（_zum / _zpx）を読む。無ければ null（設定をそのまま使う）
+export function parseHeightUnitFromFilename(name: string): "um" | "px" | null {
+  const m = name.match(/_z(um|px)(?=\.csv$|_)/i);
+  return m ? (m[1].toLowerCase() as "um" | "px") : null;
 }

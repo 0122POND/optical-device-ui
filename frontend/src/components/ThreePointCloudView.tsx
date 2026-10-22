@@ -32,6 +32,8 @@ export function ThreePointCloudView(props: {
   scale: ScaleInputs;
   flipX: boolean;
   flipRef: number;
+  // 奥行き軸の見た目の強調倍率（1=Plotly 点群の既定と同じ見え方）。値・色は変えない
+  depthExaggeration?: number;
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
   colorRangeMin: string;
   colorRangeMax: string;
@@ -45,6 +47,7 @@ export function ThreePointCloudView(props: {
     scale,
     flipX,
     flipRef,
+    depthExaggeration = 1,
     colorRangeMin,
     colorRangeMax,
     isBuilding,
@@ -58,6 +61,8 @@ export function ThreePointCloudView(props: {
     controls: OrbitControls;
     points?: THREE.Points;
     depthUm?: Float64Array;
+    // 奥行きを横幅と同じ長さに見せる基準倍率（Plotly 点群の既定 aspect x=y=1 と揃える）
+    depthBase?: number;
   } | null>(null);
   // 自動回転の最新状態。描画ループ（マウント時に1回だけ生成）から参照するため ref に持つ
   const rotateRef = useRef(false);
@@ -65,6 +70,9 @@ export function ThreePointCloudView(props: {
   // カラーレンジの最新値。ジオメトリ再構築effectの依存に入れずに読むための ref
   // （依存に入れるとレンジ入力のたびに再構築＋カメラリセットが起きる）
   const rangeRef = useRef({ min: colorRangeMin, max: colorRangeMax });
+  // 奥行き強調の最新値（ジオメトリ再構築 effect の依存に入れずに読むため）
+  const depthExRef = useRef(depthExaggeration);
+  depthExRef.current = depthExaggeration;
   rangeRef.current = { min: colorRangeMin, max: colorRangeMax };
 
   // 初期化（マウント時に1回）
@@ -198,8 +206,15 @@ export function ThreePointCloudView(props: {
     st.points = points;
     st.depthUm = depthUm;
 
-    // カメラをデータ範囲にフィット
-    const radius = Math.max(maxXu - minX, maxYu - minY, maxZu - minZ, 1);
+    // 奥行き(x)は横幅(y)と同じ長さに見せたうえで強調倍率を掛ける（Plotly 点群と同じ見え方）。
+    // 実寸のままだと、奥行きが掃引方向に比べて極端に薄い多層データ（HDD掃引等）で層が重なって見える
+    const depthRange = maxXu - minX;
+    const depthBase = depthRange > 0 ? Math.max((maxYu - minY) / depthRange, 1e-6) : 1;
+    st.depthBase = depthBase;
+    points.scale.x = depthBase * depthExRef.current;
+
+    // カメラをデータ範囲にフィット（奥行きは表示上の長さで評価）
+    const radius = Math.max(depthRange * points.scale.x, maxYu - minY, maxZu - minZ, 1);
     st.controls.target.set(0, 0, 0);
     st.camera.position.set(radius * 0.8, radius * 0.6, radius * 1.2);
     st.camera.near = radius / 1000;
@@ -207,6 +222,13 @@ export function ThreePointCloudView(props: {
     st.camera.updateProjectionMatrix();
     st.controls.update();
   }, [cloud, dataSource, scale, flipX, flipRef]);
+
+  // 奥行き強調だけが変わったときはスケールのみ更新（ジオメトリ・カメラは維持）
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st?.points || st.depthBase == null) return;
+    st.points.scale.x = st.depthBase * depthExaggeration;
+  }, [depthExaggeration]);
 
   // カラーレンジ変更時は色バッファのみ更新（ジオメトリ・カメラは維持）
   useEffect(() => {
