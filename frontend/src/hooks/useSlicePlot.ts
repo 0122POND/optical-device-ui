@@ -269,7 +269,11 @@ export function useSlicePlot(args: {
       title: titleText,
       margin: { l: 50, r: 20, t: 40, b: 50 },
       xaxis: { title: { text: "距離 [µm]" }, color: colors.textMuted, gridcolor: colors.grid },
-      yaxis: { title: { text: "深さ [µm]" }, color: colors.textMuted, gridcolor: colors.grid },
+      yaxis: {
+        title: { text: sc.valueCalibrated ? "深さ [µm]" : "高さ [px・未校正]" },
+        color: colors.textMuted,
+        gridcolor: colors.grid,
+      },
       height: 250,
       paper_bgcolor: colors.surface,
       plot_bgcolor: "rgba(0,0,0,0)",

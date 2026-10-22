@@ -39,6 +39,8 @@ export function ThreeSurfaceMeshView(props: {
   grid: (number | null)[][] | null;
   pitchX: number;
   pitchY: number;
+  // 高さの単位（CSV の高さが未校正の px のときは "px"）。凡例の表示に使う
+  heightUnit?: "µm" | "px";
   // カラーレンジの手動指定（µm, 空文字=自動）。前処理後の高さに対して適用する
   colorRangeMin: string;
   colorRangeMax: string;
@@ -382,7 +384,7 @@ export function ThreeSurfaceMeshView(props: {
     borderRadius: 4,
     fontSize: 12,
   };
-  const fmt = (v: number) => `${v.toFixed(1)} µm`;
+  const fmt = (v: number) => `${v.toFixed(1)} ${props.heightUnit ?? "µm"}`;
 
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 5 }}>

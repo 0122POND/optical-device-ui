@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   deviceFlipRef,
+  heightLabel,
+  parseHeightUnitFromFilename,
   gridScale,
   parsePitchFromFilename,
   physicalGrid,
@@ -16,11 +18,18 @@ const S: ScaleInputs = {
   sweepInterval: "100",
   csvPitchX: 37.4,
   csvPitchY: 37.4,
+  csvHeightUnit: "um",
+  csvUmPerHeightPx: null,
 };
 
 describe("gridScale", () => {
   it("device: 値=µm/px(X)、列=µm/px(Y)、行=掃引間隔", () => {
-    expect(gridScale("device", S)).toEqual({ value: 1.8, col: 20, row: 100, rowAssumed: false });
+    expect(gridScale("device", S)).toMatchObject({
+      value: 1.8,
+      col: 20,
+      row: 100,
+      rowAssumed: false,
+    });
   });
 
   it("device: 掃引間隔が空なら行は µm/px(Y) を仮定値として使う", () => {
@@ -31,7 +40,13 @@ describe("gridScale", () => {
   });
 
   it("csv: 値はそのまま µm、列・行は CSV のピッチ", () => {
-    expect(gridScale("csv", S)).toEqual({ value: 1, col: 37.4, row: 37.4, rowAssumed: false });
+    expect(gridScale("csv", S)).toMatchObject({
+      value: 1,
+      col: 37.4,
+      row: 37.4,
+      valueCalibrated: true,
+      valueUnit: "µm",
+    });
   });
 });
 
@@ -113,12 +128,12 @@ describe("physicalPoints", () => {
 describe("ピッチのファイル名埋め込み", () => {
   it("書き出し名と読み取りが往復する", () => {
     const name = pitchFilename("10円表_stitched.csv", 37.4, 100);
-    expect(name).toBe("10円表_stitched_pitch37.4x100um.csv");
+    expect(name).toBe("10円表_stitched_pitch37.4x100um_zum.csv");
     expect(parsePitchFromFilename(name)).toEqual({ x: 37.4, y: 100 });
   });
 
   it("再書き出しで古いピッチ表記を重ねない", () => {
-    expect(pitchFilename("a_pitch10x10um.csv", 20, 30)).toBe("a_pitch20x30um.csv");
+    expect(pitchFilename("a_pitch10x10um_zpx.csv", 20, 30)).toBe("a_pitch20x30um_zum.csv");
   });
 
   it("ピッチ表記が無ければ null", () => {
@@ -147,5 +162,32 @@ describe("pointsInCsvUnits", () => {
     const p = pointsInCsvUnits(cloud, "csv", S, true);
     expect(p.x).toEqual([10, 20]);
     expect(p.y).toEqual([3, 0]);
+  });
+});
+
+describe("CSV の高さの単位", () => {
+  it("px・未校正: 値は等倍のまま、ラベルで未校正と示す", () => {
+    const s = { ...S, csvHeightUnit: "px" as const };
+    expect(gridScale("csv", s)).toMatchObject({
+      value: 1,
+      valueCalibrated: false,
+      valueUnit: "px",
+    });
+    expect(heightLabel("csv", s)).toBe("Height [px・未校正]");
+  });
+
+  it("px・µm/px 指定あり: µm に換算する", () => {
+    const s = { ...S, csvHeightUnit: "px" as const, csvUmPerHeightPx: 0.5 };
+    expect(gridScale("csv", s)).toMatchObject({ value: 0.5, valueCalibrated: true });
+    expect(physicalGrid([[100]], "csv", s, false).z).toEqual([[50]]);
+  });
+
+  it("書き出し名に高さの単位を残し、読み戻しで判定できる", () => {
+    const name = pitchFilename("hdd.csv", 2.7, 500, "px");
+    expect(name).toBe("hdd_pitch2.7x500um_zpx.csv");
+    expect(parseHeightUnitFromFilename(name)).toBe("px");
+    expect(parseHeightUnitFromFilename("a_pitch1x1um_zum.csv")).toBe("um");
+    expect(parseHeightUnitFromFilename("a_pitch1x1um.csv")).toBeNull();
+    expect(parsePitchFromFilename(name)).toEqual({ x: 2.7, y: 500 });
   });
 });

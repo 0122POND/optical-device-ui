@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 import { colors, monoFont } from "../utils/constants";
 import { DEFAULT_UM_PER_PIXEL_X, DEFAULT_UM_PER_PIXEL_Y } from "../utils/constants";
-import { inputStyle, panelSectionStyle, sectionTitleStyle } from "../utils/styles";
+import {
+  inputStyle,
+  panelSectionStyle,
+  sectionTitleStyle,
+  segmentButtonStyle,
+  segmentGroupStyle,
+} from "../utils/styles";
 import type { DataSource } from "../utils/units";
 
 // 入力欄1行（ラベル → 入力＋単位）
@@ -51,6 +57,10 @@ export function SettingsTab({
   setCsvPitchXInput,
   csvPitchYInput,
   setCsvPitchYInput,
+  csvHeightUnit,
+  setCsvHeightUnit,
+  csvUmPerHeightPxInput,
+  setCsvUmPerHeightPxInput,
   dataSource,
   colorRangeMin,
   setColorRangeMin,
@@ -67,6 +77,11 @@ export function SettingsTab({
   setCsvPitchXInput: (v: string) => void;
   csvPitchYInput: string;
   setCsvPitchYInput: (v: string) => void;
+  // CSV の高さの単位（µm / px）と、px のときの µm/px（空欄=未校正）
+  csvHeightUnit: "um" | "px";
+  setCsvHeightUnit: (v: "um" | "px") => void;
+  csvUmPerHeightPxInput: string;
+  setCsvUmPerHeightPxInput: (v: string) => void;
   // 表示中データの出どころ（null=データなし）。どちらの設定が効いているかを示す
   dataSource: DataSource | null;
   colorRangeMin: string;
@@ -138,11 +153,43 @@ export function SettingsTab({
           />
           {unit("µm/px")}
         </Field>
+        <div style={{ marginTop: "14px" }}>
+          <Field label="高さの単位">
+            <div style={{ ...segmentGroupStyle, width: "184px" }}>
+              {(["um", "px"] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  className="tt-hover"
+                  onClick={() => setCsvHeightUnit(u)}
+                  style={segmentButtonStyle(csvHeightUnit === u)}
+                >
+                  {u === "um" ? "µm" : "画素 (px)"}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </div>
+        {csvHeightUnit === "px" && (
+          <div style={{ marginTop: "10px" }}>
+            <Field label="高さ 1px あたり（空欄=未校正）">
+              <input
+                type="text"
+                placeholder="未校正"
+                value={csvUmPerHeightPxInput}
+                onChange={(e) => setCsvUmPerHeightPxInput(e.target.value)}
+                style={fieldInput(110)}
+              />
+              {unit("µm/px")}
+            </Field>
+          </div>
+        )}
         <div
           style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
         >
-          CSV の値は高さ[µm]として扱います。目安: 自社デバイス 10 / WI5000 約37.4 / Keyence
-          約32.9。このアプリで書き出した CSV はファイル名のピッチを自動で読み込みます。
+          ピッチの目安: 自社デバイス 10 / WI5000 約37.4 / Keyence 約32.9。高さが未校正の画素
+          （HDD掃引の奥行きなど）は「画素」を選ぶと、軸に「px・未校正」と表示します。このアプリで
+          書き出した CSV はファイル名のピッチと高さの単位を自動で読み込みます。
         </div>
       </section>
 

@@ -15,6 +15,8 @@ import {
   gridScale,
   parsePitchFromFilename,
   physicalGrid,
+  heightLabel,
+  parseHeightUnitFromFilename,
   pitchFilename,
   pointsInCsvUnits,
   type DataSource,
@@ -216,6 +218,21 @@ function App() {
   // CSV（高さマップ）の列・行ピッチ µm/px。CSV は装置ごとにピッチが違うため個別に持つ
   const [csvPitchXInput, setCsvPitchXInput] = usePersistentState("csvPitchX", "10");
   const [csvPitchYInput, setCsvPitchYInput] = usePersistentState("csvPitchY", "10");
+  // CSV の高さの単位（µm / 未校正の px）と、px のときの µm/px（空欄=未校正）
+  const [csvHeightUnit, setCsvHeightUnit] = usePersistentState("csvHeightUnit", "um");
+  const [csvUmPerHeightPxInput, setCsvUmPerHeightPxInput] = usePersistentState(
+    "csvUmPerHeightPx",
+    ""
+  );
+  // 点群表示の奥行きの強調（1=従来の見え方。値・計測は変えず見た目だけ伸ばす）
+  const [depthExaggerationInput, setDepthExaggerationInput] = usePersistentState(
+    "depthExaggeration",
+    "1"
+  );
+  const depthExaggeration = (() => {
+    const v = parseFloat(depthExaggerationInput);
+    return !isNaN(v) && v > 0 ? v : 1;
+  })();
   const umPerPixelX = (() => {
     const v = parseFloat(umPerPixelXInput);
     return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_X;
@@ -233,10 +250,31 @@ function App() {
     const v = parseFloat(csvPitchYInput);
     return !isNaN(v) && v > 0 ? v : 10;
   })();
+  const csvUmPerHeightPx = (() => {
+    const v = parseFloat(csvUmPerHeightPxInput);
+    return !isNaN(v) && v > 0 ? v : null;
+  })();
+  const csvHeightUnitValue: "um" | "px" = csvHeightUnit === "px" ? "px" : "um";
   // µm 換算の設定一式（描画 effect の依存に入るので参照を安定させる）
   const scale = useMemo<ScaleInputs>(
-    () => ({ umPerPixelX, umPerPixelY, sweepInterval, csvPitchX, csvPitchY }),
-    [umPerPixelX, umPerPixelY, sweepInterval, csvPitchX, csvPitchY]
+    () => ({
+      umPerPixelX,
+      umPerPixelY,
+      sweepInterval,
+      csvPitchX,
+      csvPitchY,
+      csvHeightUnit: csvHeightUnitValue,
+      csvUmPerHeightPx,
+    }),
+    [
+      umPerPixelX,
+      umPerPixelY,
+      sweepInterval,
+      csvPitchX,
+      csvPitchY,
+      csvHeightUnitValue,
+      csvUmPerHeightPx,
+    ]
   );
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
@@ -507,6 +545,7 @@ function App() {
     axisVisible,
     renderPointsWithThree: pointEngine === "three",
     renderSurfaceWithThree: surfaceEngine === "three",
+    depthExaggeration,
     cloud,
     flipX,
     viewMode,
@@ -700,11 +739,16 @@ function App() {
       if (pointSrc) {
         await downloadPointCSV(
           pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
-          pitchFilename(`${(dataName ?? "points").replace(/\.csv$/i, "")}_points`, sc.col, sc.row)
+          pitchFilename(
+            `${(dataName ?? "points").replace(/\.csv$/i, "")}_points`,
+            sc.col,
+            sc.row,
+            sc.valueUnit
+          )
         );
       } else if (zData && zData.length > 0) {
         const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-        await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row));
+        await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row, sc.valueUnit));
       }
     }
 
@@ -730,6 +774,9 @@ function App() {
       setCsvPitchXInput(String(pitch.x));
       setCsvPitchYInput(String(pitch.y));
     }
+    // 高さの単位（_zum / _zpx）も書き出し時に残しているので反映する
+    const zUnit = fileName ? parseHeightUnitFromFilename(fileName) : null;
+    if (zUnit) setCsvHeightUnit(zUnit);
     // 点群形式（x,y,z ヘッダ＋1行1点）。同じ位置に複数の高さを持てるので高さマップは作らず、
     // Surface・2D寸法測定などグリッド前提の機能は zData 無しとして自動的に無効になる
     if (isPointCSV(text)) {
@@ -1110,6 +1157,7 @@ function App() {
                     scale={scale}
                     flipX={flipX}
                     flipRef={flipRef}
+                    depthExaggeration={depthExaggeration}
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
@@ -1127,6 +1175,7 @@ function App() {
                       grid={meshSurface.grid}
                       pitchX={meshSurface.pitchX}
                       pitchY={meshSurface.pitchY}
+                      heightUnit={gridScale(dataSource, scale).valueUnit}
                       colorRangeMin={colorRangeMin}
                       colorRangeMax={colorRangeMax}
                       autoRotate={autoRotate}
@@ -1497,6 +1546,10 @@ function App() {
                     setCsvPitchXInput={setCsvPitchXInput}
                     csvPitchYInput={csvPitchYInput}
                     setCsvPitchYInput={setCsvPitchYInput}
+                    csvHeightUnit={csvHeightUnitValue}
+                    setCsvHeightUnit={setCsvHeightUnit}
+                    csvUmPerHeightPxInput={csvUmPerHeightPxInput}
+                    setCsvUmPerHeightPxInput={setCsvUmPerHeightPxInput}
                     dataSource={zData && zData.length > 0 ? dataSource : null}
                     colorRangeMin={colorRangeMin}
                     setColorRangeMin={setColorRangeMin}
@@ -1839,6 +1892,46 @@ function App() {
                                     {eng === "plotly" ? "Plotly" : "three.js"}
                                   </button>
                                 ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 奥行きの強調（点群表示のとき）。層が重なった構造を引き離して見るため */}
+                          {plotType === "scatter3d" && viewMode === "3D" && (
+                            <div style={settingRowStyle}>
+                              <span style={rowLabelStyle} title={heightLabel(dataSource, scale)}>
+                                奥行きの強調
+                              </span>
+                              <div
+                                style={{
+                                  width: "190px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <input
+                                  type="range"
+                                  min={0.5}
+                                  max={20}
+                                  step={0.5}
+                                  value={depthExaggeration}
+                                  onChange={(e) => setDepthExaggerationInput(e.target.value)}
+                                  onDoubleClick={() => setDepthExaggerationInput("1")}
+                                  title="ダブルクリックで ×1 に戻す（値・計測は変わらず、見た目だけ伸びる）"
+                                  style={{ flex: 1, minWidth: 0, accentColor: colors.primary }}
+                                />
+                                <span
+                                  style={{
+                                    width: "40px",
+                                    textAlign: "right",
+                                    fontFamily: monoFont,
+                                    fontSize: "12px",
+                                    color: colors.text,
+                                  }}
+                                >
+                                  ×{depthExaggeration}
+                                </span>
                               </div>
                             </div>
                           )}

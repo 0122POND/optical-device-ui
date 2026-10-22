@@ -6,6 +6,7 @@ import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
 import {
   gridScale,
+  heightLabel,
   physicalGrid,
   physicalPoints,
   type DataSource,
@@ -37,6 +38,8 @@ export function usePlotly(args: {
   renderPointsWithThree: boolean;
   // true のとき3D表示の Surface は three.js メッシュ側で描くので Plotly では描画しない
   renderSurfaceWithThree: boolean;
+  // 点群(3D)の奥行き軸の見た目の強調倍率（1=従来）。値・ホバー・計測は変えない
+  depthExaggeration: number;
   cloud: PointCloud | null;
   flipX: boolean;
   viewMode: ViewMode;
@@ -76,6 +79,7 @@ export function usePlotly(args: {
     axisVisible,
     renderPointsWithThree,
     renderSurfaceWithThree,
+    depthExaggeration,
     cloud,
     flipX,
     viewMode,
@@ -240,7 +244,11 @@ export function usePlotly(args: {
                     (measurePt2.y - measurePt1.y) ** 2 +
                     (measurePt2.z - measurePt1.z) ** 2
                 );
-                return d >= 1000 ? `${(d / 1000).toFixed(3)} mm` : `${d.toFixed(2)} µm`;
+                const label = d >= 1000 ? `${(d / 1000).toFixed(3)} mm` : `${d.toFixed(2)} µm`;
+                // 高さが未校正の px だと、高さ方向を含む距離は物理的に意味を持たない
+                return gridScale(dataSource, scale).valueCalibrated
+                  ? label
+                  : `${label}（高さ未校正）`;
               })(),
               showarrow: false,
               font: { color: "#ffffff", size: 13, family: fontFamily },
@@ -916,9 +924,10 @@ export function usePlotly(args: {
       const colorData = xDataUm;
       const cMin = pointColor.lo;
       const cMax = pointColor.hi;
-      // mm超えたらmm表示
-      const useMillimeter = cMax >= 1000;
-      const unitLabel = useMillimeter ? "mm" : "µm";
+      // mm超えたらmm表示（未校正の px はそのまま px）
+      const valueCalibrated = gridScale(dataSource, scale).valueCalibrated;
+      const useMillimeter = valueCalibrated && cMax >= 1000;
+      const unitLabel = !valueCalibrated ? "px" : useMillimeter ? "mm" : "µm";
       const toUnit = (um: number) => (useMillimeter ? um / 1000 : um);
       // キリの良い数値でtickを生成
       const rangeUnit = toUnit(cMax) - toUnit(cMin);
@@ -934,7 +943,8 @@ export function usePlotly(args: {
       const ticktext: string[] = [];
       // niceStepに基づいて小数桁数を決定
       const decimals = niceStep >= 1 ? 0 : Math.max(0, Math.ceil(-Math.log10(niceStep)));
-      const fmt = Math.max(decimals, 3);
+      // µm は小さい値も読めるよう3桁、未校正の px は刻みに必要な桁だけ
+      const fmt = valueCalibrated ? Math.max(decimals, 3) : decimals;
       for (let v = niceStart; v <= maxUnit + niceStep * 0.01; v += niceStep) {
         // µm値（colorDataがµm単位のため直接使用）
         const umVal = useMillimeter ? v * 1000 : v;
@@ -990,7 +1000,10 @@ export function usePlotly(args: {
           bgcolor: "rgba(0,0,0,0)",
           xaxis: {
             title: axisVisible
-              ? { text: "Z [µm]", font: { size: 12, color: colors.textMuted } }
+              ? {
+                  text: dataSource === "device" ? "Z [µm]" : heightLabel(dataSource, scale),
+                  font: { size: 12, color: colors.textMuted },
+                }
               : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
@@ -1032,8 +1045,9 @@ export function usePlotly(args: {
             // X/Yは表示上の長さを揃え、Zは実寸比で調整
             const xRange = xUmMax - xUmMin || 1;
             const xyMax = Math.max(xRange, yRange);
+            // 奥行き(x)は強調倍率を掛ける（データ値は変えず、表示上の長さだけ伸ばす）
             return {
-              x: 1,
+              x: depthExaggeration,
               y: 1,
               z: Math.max(zRange / xyMax, 0.15),
             };
@@ -1178,6 +1192,7 @@ export function usePlotly(args: {
     axisVisible,
     renderPointsWithThree,
     renderSurfaceWithThree,
+    depthExaggeration,
     cloud,
     flipX,
     viewMode,
