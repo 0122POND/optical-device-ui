@@ -37,6 +37,13 @@ Mac ではリポジトリ直下の `start_mac.sh`（バックエンドとフロ�
 4. **可視化**: Plotly.js（3D/2D）と three.js メッシュ。統計は `utils/surfaceStats.ts`、帯の断面は `utils/bandSection.ts`
 5. **測定履歴**: `utils/historyStore.ts` - ブラウザ（IndexedDB）に最新20件を保存
 
+### 画面の構成（frontend/src）
+
+- `App.tsx`: 状態と処理（計測・読込・WebSocket・履歴）の配線。画面の部品は components に分けてある
+- `components/operate/*`: 操作タブの各区画（計測・ファイル・後処理・表示・計測ツール）／`components/plot/*`: プロット上のツールバー・視点プリセット・チップ／`components/modals/*`: 確認・アルゴリズム選択・履歴削除／`SlicePanel`・`ProgressOverlay`・`ResultTab`・`SettingsTab`
+- `hooks/*`: 描画（`usePlotly`・`useSlicePlot`）、設定（`useScaleSettings`）、後処理（`usePostprocess`）、プロット操作（`usePlotControls`）、履歴（`useCloudHistory`）、WebSocket（`useWebSocket`）
+- Plotly の Surface は表示だけ間引く（`utils/displayGrid.ts`、最大25万セル）。断面・統計・CSV出力・後処理は元の解像度
+
 ### データ構造
 
 - **Surface**: `(number | null)[][]` - 2Dグリッド（null=データなし、number=高さ）
