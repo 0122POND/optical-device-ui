@@ -33,7 +33,9 @@ Mac ではリポジトリ直下の `start_mac.sh`（バックエンドとフロ�
 
 1. **点群処理**: `utils/pointCloud.ts` - 結果画像（PNG/BMP）・深さファイルから高さマップと3D点群を構築
 2. **単位換算**: `utils/units.ts` - データの出どころ（デバイス／CSV）に応じて µm に換算
-3. **可視化**: Plotly.js（3D/2D）と three.js メッシュ
+3. **後処理**: `utils/postprocess.ts` - 外れ値除去（MAD）・走査方向の補間。`tools/remove_outliers.py`・`interpolate_scan.py` と同じ結果（補った画素は印で区別）
+4. **可視化**: Plotly.js（3D/2D）と three.js メッシュ。統計は `utils/surfaceStats.ts`、帯の断面は `utils/bandSection.ts`
+5. **測定履歴**: `utils/historyStore.ts` - ブラウザ（IndexedDB）に最新20件を保存
 
 ### データ構造
 
@@ -50,10 +52,12 @@ Mac ではリポジトリ直下の `start_mac.sh`（バックエンドとフロ�
 ```
 Client → Server: {"cmd": "preprocess", "params": {"algorithm", "use_gpu", "peak_threshold"}}   # 前処理（data/row_data → data/result）
                  {"cmd": "ai_inference", "params": {"model_type", "threshold"}}              # AI推論（data/row_data → data/mask_result）
+                 {"cmd": "cancel"}                                                            # 実行中の計測を次の区切りで止める
                  {"cmd": "ping"}
 Server → Client: {"type": "status", "value": "READY|RUNNING|COMPLETE"}
                  {"type": "progress", "step", "total", "message", "percent"}
                  {"type": "preprocess_complete" | "ai_inference_complete", "files", "count"}
+                 {"type": "cancelled", "job"}                                                 # 中止した（AIは途中のマスクを残さない）
                  {"type": "error", "message"} / {"type": "pong"}
 ```
 
