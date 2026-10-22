@@ -71,6 +71,8 @@ import type {
   DimLine,
   CloudHistoryEntry,
   DataOrigin,
+  ViewPresetKind,
+  ViewPresetRequest,
   FolderSource,
 } from "./types";
 import "./App.css";
@@ -959,9 +961,49 @@ function App() {
     Plotly.relayout(el, { "scene.dragmode": mode });
   };
 
+  // 視点のプリセット要求（three.js 表示へ渡す。同じ向きの連打でも反映されるよう通し番号付き）
+  const [viewPreset, setViewPreset] = useState<ViewPresetRequest>(null);
+
+  // 正面（横方向×奥行き）・側面（縦方向×奥行き）・上面（横方向×縦方向）へ切り替える。
+  // Plotly の平行投影はズームが効かず、投影と視点を同時に変えると描画が追従しないため、遠近のまま
+  // 箱の大きさ（aspectratio。奥行きの強調で伸びる）に合わせて引いた位置から見る
+  const handleViewPreset = (kind: Exclude<ViewPresetKind, "reset">) => {
+    setAutoRotate(false);
+    setViewPreset((p) => ({ kind, n: (p?.n ?? 0) + 1 }));
+    const el = plotRef.current;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!el || !(el as any)._fullLayout?.scene) return; // three.js 表示中は Plotly のシーンが無い
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const asp = (el as any)._fullLayout.scene.aspectratio ?? { x: 1, y: 1, z: 1 };
+    const d = Math.max(2.2, 1.3 * Math.max(asp.x, asp.y, asp.z));
+    // 軸の割り当て: surface は x=縦方向(列), y=横方向(行), z=高さ / 点群は x=奥行き, y=縦方向, z=横方向
+    const cams =
+      plotType === "surface"
+        ? {
+            front: { eye: { x: d, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } },
+            side: { eye: { x: 0, y: -d, z: 0 }, up: { x: 0, y: 0, z: 1 } },
+            top: { eye: { x: 0, y: 0, z: d }, up: { x: 0, y: 1, z: 0 } },
+          }
+        : {
+            front: { eye: { x: 0, y: d, z: 0 }, up: { x: 1, y: 0, z: 0 } },
+            side: { eye: { x: 0, y: 0, z: d }, up: { x: 1, y: 0, z: 0 } },
+            top: { eye: { x: d, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } },
+          };
+    Plotly.relayout(el, {
+      "scene.camera": {
+        ...cams[kind],
+        center: { x: 0, y: 0, z: 0 },
+        projection: { type: "perspective" },
+      },
+    });
+  };
+
   const handleCameraReset = () => {
+    setViewPreset((p) => ({ kind: "reset", n: (p?.n ?? 0) + 1 }));
     const el = plotRef.current;
     if (!el) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!(el as any)._fullLayout?.scene) return;
     const cam =
       viewMode === "2D-camera"
         ? { eye: { x: 2.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
@@ -976,9 +1018,16 @@ function App() {
                 y: 2.0 * Math.sin(az) * Math.cos(el2),
                 z: 2.0 * Math.sin(el2) + 0.5,
               },
+              up: { x: 0, y: 0, z: 1 },
             };
           })();
-    Plotly.relayout(el, { "scene.camera": cam });
+    Plotly.relayout(el, {
+      "scene.camera": {
+        ...cam,
+        center: { x: 0, y: 0, z: 0 },
+        projection: { type: "perspective" },
+      },
+    });
   };
 
   const handleDownload = async () => {
@@ -1158,6 +1207,7 @@ function App() {
                     flipX={flipX}
                     flipRef={flipRef}
                     depthExaggeration={depthExaggeration}
+                    viewPreset={viewPreset}
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
@@ -1180,6 +1230,7 @@ function App() {
                       colorRangeMax={colorRangeMax}
                       autoRotate={autoRotate}
                       onAutoRotateChange={setAutoRotate}
+                      viewPreset={viewPreset}
                     />
                   )}
 
@@ -1399,6 +1450,34 @@ function App() {
                     </Icon>
                   </button>
                 </div>
+
+                {/* 視点のプリセット（3D表示のときだけ） */}
+                {viewMode === "3D" && showPlot && (
+                  <div style={floatingGroupStyle}>
+                    {(
+                      [
+                        { kind: "front", label: "正面", title: "正面（横方向×奥行き）" },
+                        { kind: "side", label: "側面", title: "側面（縦方向×奥行き）" },
+                        { kind: "top", label: "上面", title: "上面（横方向×縦方向）" },
+                      ] as const
+                    ).map(({ kind, label, title }) => (
+                      <button
+                        key={kind}
+                        title={`${title}。カメラリセットで元の視点に戻る`}
+                        className="tt-hover"
+                        style={{
+                          // 押した瞬間に視点を切り替えるだけ（手で回すと向きが変わるので選択状態は持たない）
+                          ...segmentButtonStyle(false, 30),
+                          flex: "none",
+                          padding: "0 10px",
+                        }}
+                        onClick={() => handleViewPreset(kind)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* サイドパネル表示/非表示（右上） */}

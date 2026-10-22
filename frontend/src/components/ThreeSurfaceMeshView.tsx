@@ -11,6 +11,7 @@ import {
   type Detrend,
   type MeshColormap,
 } from "../utils/surfaceMesh";
+import type { ViewPresetRequest } from "../types";
 
 // 自動回転の角速度[°/s]（15°/s ≒ 24秒で1周。Plotly側の usePlotlyAutoRotate と揃える）
 const SPIN_DEG_PER_SEC = 15;
@@ -47,6 +48,8 @@ export function ThreeSurfaceMeshView(props: {
   autoRotate?: boolean;
   // パネルの「自動回転」チェックから App 側の自動回転状態を切り替える（ツールバーと連動）
   onAutoRotateChange?: (on: boolean) => void;
+  // 視点のプリセット（正面・側面・上面・既定）
+  viewPreset?: ViewPresetRequest;
 }) {
   const { grid, pitchX, pitchY, colorRangeMin, colorRangeMax, autoRotate, onAutoRotateChange } =
     props;
@@ -354,6 +357,23 @@ export function ThreeSurfaceMeshView(props: {
     st.cam = { az: 30, el: 35, dist: st.homeDist, target: new THREE.Vector3() };
     st.auto = true;
   };
+
+  // 視点のプリセット。メッシュは高さが画面の上（world y）、列(縦方向)=world x、行(横方向)=world -z
+  //   正面: 縦方向に沿って見る（横方向×高さ）= 方位角90° / 側面: 横方向に沿って見る（縦方向×高さ）= 0°
+  //   上面: 真上から（ほぼ真上。真上ちょうどは上向きが決まらないため 89.5°）
+  const viewPreset = props.viewPreset;
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st || !viewPreset) return;
+    const v = {
+      front: { az: 90, el: 0 },
+      side: { az: 0, el: 0 },
+      top: { az: 0, el: 89.5 },
+      reset: { az: 30, el: 35 },
+    }[viewPreset.kind];
+    st.cam = { az: v.az, el: v.el, dist: st.homeDist, target: new THREE.Vector3() };
+    st.auto = true;
+  }, [viewPreset]);
 
   const panel: React.CSSProperties = {
     position: "absolute",

@@ -63,3 +63,8 @@ export type CloudHistoryEntry = {
   name: string;
   source: HistorySource;
 };
+
+// 視点のプリセット（正面=横方向×奥行き / 側面=縦方向×奥行き / 上面=横方向×縦方向 / reset=既定に戻す）。
+// n は同じ向きを続けて押しても反映されるよう毎回増やす通し番号
+export type ViewPresetKind = "front" | "side" | "top" | "reset";
+export type ViewPresetRequest = { kind: ViewPresetKind; n: number } | null;
