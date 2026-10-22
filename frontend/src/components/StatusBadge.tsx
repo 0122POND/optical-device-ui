@@ -1,29 +1,12 @@
 import type { MeasureStatus } from "../types";
+import { colors, monoFont } from "../utils/constants";
 
-// 計測ステータスをドット付きピル表示するバッジ
+// 計測ステータスをドット付きピル表示するバッジ（待機=中立 / 実行中=アクセント点滅 / 完了=緑）
 export const StatusBadge = ({ status }: { status: MeasureStatus }) => {
   const config = {
-    READY: {
-      bg: "#1e3a2f",
-      color: "#6bff95",
-      border: "#6bff9555",
-      dot: "#3ddc84",
-      label: "READY",
-    },
-    RUNNING: {
-      bg: "#3a2828",
-      color: "#ff6b6b",
-      border: "#ff6b6b55",
-      dot: "#ff4d4d",
-      label: "RUNNING",
-    },
-    COMPLETE: {
-      bg: "#1e2a3a",
-      color: "#6b95ff",
-      border: "#6b95ff55",
-      dot: "#4d7fff",
-      label: "COMPLETE",
-    },
+    READY: { color: colors.textMuted, dot: colors.success, label: "READY" },
+    RUNNING: { color: colors.primary, dot: colors.primary, label: "RUNNING" },
+    COMPLETE: { color: colors.success, dot: colors.success, label: "COMPLETE" },
   };
   const c = config[status];
 
@@ -32,22 +15,25 @@ export const StatusBadge = ({ status }: { status: MeasureStatus }) => {
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "6px",
-        padding: "8px 12px",
+        gap: "7px",
+        height: "26px",
+        padding: "0 11px",
         borderRadius: "999px",
-        fontSize: "12px",
-        fontWeight: 600,
-        backgroundColor: c.bg,
+        fontFamily: monoFont,
+        fontSize: "11px",
+        fontWeight: 500,
+        letterSpacing: "0.06em",
         color: c.color,
-        border: `1px solid ${c.border}`,
+        backgroundColor: `color-mix(in srgb, ${c.dot} 12%, transparent)`,
       }}
     >
       <span
         style={{
-          width: "8px",
-          height: "8px",
+          width: "6px",
+          height: "6px",
           borderRadius: "50%",
           backgroundColor: c.dot,
+          boxShadow: `0 0 8px ${c.dot}`,
           animation: status === "RUNNING" ? "blink 1s ease-in-out infinite" : "none",
         }}
       />

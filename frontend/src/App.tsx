@@ -18,6 +18,7 @@ import {
   CSV_MAX_TOTAL_POINTS,
   colors,
   fontFamily,
+  monoFont,
 } from "./utils/constants";
 import { formatElapsed } from "./utils/format";
 import { Header } from "./components/Header";
@@ -29,12 +30,24 @@ import { usePlotlyAutoRotate } from "./hooks/usePlotlyAutoRotate";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { ThreePointCloudView } from "./components/ThreePointCloudView";
 import { ThreeSurfaceMeshView } from "./components/ThreeSurfaceMeshView";
+import { Icon } from "./components/Icon";
 import {
   buttonPrimaryStyle,
-  buttonRunStyle,
+  buttonSecondaryStyle,
   buttonFileStyle,
-  buttonToggleStyle,
   enabledStateStyle,
+  rowLabelStyle,
+  settingRowStyle,
+  floatingGroupStyle,
+  iconButtonStyle,
+  modalButtonStyle,
+  modalCardStyle,
+  modalOverlayStyle,
+  panelSectionStyle,
+  sectionTitleStyle,
+  segmentButtonStyle,
+  segmentGroupStyle,
+  toolButtonStyle,
 } from "./utils/styles";
 import type {
   PlotType,
@@ -190,6 +203,8 @@ function App() {
   })();
 
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
+  // 表示中データの名前（ヘッダーに出す。CSV読込=ファイル名、マスク読込=フォルダ名）
+  const [dataName, setDataName] = useState<string | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
 
   // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
@@ -219,7 +234,7 @@ function App() {
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#1a1a2e";
+    ctx.fillStyle = colors.plotBg;
     ctx.fillRect(0, 0, size, size);
 
     const { y, z, x: depth } = pc;
@@ -637,6 +652,7 @@ function App() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      setDataName(file.name);
       loadCsvText(reader.result as string, "csv");
     };
     reader.readAsText(file);
@@ -671,6 +687,7 @@ function App() {
       lastCsvGridRef.current = null;
       const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
 
+      setDataName("mask_result");
       applyCloudResult(newCloud, newGrid, {
         plotType: "surface",
         source: "coin",
@@ -751,6 +768,130 @@ function App() {
     return { grid, pitchX: umPerPixelY, pitchY };
   }, [surfaceEngine, zData, cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
 
+  // --- プロット操作（フローティングツールバーから呼ぶ） ---
+  const handleZoom = (factor: number) => {
+    const el = plotRef.current;
+    if (!el) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scene = (el as any)._fullLayout?.scene?._scene;
+    const camera = scene?.getCamera?.();
+    if (camera) {
+      const eye = camera.eye;
+      Plotly.relayout(el, {
+        "scene.camera.eye": {
+          x: eye.x * factor,
+          y: eye.y * factor,
+          z: eye.z * factor,
+        },
+      });
+    }
+  };
+
+  const handleDragMode = (mode: DragMode) => {
+    const el = plotRef.current;
+    if (!el) return;
+    setDragMode(mode);
+    Plotly.relayout(el, { "scene.dragmode": mode });
+  };
+
+  const handleCameraReset = () => {
+    const el = plotRef.current;
+    if (!el) return;
+    const cam =
+      viewMode === "2D-camera"
+        ? { eye: { x: 2.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
+        : (() => {
+            const azim = 20;
+            const elev = 10;
+            const az = (azim * Math.PI) / 180;
+            const el2 = (elev * Math.PI) / 180;
+            return {
+              eye: {
+                x: 2.0 * Math.cos(az) * Math.cos(el2),
+                y: 2.0 * Math.sin(az) * Math.cos(el2),
+                z: 2.0 * Math.sin(el2) + 0.5,
+              },
+            };
+          })();
+    Plotly.relayout(el, { "scene.camera": cam });
+  };
+
+  const handleDownload = async () => {
+    const el = plotRef.current;
+    if (!el) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = el as any;
+    // 画面ではプロット背景を透過にしてステージのグラデーションを見せているが、
+    // 保存する画像は従来どおり黒背景にする（保存の間だけ背景を塗り、終わったら戻す）
+    const bg = (color: string) => ({
+      paper_bgcolor: color,
+      plot_bgcolor: color,
+      ...(p._fullLayout?.scene ? { "scene.bgcolor": color } : {}),
+    });
+    await Plotly.relayout(el, bg("#000000"));
+    try {
+      await Plotly.downloadImage(el, {
+        format: "png",
+        width: 1920,
+        height: 1080,
+        filename: "surface_plot",
+      });
+    } finally {
+      await Plotly.relayout(el, bg("rgba(0,0,0,0)"));
+      // WebGL 3Dプロットのキャンバスが白くなる問題を回避: 再描画
+      if (p.data && p.layout) {
+        Plotly.react(el, p.data, p.layout);
+      }
+    }
+  };
+
+  // ヘッダーに出す表示中データの概要（名前・グリッドサイズ・有効率）
+  const dataSummary = (() => {
+    if (!zData || zData.length === 0) return null;
+    const h = zData.length;
+    const w = zData[0].length;
+    let valid = 0;
+    for (const row of zData) for (const v of row) if (v != null) valid++;
+    return { name: dataName, w, h, validPct: (valid / (w * h)) * 100 };
+  })();
+
+  // プロット左下のチップ（描画モード・エンジン・スケール）
+  const engineLabel =
+    (plotType === "surface" ? surfaceEngine : pointEngine) === "three" ? "three.js" : "Plotly";
+  const chip = (children: React.ReactNode) => (
+    <span
+      style={{
+        ...floatingGroupStyle,
+        height: "26px",
+        padding: "0 10px",
+        gap: "6px",
+        borderRadius: "7px",
+        color: colors.textMuted,
+        fontSize: "11.5px",
+      }}
+    >
+      {children}
+    </span>
+  );
+  const chipValue = (v: React.ReactNode) => (
+    <b style={{ color: colors.text, fontWeight: 500, fontFamily: monoFont }}>{v}</b>
+  );
+
+  const algorithmLabel =
+    algorithm === "coin"
+      ? "硬貨"
+      : algorithm === "coin2"
+        ? "硬貨(別アプローチ)"
+        : algorithm === "coin_paper"
+          ? "論文硬貨"
+          : algorithm === "tgv"
+            ? "TGV"
+            : algorithm === "elec"
+              ? "エレキ"
+              : algorithm === "medical"
+                ? "医療"
+                : "半導体";
+
   return (
     <>
       <div
@@ -758,430 +899,21 @@ function App() {
           width: "100vw",
           height: "100vh",
           display: "grid",
-          gridTemplateRows: "56px 52px 1fr",
+          gridTemplateRows: "52px 1fr",
           backgroundColor: colors.bg,
           color: colors.text,
           fontFamily: fontFamily,
-          fontSize: "14px",
+          fontSize: "13px",
           lineHeight: 1.5,
         }}
       >
         {/* ヘッダー */}
-        <Header lastMeasuredAt={lastMeasuredAt} measureCount={measureCount} status={status} />
-
-        {/* ツールバー */}
-        <div
-          style={{
-            display: "grid",
-            // 左列は minmax(0, 1fr)。素の 1fr は中身の最小幅（Plotlyの描画幅など）より縮まず、
-            // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
-            gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
-            height: "100%",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "0 12px",
-              minWidth: 0,
-              overflowX: "auto",
-              backgroundColor: "#aab2be",
-              borderBottom: `1px solid ${colors.border}`,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                borderRadius: "6px",
-                overflow: "hidden",
-                border: `1px solid ${colors.border}`,
-                height: "44px",
-              }}
-            >
-              {(
-                [
-                  { key: "3D", label: "3D", icon: "/icons/3d.png" },
-                  { key: "2D-camera", label: "2D", icon: "/icons/2d.png" },
-                ] as const
-              ).map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    setViewMode(key);
-                    if (key === "3D") {
-                      setShowSlice(false);
-                      setDimensionMode(false);
-                    }
-                  }}
-                  style={{
-                    padding: "0 14px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    fontFamily,
-                    border: "none",
-                    borderRight: `1px solid ${colors.border}`,
-                    cursor: "pointer",
-                    backgroundColor: viewMode === key ? colors.primary : colors.bgDark,
-                    color: viewMode === key ? "#fff" : colors.textMuted,
-                    transition: "background-color 0.15s, color 0.15s",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  {icon && (
-                    <img
-                      src={icon}
-                      alt=""
-                      style={{
-                        height: "18px",
-                        width: "18px",
-                        objectFit: "cover",
-                        opacity: viewMode === key ? 1 : 0.6,
-                        border: "1px solid #fff",
-                        borderRadius: "2px",
-                      }}
-                    />
-                  )}
-                  {label}
-                </button>
-              ))}
-            </div>
-            {/* セパレータ */}
-            <div
-              style={{
-                width: "1px",
-                height: "28px",
-                backgroundColor: "#7a8290",
-                margin: "0 4px",
-              }}
-            />
-            {/* Plotlyツールバーボタン群 */}
-            {(() => {
-              const tbBtnStyle = (active?: boolean): React.CSSProperties => ({
-                width: "44px",
-                height: "44px",
-                padding: 0,
-                border: "none",
-                borderRadius: "6px",
-                backgroundColor: active ? colors.primary : "transparent",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "background-color 0.15s",
-              });
-              const svgColor = "#2d3139";
-              const activeColor = "#ffffff";
-
-              const handleZoom = (factor: number) => {
-                const el = plotRef.current;
-                if (!el) return;
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const scene = (el as any)._fullLayout?.scene?._scene;
-                const camera = scene?.getCamera?.();
-                if (camera) {
-                  const eye = camera.eye;
-                  Plotly.relayout(el, {
-                    "scene.camera.eye": {
-                      x: eye.x * factor,
-                      y: eye.y * factor,
-                      z: eye.z * factor,
-                    },
-                  });
-                }
-              };
-
-              const handleDragMode = (mode: DragMode) => {
-                const el = plotRef.current;
-                if (!el) return;
-                setDragMode(mode);
-                Plotly.relayout(el, { "scene.dragmode": mode });
-              };
-
-              const handleReset = () => {
-                const el = plotRef.current;
-                if (!el) return;
-                const cam =
-                  viewMode === "2D-camera"
-                    ? { eye: { x: 2.0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } }
-                    : (() => {
-                        const azim = 20;
-                        const elev = 10;
-                        const az = (azim * Math.PI) / 180;
-                        const el2 = (elev * Math.PI) / 180;
-                        return {
-                          eye: {
-                            x: 2.0 * Math.cos(az) * Math.cos(el2),
-                            y: 2.0 * Math.sin(az) * Math.cos(el2),
-                            z: 2.0 * Math.sin(el2) + 0.5,
-                          },
-                        };
-                      })();
-                Plotly.relayout(el, { "scene.camera": cam });
-              };
-
-              const handleDownload = () => {
-                const el = plotRef.current;
-                if (!el) return;
-                Plotly.downloadImage(el, {
-                  format: "png",
-                  width: 1920,
-                  height: 1080,
-                  filename: "surface_plot",
-                }).then(() => {
-                  // WebGL 3Dプロットのキャンバスが白くなる問題を回避: 再描画
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const p = el as any;
-                  if (p.data && p.layout) {
-                    Plotly.react(el, p.data, p.layout);
-                  }
-                });
-              };
-
-              return (
-                <>
-                  {/* 画像保存 */}
-                  <button title="画像保存" style={tbBtnStyle()} onClick={handleDownload}>
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <path d="M21 15l-5-5L5 21" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* ズームイン */}
-                  <button title="ズームイン" style={tbBtnStyle()} onClick={() => handleZoom(0.8)}>
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      <line x1="11" y1="8" x2="11" y2="14" />
-                      <line x1="8" y1="11" x2="14" y2="11" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* ズームアウト */}
-                  <button
-                    title="ズームアウト"
-                    style={tbBtnStyle()}
-                    onClick={() => handleZoom(1.25)}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      <line x1="8" y1="11" x2="14" y2="11" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* パン */}
-                  <button
-                    title="パン"
-                    style={tbBtnStyle(dragMode === "pan")}
-                    onClick={() => handleDragMode("pan")}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={dragMode === "pan" ? activeColor : svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M18 11V6a2 2 0 0 0-4 0v5" />
-                      <path d="M14 10V4a2 2 0 0 0-4 0v6" />
-                      <path d="M10 10.5V6a2 2 0 0 0-4 0v8" />
-                      <path d="M18 11a2 2 0 0 1 4 0v5a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.6L3.3 17.8a2 2 0 0 1 3-2.6L8 18" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* 回転(Turntable) */}
-                  <button
-                    title="回転 (Turntable)"
-                    style={tbBtnStyle(dragMode === "turntable")}
-                    onClick={() => handleDragMode("turntable")}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={dragMode === "turntable" ? activeColor : svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 12a9 9 0 1 1-9-9" />
-                      <polyline points="21 3 21 12 12 12" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* 回転(Orbital) */}
-                  <button
-                    title="回転 (Orbital)"
-                    style={tbBtnStyle(dragMode === "orbit")}
-                    onClick={() => handleDragMode("orbit")}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={dragMode === "orbit" ? activeColor : svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <circle cx="12" cy="12" r="10" />
-                      <ellipse cx="12" cy="12" rx="10" ry="4" />
-                      <line x1="12" y1="2" x2="12" y2="22" />
-                    </svg>
-                  </button>
-
-                  {/* セパレータ */}
-                  <div
-                    style={{
-                      width: "1px",
-                      height: "28px",
-                      backgroundColor: "#7a8290",
-                      margin: "0 2px",
-                    }}
-                  />
-
-                  {/* リセット */}
-                  <button title="カメラリセット" style={tbBtnStyle()} onClick={handleReset}>
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="1 4 1 10 7 10" />
-                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                    </svg>
-                  </button>
-
-                  {/* サイドパネル表示/非表示（右端に配置） */}
-                  <button
-                    title={
-                      sidePanelVisible ? "操作パネルを隠す（グラフを全幅表示）" : "操作パネルを表示"
-                    }
-                    style={{ ...tbBtnStyle(), marginLeft: "auto" }}
-                    onClick={() => setSidePanelVisible((v) => !v)}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={svgColor}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      {/* サイドパネル付きレイアウト＋開閉方向のシェブロン */}
-                      <rect x="3" y="4" width="18" height="16" rx="2" />
-                      <line x1="15" y1="4" x2="15" y2="20" />
-                      {sidePanelVisible ? (
-                        <polyline points="8 9 11 12 8 15" />
-                      ) : (
-                        <polyline points="11 9 8 12 11 15" />
-                      )}
-                    </svg>
-                  </button>
-                </>
-              );
-            })()}
-          </div>
-          {/* 右セルはサイドパネルと背景・左ボーダーを揃え、上の隙間を解消して連続させる */}
-          {sidePanelVisible && (
-            <div style={{ backgroundColor: "#2c3e56", borderLeft: `1px solid #3a5068` }} />
-          )}
-        </div>
+        <Header
+          lastMeasuredAt={lastMeasuredAt}
+          measureCount={measureCount}
+          status={status}
+          data={dataSummary}
+        />
 
         {/* メインエリア */}
         <div
@@ -1191,6 +923,7 @@ function App() {
             // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
             gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
             height: "100%",
+            minHeight: 0,
             overflow: "hidden",
           }}
         >
@@ -1200,15 +933,14 @@ function App() {
               width: "100%",
               height: "100%",
               minWidth: 0,
-              padding: "12px",
               boxSizing: "border-box",
               display: "flex",
               flexDirection: "column",
-              gap: "12px",
+              background: `radial-gradient(ellipse at 50% 45%, ${colors.stageGlow} 0%, ${colors.bg} 70%)`,
             }}
           >
-            {/* 上：3D */}
-            <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+            {/* 上：3D（ツールバーはプロットの上に浮かべる。ボタン以外の領域はそのまま操作できる） */}
+            <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
               <div ref={plotRef} style={{ width: "100%", height: "100%", position: "relative" }}>
                 {!showPlot && (
                   <div
@@ -1216,15 +948,35 @@ function App() {
                       position: "absolute",
                       inset: 0,
                       display: "flex",
+                      flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#ffffff",
-                      fontSize: "15px",
+                      gap: "14px",
+                      color: colors.textMuted,
+                      textAlign: "center",
                     }}
                   >
-                    右側のボタンから3次元形状の
-                    <br />
-                    計測・表示を開始してください。
+                    <svg
+                      width="44"
+                      height="44"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={colors.textDim}
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 2 3 7v10l9 5 9-5V7z" />
+                      <path d="M3 7l9 5 9-5M12 12v10" />
+                    </svg>
+                    <div style={{ fontSize: "15px", fontWeight: 500, color: colors.text }}>
+                      3次元形状はまだありません
+                    </div>
+                    <div style={{ fontSize: "12.5px", lineHeight: 1.7 }}>
+                      右側のパネルから計測を開始するか、
+                      <br />
+                      CSV・マスクを読み込んでください。
+                    </div>
                   </div>
                 )}
 
@@ -1271,7 +1023,7 @@ function App() {
                       justifyContent: "center",
                       color: colors.text,
                       fontSize: "15px",
-                      backgroundColor: "rgba(45, 49, 57, 0.85)",
+                      backgroundColor: "rgba(11, 14, 19, 0.82)",
                       pointerEvents: "none",
                       textAlign: "center",
                       lineHeight: 1.6,
@@ -1311,11 +1063,199 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {/* 表示情報のチップ（左下） */}
+              {showPlot && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "12px",
+                    bottom: "12px",
+                    zIndex: 20,
+                    display: "flex",
+                    gap: "6px",
+                    pointerEvents: "none",
+                  }}
+                >
+                  {chip(
+                    <>
+                      {plotType === "surface" ? "Surface" : "Point Cloud"} ·{" "}
+                      {chipValue(engineLabel)}
+                    </>
+                  )}
+                  {chip(<>掃引 {chipValue(sweepInterval ? `${sweepInterval} µm` : "—")}</>)}
+                  {chip(
+                    <>
+                      X {chipValue(umPerPixelX)} · Y {chipValue(`${umPerPixelY} µm/px`)}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* フローティングツールバー（左上） */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "12px",
+                  left: "12px",
+                  zIndex: 20,
+                  display: "flex",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={floatingGroupStyle}>
+                  {(
+                    [
+                      { key: "3D", label: "3D" },
+                      { key: "2D-camera", label: "2D" },
+                    ] as const
+                  ).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      className="tt-hover"
+                      onClick={() => {
+                        setViewMode(key);
+                        if (key === "3D") {
+                          setShowSlice(false);
+                          setDimensionMode(false);
+                        }
+                      }}
+                      style={{ ...segmentButtonStyle(viewMode === key, 30), flex: "none" }}
+                    >
+                      {key === "3D" ? (
+                        <Icon>
+                          <path d="M12 2 3 7v10l9 5 9-5V7z" />
+                          <path d="M3 7l9 5 9-5M12 12v10" />
+                        </Icon>
+                      ) : (
+                        <Icon>
+                          <rect x="4" y="4" width="16" height="16" rx="2" />
+                          <path d="M4 12h16M12 4v16" />
+                        </Icon>
+                      )}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={floatingGroupStyle}>
+                  <button
+                    title="画像保存"
+                    className="tt-hover"
+                    style={iconButtonStyle()}
+                    onClick={handleDownload}
+                  >
+                    <Icon>
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="2" />
+                      <path d="m21 15-5-5L5 21" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="ズームイン"
+                    className="tt-hover"
+                    style={iconButtonStyle()}
+                    onClick={() => handleZoom(0.8)}
+                  >
+                    <Icon>
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m20 20-3.5-3.5M11 8v6M8 11h6" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="ズームアウト"
+                    className="tt-hover"
+                    style={iconButtonStyle()}
+                    onClick={() => handleZoom(1.25)}
+                  >
+                    <Icon>
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m20 20-3.5-3.5M8 11h6" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="パン"
+                    className="tt-hover"
+                    style={iconButtonStyle(dragMode === "pan")}
+                    onClick={() => handleDragMode("pan")}
+                  >
+                    <Icon>
+                      <path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-3a2 2 0 0 0-4 0" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="回転 (Turntable)"
+                    className="tt-hover"
+                    style={iconButtonStyle(dragMode === "turntable")}
+                    onClick={() => handleDragMode("turntable")}
+                  >
+                    <Icon>
+                      <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                      <path d="M21 3v5h-5" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="回転 (Orbital)"
+                    className="tt-hover"
+                    style={iconButtonStyle(dragMode === "orbit")}
+                    onClick={() => handleDragMode("orbit")}
+                  >
+                    <Icon>
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+                    </Icon>
+                  </button>
+                  <button
+                    title="カメラリセット"
+                    className="tt-hover"
+                    style={iconButtonStyle()}
+                    onClick={handleCameraReset}
+                  >
+                    <Icon>
+                      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                      <path d="M3 3v5h5" />
+                    </Icon>
+                  </button>
+                </div>
+              </div>
+
+              {/* サイドパネル表示/非表示（右上） */}
+              <div
+                style={{
+                  ...floatingGroupStyle,
+                  position: "absolute",
+                  top: "12px",
+                  right: "12px",
+                  zIndex: 20,
+                }}
+              >
+                <button
+                  title={
+                    sidePanelVisible ? "操作パネルを隠す（グラフを全幅表示）" : "操作パネルを表示"
+                  }
+                  className="tt-hover"
+                  style={iconButtonStyle()}
+                  onClick={() => setSidePanelVisible((v) => !v)}
+                >
+                  <Icon>
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M15 4v16" />
+                  </Icon>
+                </button>
+              </div>
             </div>
 
             {/* 下：2D 断層グラフ */}
             {showSlice && (
-              <div style={{ height: "260px", flexShrink: 0, position: "relative" }}>
+              <div
+                style={{
+                  height: "260px",
+                  flexShrink: 0,
+                  position: "relative",
+                  borderTop: `1px solid ${colors.border}`,
+                }}
+              >
                 <div ref={sliceRef} style={{ width: "100%", height: "100%" }} />
                 {/* 2点間距離計測の操作（ON/OFFトグル＋クリア） */}
                 <div
@@ -1342,7 +1282,7 @@ function App() {
                         fontFamily,
                         borderRadius: "4px",
                         border: `1px solid ${colors.border}`,
-                        backgroundColor: "rgba(0,0,0,0.5)",
+                        backgroundColor: "rgba(22, 27, 34, 0.86)",
                         color: colors.text,
                         cursor: "pointer",
                         transition: "all 0.15s",
@@ -1359,9 +1299,9 @@ function App() {
                       fontWeight: 600,
                       fontFamily,
                       borderRadius: "4px",
-                      border: `1px solid ${sliceMeasureMode ? "#f59e0b" : colors.border}`,
-                      backgroundColor: sliceMeasureMode ? "#f59e0b" : "rgba(0,0,0,0.5)",
-                      color: sliceMeasureMode ? "#1a2332" : colors.text,
+                      border: `1px solid ${sliceMeasureMode ? colors.primary : colors.borderLight}`,
+                      backgroundColor: sliceMeasureMode ? colors.primary : "rgba(22, 27, 34, 0.86)",
+                      color: sliceMeasureMode ? colors.onPrimary : colors.text,
                       cursor: "pointer",
                       transition: "all 0.15s",
                     }}
@@ -1377,818 +1317,684 @@ function App() {
             )}
           </div>
 
-          {/* 右：サイドパネル */}
+          {/* 右：サイドパネル（タブは上に固定、実行ボタンは下に固定、間だけスクロール） */}
           {sidePanelVisible && (
             <div
               style={{
                 height: "100%",
-                padding: "16px 20px",
+                minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                gap: "16px",
-                backgroundColor: "#2c3e56",
+                backgroundColor: colors.surface,
+                borderLeft: `1px solid ${colors.border}`,
                 boxSizing: "border-box",
-                borderLeft: `1px solid #3a5068`,
-                // 縦解像度が低い環境（Windowsのスケール125%等）では収まらないため
-                // あふれた分だけ縦スクロールできるようにする
-                overflowY: "auto",
               }}
             >
               {/* タブヘッダー */}
-              <div
-                style={{
-                  display: "flex",
-                  borderBottom: `1px solid ${colors.border}`,
-                  marginBottom: "4px",
-                }}
-              >
-                {[
-                  { key: "settings" as const, label: "設定" },
-                  { key: "actions" as const, label: "操作" },
-                  { key: "result" as const, label: "測定結果" },
-                ].map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => setSideTab(key)}
-                    style={{
-                      height: "44px",
-                      padding: "0 16px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      fontFamily,
-                      color: sideTab === key ? colors.primary : colors.textMuted,
-                      borderBottom:
-                        sideTab === key ? `2px solid ${colors.primary}` : "2px solid transparent",
-                      background: "none",
-                      border: "none",
-                      borderBottomWidth: "2px",
-                      borderBottomStyle: "solid",
-                      borderBottomColor: sideTab === key ? colors.primary : "transparent",
-                      cursor: "pointer",
-                      letterSpacing: "0.3px",
-                      transition: "color 0.15s, border-color 0.15s",
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div style={{ padding: "12px 14px 4px" }}>
+                <div style={segmentGroupStyle}>
+                  {[
+                    { key: "settings" as const, label: "設定" },
+                    { key: "actions" as const, label: "操作" },
+                    { key: "result" as const, label: "測定結果" },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      className="tt-hover"
+                      onClick={() => setSideTab(key)}
+                      style={{ ...segmentButtonStyle(sideTab === key, 30), fontSize: "12.5px" }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* 設定タブ */}
-              {sideTab === "settings" && (
-                <SettingsTab
-                  sweepInterval={sweepInterval}
-                  setSweepInterval={setSweepInterval}
-                  umPerPixelXInput={umPerPixelXInput}
-                  setUmPerPixelXInput={setUmPerPixelXInput}
-                  umPerPixelYInput={umPerPixelYInput}
-                  setUmPerPixelYInput={setUmPerPixelYInput}
-                  colorRangeMin={colorRangeMin}
-                  setColorRangeMin={setColorRangeMin}
-                  colorRangeMax={colorRangeMax}
-                  setColorRangeMax={setColorRangeMax}
-                />
-              )}
+              {/* タブ本体（縦解像度が低い環境でも収まるよう、ここだけスクロール） */}
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 16px" }}>
+                {/* 設定タブ */}
+                {sideTab === "settings" && (
+                  <SettingsTab
+                    sweepInterval={sweepInterval}
+                    setSweepInterval={setSweepInterval}
+                    umPerPixelXInput={umPerPixelXInput}
+                    setUmPerPixelXInput={setUmPerPixelXInput}
+                    umPerPixelYInput={umPerPixelYInput}
+                    setUmPerPixelYInput={setUmPerPixelYInput}
+                    colorRangeMin={colorRangeMin}
+                    setColorRangeMin={setColorRangeMin}
+                    colorRangeMax={colorRangeMax}
+                    setColorRangeMax={setColorRangeMax}
+                  />
+                )}
 
-              {/* 操作タブ */}
-              {sideTab === "actions" && (
-                <>
-                  {/* アルゴリズム選択（クリックでポップアップ） */}
-                  <div
-                    onClick={() => setShowAlgorithms(true)}
-                    title="クリックしてアルゴリズムを変更"
-                    style={{
-                      fontSize: "11px",
-                      color: colors.textMuted,
-                      marginBottom: "12px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      userSelect: "none",
-                    }}
-                  >
-                    <span>
-                      アルゴリズム：
-                      <span style={{ color: colors.primary, fontWeight: 600 }}>
-                        {algorithm === "coin"
-                          ? "硬貨"
-                          : algorithm === "coin2"
-                            ? "硬貨(別アプローチ)"
-                            : algorithm === "coin_paper"
-                              ? "論文硬貨"
-                              : algorithm === "tgv"
-                                ? "TGV"
-                                : algorithm === "elec"
-                                  ? "エレキ"
-                                  : algorithm === "medical"
-                                    ? "医療"
-                                    : "半導体"}
-                      </span>
-                    </span>
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                  </div>
-
-                  {/* ボタングリッド（2列） */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                    {/* AIでの結果を表示ボタン */}
-                    <button
-                      disabled={status === "RUNNING" || isLoadingAI}
-                      style={{
-                        ...buttonRunStyle,
-                        ...enabledStateStyle(!(status === "RUNNING" || isLoadingAI)),
-                      }}
-                      onClick={handleShowAIResult}
-                      title="AI推論でマスク画像から3次元形状を再構成して表示する"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="5" cy="6" r="2" />
-                        <circle cx="19" cy="6" r="2" />
-                        <circle cx="5" cy="18" r="2" />
-                        <circle cx="19" cy="18" r="2" />
-                        <circle cx="12" cy="12" r="2.5" />
-                        <line x1="7" y1="7" x2="10" y2="10" />
-                        <line x1="14" y1="10" x2="17" y2="7" />
-                        <line x1="7" y1="17" x2="10" y2="14" />
-                        <line x1="14" y1="14" x2="17" y2="17" />
-                      </svg>
-                      {isLoadingAI ? "読込中..." : "AI計測"}
-                    </button>
-
-                    {/* CSV出力ボタン */}
-                    <button
-                      style={{
-                        ...buttonFileStyle,
-                      }}
-                      onClick={() => {
-                        setConfirmMode("csv");
-                        setShowConfirm(true);
-                      }}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                      CSV出力
-                    </button>
-
-                    {/* 軸トグルボタン */}
-                    <button
-                      disabled={!showPlot}
-                      onClick={() => {
-                        if (!showPlot) return;
-                        setAxisVisible((v) => !v);
-                      }}
-                      style={{
-                        ...buttonToggleStyle(axisVisible, showPlot),
-                      }}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="4" y1="20" x2="4" y2="4" />
-                        <line x1="4" y1="20" x2="20" y2="20" />
-                        <polyline points="4 4 2 6" />
-                        <polyline points="4 4 6 6" />
-                        <polyline points="20 20 18 18" />
-                        <polyline points="20 20 18 22" />
-                      </svg>
-                      {axisVisible ? "軸非表示" : "軸表示"}
-                    </button>
-
-                    {/* 左右反転トグルボタン */}
-                    <button
-                      disabled={!showPlot}
-                      onClick={() => {
-                        if (!showPlot) return;
-                        setFlipX((v) => !v);
-                      }}
-                      style={{
-                        ...buttonToggleStyle(flipX, showPlot),
-                      }}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="7 8 3 12 7 16" />
-                        <polyline points="17 8 21 12 17 16" />
-                        <line x1="3" y1="12" x2="10" y2="12" />
-                        <line x1="14" y1="12" x2="21" y2="12" />
-                        <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
-                      </svg>
-                      {flipX ? "反転: ON" : "左右反転"}
-                    </button>
-
-                    {/* 距離計測ボタン */}
-                    <button
-                      disabled={!showPlot}
-                      onClick={() => {
-                        if (!showPlot) return;
-                        const next = !measureMode;
-                        setMeasureMode(next);
-                        measureStateRef.current = { mode: next, pt1: null, pt2: null };
-                        if (!next) {
-                          setMeasurePt1(null);
-                          setMeasurePt2(null);
-                        }
-                      }}
-                      style={{
-                        ...buttonToggleStyle(measureMode, showPlot),
-                      }}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M2 12h4l1-3h2l2 6h2l1-3h4" />
-                        <circle cx="5" cy="12" r="1.5" fill="currentColor" />
-                        <circle cx="19" cy="12" r="1.5" fill="currentColor" />
-                      </svg>
-                      {measureMode ? "計測: ON" : "距離計測"}
-                    </button>
-
-                    {/* 寸法測定（2D 両矢印ドラッグ）トグルボタン */}
-                    <button
-                      disabled={viewMode !== "2D-camera" || !zData || zData.length === 0}
-                      onClick={() => {
-                        if (viewMode !== "2D-camera" || !zData || zData.length === 0) return;
-                        const next = !dimensionMode;
-                        setDimensionMode(next);
-                        if (next) {
-                          // 競合する他モードを解除
-                          setShowSlice(false);
-                          setMeasureMode(false);
-                          measureStateRef.current = { mode: false, pt1: null, pt2: null };
-                          setMeasurePt1(null);
-                          setMeasurePt2(null);
-                        } else {
-                          setDimReadouts([]);
-                        }
-                      }}
-                      style={{
-                        ...buttonToggleStyle(
-                          dimensionMode,
-                          viewMode === "2D-camera" && !!zData && zData.length > 0
-                        ),
-                      }}
-                      title="2D表示で両矢印をドラッグし、任意2点間の寸法を測る"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="3" y1="12" x2="21" y2="12" />
-                        <polyline points="6 9 3 12 6 15" />
-                        <polyline points="18 9 21 12 18 15" />
-                      </svg>
-                      {dimensionMode ? "寸法: ON" : "寸法測定"}
-                    </button>
-
-                    {/* 寸法読み取り値（線ごと） */}
-                    {dimensionMode && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        <div style={{ display: "flex", gap: "6px" }}>
-                          <button
-                            onClick={addDimLine}
-                            style={{
-                              ...buttonFileStyle,
-                              flex: 1,
-                            }}
-                            title="寸法線をもう1本追加する"
-                          >
-                            ＋ 寸法線を追加
-                          </button>
-                        </div>
-                        {dimReadouts.map((r, idx) => {
-                          const color = DIM_COLORS[idx % DIM_COLORS.length];
-                          return (
-                            <div
-                              key={r.id}
-                              style={{
-                                padding: "8px 10px",
-                                borderRadius: "6px",
-                                backgroundColor: "#0b1f2a",
-                                border: `1px solid ${color}`,
-                                fontSize: "12px",
-                                color: "#e0f2fe",
-                                lineHeight: 1.6,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <div style={{ fontWeight: 600, color }}>
-                                  {dimReadouts.length > 1 ? `${idx + 1}. ` : ""}距離:{" "}
-                                  {r.unit === "µm" && r.dist >= 1000
-                                    ? `${r.dist.toFixed(1)} µm (${(r.dist / 1000).toFixed(3)} mm)`
-                                    : `${r.dist.toFixed(1)} ${r.unit}`}
-                                </div>
-                                <button
-                                  onClick={() => removeDimLine(r.id)}
-                                  style={{
-                                    background: "none",
-                                    border: "none",
-                                    color: "#94a3b8",
-                                    cursor: "pointer",
-                                    fontSize: "14px",
-                                    lineHeight: 1,
-                                    padding: "0 2px",
-                                  }}
-                                  title="この寸法線を削除"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                              <div style={{ color: "#7dd3fc" }}>
-                                ΔX: {r.dx.toFixed(1)} {r.unit} ／ ΔY: {r.dy.toFixed(1)} {r.unit}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div style={{ color: "#5b7a8a", fontSize: "11px" }}>
-                          矢印の端点をドラッグして測りたい2点に合わせてください。Shiftを押しながらドラッグすると水平/垂直に固定できます。数値ボックスはドラッグで自由に移動できます
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 断層 出力/停止 トグルボタン */}
-                    <button
-                      disabled={(!cloud && !zData) || viewMode !== "2D-camera"}
-                      style={{
-                        ...buttonToggleStyle(
-                          showSlice,
-                          !!(cloud || zData) && viewMode === "2D-camera"
-                        ),
-                      }}
-                      onClick={() => {
-                        if ((!cloud && !zData) || viewMode !== "2D-camera") return;
-                        setShowSlice((v) => {
-                          if (!v) {
-                            setSliceLineStart(null);
-                            setSliceLineEnd(null);
-                            // 競合する他モード（寸法測定・距離計測）を解除
-                            setDimensionMode(false);
-                            setDimReadouts([]);
-                            setMeasureMode(false);
-                            measureStateRef.current = { mode: false, pt1: null, pt2: null };
-                            setMeasurePt1(null);
-                            setMeasurePt2(null);
-                          }
-                          return !v;
-                        });
-                      }}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="2" y="6" width="20" height="12" rx="2" />
-                        <line x1="2" y1="12" x2="22" y2="12" />
-                      </svg>
-                      {showSlice ? "断層停止" : "断層出力"}
-                    </button>
-
-                    {/* CSV読み込みボタン */}
-                    <input
-                      ref={csvInputRef}
-                      type="file"
-                      accept=".csv"
-                      style={{ display: "none" }}
-                      onChange={handleImportCSV}
-                    />
-                    <button
-                      style={{
-                        ...buttonFileStyle,
-                      }}
-                      onClick={() => csvInputRef.current?.click()}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
-                      CSV読込
-                    </button>
-
-                    {/* マスク画像読込ボタン */}
-                    <button
-                      disabled={status === "RUNNING" || isLoadingMask}
-                      style={{
-                        ...buttonFileStyle,
-                        ...enabledStateStyle(!(status === "RUNNING" || isLoadingMask)),
-                      }}
-                      onClick={handleLoadMask}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                        <line x1="12" y1="11" x2="12" y2="17" />
-                        <line x1="9" y1="14" x2="15" y2="14" />
-                      </svg>
-                      {isLoadingMask ? "読込中..." : "マスク読込"}
-                    </button>
-
-                    {/* 自動回転トグルボタン（表示中の Surface / 点群をそのまま回す） */}
-                    <button
-                      disabled={!cloud && !zData}
-                      onClick={() => {
-                        if (!cloud && !zData) return;
-                        const next = !autoRotate;
-                        if (next) {
-                          // 3D表示に切り替え、回転と噛み合わない2D系モードを解除
-                          //（Surface/Point Cloud の表示タイプは変えずに今の見た目で回す）
-                          setViewMode("3D");
-                          setShowSlice(false);
-                          setDimensionMode(false);
-                          setDimReadouts([]);
-                        }
-                        setAutoRotate(next);
-                      }}
-                      style={{
-                        ...buttonToggleStyle(autoRotate, !!(cloud || zData)),
-                      }}
-                      title="表示中の3Dグラフ（Surface / 点群）をターンテーブルのように自動回転させる"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21 12a9 9 0 1 1-2.6-6.3" />
-                        <polyline points="21 2 21 6 17 6" />
-                        <ellipse cx="12" cy="12" rx="5" ry="2" />
-                      </svg>
-                      {autoRotate ? "回転停止" : "自動回転"}
-                    </button>
-                  </div>
-
-                  {/* 距離計測結果 */}
-                  {measureMode && (
-                    <div
-                      style={{
-                        padding: "10px",
-                        borderRadius: "6px",
-                        backgroundColor: "#1a2332",
-                        border: `1px solid #3a5068`,
-                        fontSize: "12px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "6px",
-                      }}
-                    >
-                      <div style={{ color: "#d97706", fontWeight: 600, marginBottom: "2px" }}>
-                        距離計測モード
-                      </div>
-                      <div style={{ color: colors.textMuted, fontSize: "11px" }}>
-                        3Dプロット上の2点をクリックしてください
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ color: colors.textMuted }}>点1</span>
-                        <span>
-                          {measurePt1
-                            ? `(${measurePt1.x.toFixed(1)}, ${measurePt1.y.toFixed(1)}, ${measurePt1.z.toFixed(1)})`
-                            : "—"}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ color: colors.textMuted }}>点2</span>
-                        <span>
-                          {measurePt2
-                            ? `(${measurePt2.x.toFixed(1)}, ${measurePt2.y.toFixed(1)}, ${measurePt2.z.toFixed(1)})`
-                            : "—"}
-                        </span>
-                      </div>
-                      {measurePt1 && measurePt2 && (
-                        <>
-                          <div
-                            style={{
-                              color: colors.textMuted,
-                              fontSize: "11px",
-                              borderTop: `1px solid #3a5068`,
-                              paddingTop: "6px",
-                            }}
-                          >
-                            距離はグラフ上（計測線の中点）に表示されます
-                          </div>
-                          <button
-                            onClick={() => {
-                              measureStateRef.current = { mode: true, pt1: null, pt2: null };
-                              setMeasurePt1(null);
-                              setMeasurePt2(null);
-                            }}
-                            style={{
-                              marginTop: "6px",
-                              padding: "6px 0",
-                              borderRadius: "4px",
-                              border: `1px solid #3a5068`,
-                              backgroundColor: "transparent",
-                              color: colors.textMuted,
-                              fontSize: "11px",
-                              cursor: "pointer",
-                              transition: "all 0.15s",
-                            }}
-                          >
-                            再計測
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 表示タイプ切替（Surface / Point Cloud） */}
-                  {showPlot && zData && zData.length > 0 && (
-                    <>
-                      <div
-                        style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "6px" }}
-                      >
-                        描画モード
-                      </div>
-                      <div
+                {/* 操作タブ */}
+                {sideTab === "actions" && (
+                  <>
+                    {/* 計測 */}
+                    <section style={panelSectionStyle}>
+                      <h3 style={sectionTitleStyle}>計測</h3>
+                      {/* アルゴリズム選択（クリックでポップアップ） */}
+                      <button
+                        className="tt-hover"
+                        onClick={() => setShowAlgorithms(true)}
+                        title="クリックしてアルゴリズムを変更"
                         style={{
-                          display: "flex",
-                          gap: "4px",
+                          ...buttonSecondaryStyle,
+                          width: "100%",
+                          height: "40px",
+                          justifyContent: "flex-start",
+                          gap: "10px",
                         }}
                       >
-                        {(["surface", "scatter3d"] as const).map((pt) => (
+                        <span style={{ color: colors.textMuted, fontSize: "12px" }}>
+                          アルゴリズム
+                        </span>
+                        <span style={{ fontWeight: 500 }}>{algorithmLabel}</span>
+                        <span
+                          style={{ marginLeft: "auto", color: colors.textDim, display: "flex" }}
+                        >
+                          <Icon size={14}>
+                            <polyline points="9 18 15 12 9 6" />
+                          </Icon>
+                        </span>
+                      </button>
+
+                      {/* CPU / GPU の選択と計測開始 */}
+                      <div style={{ ...segmentGroupStyle, marginTop: "8px" }}>
+                        {([false, true] as const).map((gpu) => (
                           <button
-                            key={pt}
-                            onClick={() => setPlotType(pt)}
+                            key={gpu ? "gpu" : "cpu"}
+                            className="tt-hover"
+                            disabled={status === "RUNNING"}
+                            onClick={() => setUseGpu(gpu)}
                             style={{
-                              flex: 1,
-                              height: "32px",
-                              borderRadius: "6px",
-                              border: `1px solid ${plotType === pt ? colors.primary : colors.border}`,
-                              backgroundColor:
-                                plotType === pt ? colors.primary + "22" : "transparent",
-                              color: plotType === pt ? colors.primary : colors.textMuted,
-                              fontSize: "12px",
-                              fontWeight: plotType === pt ? 600 : 400,
-                              fontFamily: fontFamily,
-                              cursor: "pointer",
+                              ...segmentButtonStyle(useGpu === gpu),
+                              fontFamily: monoFont,
+                              ...enabledStateStyle(status !== "RUNNING"),
                             }}
                           >
-                            {pt === "surface" ? "Surface" : "Point Cloud"}
+                            {gpu ? "GPU" : "CPU"}
                           </button>
                         ))}
                       </div>
+                      <button
+                        className="tt-hover-strong"
+                        disabled={status === "RUNNING"}
+                        style={{
+                          ...buttonPrimaryStyle,
+                          width: "100%",
+                          marginTop: "8px",
+                          ...(status === "RUNNING"
+                            ? {
+                                backgroundColor: colors.secondary,
+                                color: colors.textMuted,
+                                boxShadow: "none",
+                                cursor: "not-allowed",
+                              }
+                            : {}),
+                        }}
+                        onClick={() => {
+                          setConfirmMode("plot");
+                          setShowConfirm(true);
+                        }}
+                      >
+                        {status === "RUNNING" ? (
+                          "処理中..."
+                        ) : (
+                          <>
+                            <Icon size={14} color="currentColor">
+                              <path d="M7 5v14l11-7z" fill="currentColor" stroke="none" />
+                            </Icon>
+                            計測開始
+                          </>
+                        )}
+                      </button>
 
-                      {/* Surface エンジン切替（Surface のときのみ） */}
-                      {plotType === "surface" && (
-                        <>
+                      {/* AI推論で表示 */}
+                      <button
+                        className="tt-hover"
+                        disabled={status === "RUNNING" || isLoadingAI}
+                        style={{
+                          ...buttonSecondaryStyle,
+                          width: "100%",
+                          marginTop: "8px",
+                          ...enabledStateStyle(!(status === "RUNNING" || isLoadingAI)),
+                        }}
+                        onClick={handleShowAIResult}
+                        title="AI推論でマスク画像から3次元形状を再構成して表示する"
+                      >
+                        <span style={{ color: colors.primary, display: "flex" }}>
+                          <Icon>
+                            <circle cx="5" cy="6" r="2" />
+                            <circle cx="19" cy="6" r="2" />
+                            <circle cx="5" cy="18" r="2" />
+                            <circle cx="19" cy="18" r="2" />
+                            <circle cx="12" cy="12" r="2.5" />
+                            <line x1="7" y1="7" x2="10" y2="10" />
+                            <line x1="14" y1="10" x2="17" y2="7" />
+                            <line x1="7" y1="17" x2="10" y2="14" />
+                            <line x1="14" y1="14" x2="17" y2="17" />
+                          </Icon>
+                        </span>
+                        {isLoadingAI ? "読込中..." : "AI計測"}
+                      </button>
+                    </section>
+
+                    {/* ファイル */}
+                    <section style={panelSectionStyle}>
+                      <h3 style={sectionTitleStyle}>ファイル</h3>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(3, 1fr)",
+                          gap: "6px",
+                        }}
+                      >
+                        <input
+                          ref={csvInputRef}
+                          type="file"
+                          accept=".csv"
+                          style={{ display: "none" }}
+                          onChange={handleImportCSV}
+                        />
+                        <button
+                          className="tt-hover"
+                          style={buttonFileStyle}
+                          onClick={() => csvInputRef.current?.click()}
+                        >
+                          <Icon size={15} color={colors.textMuted}>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                          </Icon>
+                          CSV読込
+                        </button>
+                        <button
+                          className="tt-hover"
+                          disabled={status === "RUNNING" || isLoadingMask}
+                          style={{
+                            ...buttonFileStyle,
+                            ...enabledStateStyle(!(status === "RUNNING" || isLoadingMask)),
+                          }}
+                          onClick={handleLoadMask}
+                        >
+                          <Icon size={15} color={colors.textMuted}>
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                            <line x1="12" y1="11" x2="12" y2="17" />
+                            <line x1="9" y1="14" x2="15" y2="14" />
+                          </Icon>
+                          {isLoadingMask ? "読込中..." : "マスク"}
+                        </button>
+                        <button
+                          className="tt-hover"
+                          style={buttonFileStyle}
+                          onClick={() => {
+                            setConfirmMode("csv");
+                            setShowConfirm(true);
+                          }}
+                        >
+                          <Icon size={15} color={colors.textMuted}>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </Icon>
+                          CSV出力
+                        </button>
+                      </div>
+                    </section>
+
+                    {/* 表示 */}
+                    <section style={panelSectionStyle}>
+                      <h3 style={sectionTitleStyle}>表示</h3>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(3, 1fr)",
+                          gap: "6px",
+                        }}
+                      >
+                        {/* 軸 */}
+                        <button
+                          className="tt-hover"
+                          disabled={!showPlot}
+                          onClick={() => {
+                            if (!showPlot) return;
+                            setAxisVisible((v) => !v);
+                          }}
+                          style={toolButtonStyle(axisVisible, showPlot)}
+                          title={axisVisible ? "軸を非表示にする" : "軸を表示する"}
+                        >
+                          <Icon size={18}>
+                            <line x1="4" y1="20" x2="4" y2="4" />
+                            <line x1="4" y1="20" x2="20" y2="20" />
+                            <polyline points="4 4 2 6" />
+                            <polyline points="4 4 6 6" />
+                            <polyline points="20 20 18 18" />
+                            <polyline points="20 20 18 22" />
+                          </Icon>
+                          軸
+                        </button>
+
+                        {/* 左右反転 */}
+                        <button
+                          className="tt-hover"
+                          disabled={!showPlot}
+                          onClick={() => {
+                            if (!showPlot) return;
+                            setFlipX((v) => !v);
+                          }}
+                          style={toolButtonStyle(flipX, showPlot)}
+                        >
+                          <Icon size={18}>
+                            <polyline points="7 8 3 12 7 16" />
+                            <polyline points="17 8 21 12 17 16" />
+                            <line x1="3" y1="12" x2="10" y2="12" />
+                            <line x1="14" y1="12" x2="21" y2="12" />
+                            <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
+                          </Icon>
+                          左右反転
+                        </button>
+
+                        {/* 自動回転（表示中の Surface / 点群をそのまま回す） */}
+                        <button
+                          className="tt-hover"
+                          disabled={!cloud && !zData}
+                          onClick={() => {
+                            if (!cloud && !zData) return;
+                            const next = !autoRotate;
+                            if (next) {
+                              // 3D表示に切り替え、回転と噛み合わない2D系モードを解除
+                              //（Surface/Point Cloud の表示タイプは変えずに今の見た目で回す）
+                              setViewMode("3D");
+                              setShowSlice(false);
+                              setDimensionMode(false);
+                              setDimReadouts([]);
+                            }
+                            setAutoRotate(next);
+                          }}
+                          style={toolButtonStyle(autoRotate, !!(cloud || zData))}
+                          title="表示中の3Dグラフ（Surface / 点群）をターンテーブルのように自動回転させる"
+                        >
+                          <Icon size={18}>
+                            <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+                            <polyline points="21 2 21 6 17 6" />
+                            <ellipse cx="12" cy="12" rx="5" ry="2" />
+                          </Icon>
+                          自動回転
+                        </button>
+                      </div>
+
+                      {/* 表示タイプ・エンジン切替 */}
+                      {showPlot && zData && zData.length > 0 && (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "10px",
+                            marginTop: "14px",
+                          }}
+                        >
+                          <div style={settingRowStyle}>
+                            <span style={rowLabelStyle}>描画モード</span>
+                            <div style={{ ...segmentGroupStyle, width: "190px" }}>
+                              {(["surface", "scatter3d"] as const).map((pt) => (
+                                <button
+                                  key={pt}
+                                  className="tt-hover"
+                                  onClick={() => setPlotType(pt)}
+                                  style={segmentButtonStyle(plotType === pt)}
+                                >
+                                  {pt === "surface" ? "Surface" : "Point Cloud"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Surface エンジン切替（Surface のときのみ） */}
+                          {plotType === "surface" && (
+                            <div style={settingRowStyle}>
+                              <span style={rowLabelStyle}>エンジン</span>
+                              <div style={{ ...segmentGroupStyle, width: "190px" }}>
+                                {(["plotly", "three"] as const).map((eng) => (
+                                  <button
+                                    key={eng}
+                                    className="tt-hover"
+                                    onClick={() => setSurfaceEngine(eng)}
+                                    style={segmentButtonStyle(surfaceEngine === eng)}
+                                  >
+                                    {eng === "plotly" ? "Plotly" : "three.js"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 点群エンジン切替（Point Cloud のときのみ） */}
+                          {plotType === "scatter3d" && (
+                            <div style={settingRowStyle}>
+                              <span style={rowLabelStyle}>エンジン</span>
+                              <div style={{ ...segmentGroupStyle, width: "190px" }}>
+                                {(["plotly", "three"] as const).map((eng) => (
+                                  <button
+                                    key={eng}
+                                    className="tt-hover"
+                                    onClick={() => setPointEngine(eng)}
+                                    style={segmentButtonStyle(pointEngine === eng)}
+                                    title={
+                                      eng === "plotly" ? "最大12万点" : "高密度（最大100万点以上）"
+                                    }
+                                  >
+                                    {eng === "plotly" ? "Plotly" : "three.js"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    {/* 計測ツール */}
+                    <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
+                      <h3 style={sectionTitleStyle}>計測ツール</h3>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(3, 1fr)",
+                          gap: "6px",
+                        }}
+                      >
+                        {/* 距離計測 */}
+                        <button
+                          className="tt-hover"
+                          disabled={!showPlot}
+                          onClick={() => {
+                            if (!showPlot) return;
+                            const next = !measureMode;
+                            setMeasureMode(next);
+                            measureStateRef.current = { mode: next, pt1: null, pt2: null };
+                            if (!next) {
+                              setMeasurePt1(null);
+                              setMeasurePt2(null);
+                            }
+                          }}
+                          style={toolButtonStyle(measureMode, showPlot)}
+                        >
+                          <Icon size={18}>
+                            <path d="M2 12h4l1-3h2l2 6h2l1-3h4" />
+                            <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+                            <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+                          </Icon>
+                          距離
+                        </button>
+
+                        {/* 寸法測定（2D 両矢印ドラッグ） */}
+                        <button
+                          className="tt-hover"
+                          disabled={viewMode !== "2D-camera" || !zData || zData.length === 0}
+                          onClick={() => {
+                            if (viewMode !== "2D-camera" || !zData || zData.length === 0) return;
+                            const next = !dimensionMode;
+                            setDimensionMode(next);
+                            if (next) {
+                              // 競合する他モードを解除
+                              setShowSlice(false);
+                              setMeasureMode(false);
+                              measureStateRef.current = { mode: false, pt1: null, pt2: null };
+                              setMeasurePt1(null);
+                              setMeasurePt2(null);
+                            } else {
+                              setDimReadouts([]);
+                            }
+                          }}
+                          style={toolButtonStyle(
+                            dimensionMode,
+                            viewMode === "2D-camera" && !!zData && zData.length > 0
+                          )}
+                          title="2D表示で両矢印をドラッグし、任意2点間の寸法を測る"
+                        >
+                          <Icon size={18}>
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                            <polyline points="6 9 3 12 6 15" />
+                            <polyline points="18 9 21 12 18 15" />
+                          </Icon>
+                          寸法
+                        </button>
+
+                        {/* 断層 出力/停止 */}
+                        <button
+                          className="tt-hover"
+                          disabled={(!cloud && !zData) || viewMode !== "2D-camera"}
+                          style={toolButtonStyle(
+                            showSlice,
+                            !!(cloud || zData) && viewMode === "2D-camera"
+                          )}
+                          onClick={() => {
+                            if ((!cloud && !zData) || viewMode !== "2D-camera") return;
+                            setShowSlice((v) => {
+                              if (!v) {
+                                setSliceLineStart(null);
+                                setSliceLineEnd(null);
+                                // 競合する他モード（寸法測定・距離計測）を解除
+                                setDimensionMode(false);
+                                setDimReadouts([]);
+                                setMeasureMode(false);
+                                measureStateRef.current = { mode: false, pt1: null, pt2: null };
+                                setMeasurePt1(null);
+                                setMeasurePt2(null);
+                              }
+                              return !v;
+                            });
+                          }}
+                          title={showSlice ? "断層グラフを閉じる" : "2D表示で断層グラフを出す"}
+                        >
+                          <Icon size={18}>
+                            <rect x="2" y="6" width="20" height="12" rx="2" />
+                            <line x1="2" y1="12" x2="22" y2="12" />
+                          </Icon>
+                          断層
+                        </button>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "8px",
+                          marginTop: "10px",
+                        }}
+                      >
+                        {/* 寸法読み取り値（線ごと） */}
+                        {dimensionMode && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button
+                                onClick={addDimLine}
+                                style={{
+                                  ...buttonFileStyle,
+                                  flex: 1,
+                                }}
+                                title="寸法線をもう1本追加する"
+                              >
+                                ＋ 寸法線を追加
+                              </button>
+                            </div>
+                            {dimReadouts.map((r, idx) => {
+                              const color = DIM_COLORS[idx % DIM_COLORS.length];
+                              return (
+                                <div
+                                  key={r.id}
+                                  style={{
+                                    padding: "8px 10px",
+                                    borderRadius: "8px",
+                                    backgroundColor: colors.bgDark,
+                                    border: `1px solid ${color}`,
+                                    fontSize: "12px",
+                                    color: colors.text,
+                                    lineHeight: 1.6,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 600, color }}>
+                                      {dimReadouts.length > 1 ? `${idx + 1}. ` : ""}距離:{" "}
+                                      {r.unit === "µm" && r.dist >= 1000
+                                        ? `${r.dist.toFixed(1)} µm (${(r.dist / 1000).toFixed(3)} mm)`
+                                        : `${r.dist.toFixed(1)} ${r.unit}`}
+                                    </div>
+                                    <button
+                                      onClick={() => removeDimLine(r.id)}
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: colors.textDim,
+                                        cursor: "pointer",
+                                        fontSize: "14px",
+                                        lineHeight: 1,
+                                        padding: "0 2px",
+                                      }}
+                                      title="この寸法線を削除"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                  <div style={{ color: colors.textMuted }}>
+                                    ΔX: {r.dx.toFixed(1)} {r.unit} ／ ΔY: {r.dy.toFixed(1)} {r.unit}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            <div style={{ color: colors.textDim, fontSize: "11px" }}>
+                              矢印の端点をドラッグして測りたい2点に合わせてください。Shiftを押しながらドラッグすると水平/垂直に固定できます。数値ボックスはドラッグで自由に移動できます
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 距離計測結果 */}
+                        {measureMode && (
                           <div
                             style={{
-                              fontSize: "11px",
-                              color: colors.textMuted,
-                              margin: "10px 0 6px",
+                              padding: "10px",
+                              borderRadius: "8px",
+                              backgroundColor: colors.bgDark,
+                              border: `1px solid ${colors.border}`,
+                              fontSize: "12px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "6px",
                             }}
                           >
-                            Surface エンジン
+                            <div
+                              style={{
+                                color: colors.primary,
+                                fontWeight: 600,
+                                marginBottom: "2px",
+                              }}
+                            >
+                              距離計測モード
+                            </div>
+                            <div style={{ color: colors.textMuted, fontSize: "11px" }}>
+                              3Dプロット上の2点をクリックしてください
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: colors.textMuted }}>点1</span>
+                              <span>
+                                {measurePt1
+                                  ? `(${measurePt1.x.toFixed(1)}, ${measurePt1.y.toFixed(1)}, ${measurePt1.z.toFixed(1)})`
+                                  : "—"}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: colors.textMuted }}>点2</span>
+                              <span>
+                                {measurePt2
+                                  ? `(${measurePt2.x.toFixed(1)}, ${measurePt2.y.toFixed(1)}, ${measurePt2.z.toFixed(1)})`
+                                  : "—"}
+                              </span>
+                            </div>
+                            {measurePt1 && measurePt2 && (
+                              <>
+                                <div
+                                  style={{
+                                    color: colors.textMuted,
+                                    fontSize: "11px",
+                                    borderTop: `1px solid ${colors.border}`,
+                                    paddingTop: "6px",
+                                  }}
+                                >
+                                  距離はグラフ上（計測線の中点）に表示されます
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    measureStateRef.current = { mode: true, pt1: null, pt2: null };
+                                    setMeasurePt1(null);
+                                    setMeasurePt2(null);
+                                  }}
+                                  style={{
+                                    marginTop: "6px",
+                                    padding: "6px 0",
+                                    borderRadius: "4px",
+                                    border: `1px solid ${colors.border}`,
+                                    backgroundColor: "transparent",
+                                    color: colors.textMuted,
+                                    fontSize: "11px",
+                                    cursor: "pointer",
+                                    transition: "all 0.15s",
+                                  }}
+                                >
+                                  再計測
+                                </button>
+                              </>
+                            )}
                           </div>
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            {(["plotly", "three"] as const).map((eng) => (
-                              <button
-                                key={eng}
-                                onClick={() => setSurfaceEngine(eng)}
-                                style={{
-                                  flex: 1,
-                                  height: "32px",
-                                  borderRadius: "6px",
-                                  border: `1px solid ${surfaceEngine === eng ? colors.primary : colors.border}`,
-                                  backgroundColor:
-                                    surfaceEngine === eng ? colors.primary + "22" : "transparent",
-                                  color: surfaceEngine === eng ? colors.primary : colors.textMuted,
-                                  fontSize: "12px",
-                                  fontWeight: surfaceEngine === eng ? 600 : 400,
-                                  fontFamily: fontFamily,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {eng === "plotly" ? "Plotly" : "three.js メッシュ"}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
+                        )}
+                      </div>
+                    </section>
+                  </>
+                )}
 
-                      {/* 点群エンジン切替（Point Cloud のときのみ） */}
-                      {plotType === "scatter3d" && (
-                        <>
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: colors.textMuted,
-                              margin: "10px 0 6px",
-                            }}
-                          >
-                            点群エンジン
-                          </div>
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            {(["plotly", "three"] as const).map((eng) => (
-                              <button
-                                key={eng}
-                                onClick={() => setPointEngine(eng)}
-                                style={{
-                                  flex: 1,
-                                  height: "32px",
-                                  borderRadius: "6px",
-                                  border: `1px solid ${pointEngine === eng ? colors.primary : colors.border}`,
-                                  backgroundColor:
-                                    pointEngine === eng ? colors.primary + "22" : "transparent",
-                                  color: pointEngine === eng ? colors.primary : colors.textMuted,
-                                  fontSize: "12px",
-                                  fontWeight: pointEngine === eng ? 600 : 400,
-                                  fontFamily: fontFamily,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {eng === "plotly" ? "Plotly (12万点)" : "three.js (高密度)"}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
+                {/* 測定結果タブ */}
+                {sideTab === "result" && (
+                  <ResultTab
+                    cloud={cloud}
+                    viewMode={viewMode}
+                    history={cloudHistory}
+                    editingNameIdx={editingNameIdx}
+                    setEditingNameIdx={setEditingNameIdx}
+                    editingNameValue={editingNameValue}
+                    setEditingNameValue={setEditingNameValue}
+                    renameEntry={renameEntry}
+                    setDeleteConfirmIdx={setDeleteConfirmIdx}
+                    onRestore={(c) => {
+                      setShowSlice(false);
+                      setCloud(c);
+                      setShowPlot(true);
+                    }}
+                  />
+                )}
+              </div>
 
-              {/* 測定結果タブ */}
-              {sideTab === "result" && (
-                <ResultTab
-                  cloud={cloud}
-                  viewMode={viewMode}
-                  history={cloudHistory}
-                  editingNameIdx={editingNameIdx}
-                  setEditingNameIdx={setEditingNameIdx}
-                  editingNameValue={editingNameValue}
-                  setEditingNameValue={setEditingNameValue}
-                  renameEntry={renameEntry}
-                  setDeleteConfirmIdx={setDeleteConfirmIdx}
-                  onRestore={(c) => {
-                    setShowSlice(false);
-                    setCloud(c);
-                    setShowPlot(true);
-                  }}
-                />
-              )}
-
-              <div style={{ flexGrow: 1 }} />
-
-              {/* 処理経過時間 / 処理時間 */}
-              {(status === "RUNNING" || status === "COMPLETE") && (
+              {/* 処理時間（タブに関係なく常時表示） */}
+              <div style={{ padding: "10px 16px", borderTop: `1px solid ${colors.border}` }}>
                 <div
                   style={{
-                    textAlign: "center",
-                    fontSize: "13px",
-                    color: colors.text,
-                    opacity: 0.85,
-                    marginBottom: "6px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "11.5px",
+                    color: colors.textDim,
                   }}
                 >
-                  {status === "RUNNING" ? "経過時間" : "処理時間"}: {formatElapsed(elapsedMs)}
+                  <span>{status === "RUNNING" ? "経過時間" : "処理時間"}</span>
+                  <span style={{ fontFamily: monoFont, color: colors.textMuted }}>
+                    {formatElapsed(elapsedMs)}
+                  </span>
                 </div>
-              )}
-
-              {/* STARTボタン（CPU/GPU）- タブ外で常時表示 */}
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  disabled={status === "RUNNING"}
-                  style={{
-                    ...buttonPrimaryStyle,
-                    flex: 1,
-                    height: "56px",
-                    fontSize: "16px",
-                    backgroundColor: status === "RUNNING" ? colors.secondary : colors.primary,
-                    cursor: status === "RUNNING" ? "not-allowed" : "pointer",
-                    opacity: status === "RUNNING" ? 0.7 : 1,
-                  }}
-                  onClick={() => {
-                    setUseGpu(false);
-                    setConfirmMode("plot");
-                    setShowConfirm(true);
-                  }}
-                >
-                  {status === "RUNNING" ? (
-                    "処理中..."
-                  ) : (
-                    <>
-                      <span style={{ fontSize: "40px", lineHeight: 1 }}>▶</span> CPU
-                    </>
-                  )}
-                </button>
-                <button
-                  disabled={status === "RUNNING"}
-                  style={{
-                    ...buttonPrimaryStyle,
-                    flex: 1,
-                    height: "56px",
-                    fontSize: "16px",
-                    backgroundColor: status === "RUNNING" ? colors.secondary : colors.primary,
-                    cursor: status === "RUNNING" ? "not-allowed" : "pointer",
-                    opacity: status === "RUNNING" ? 0.7 : 1,
-                  }}
-                  onClick={() => {
-                    setUseGpu(true);
-                    setConfirmMode("plot");
-                    setShowConfirm(true);
-                  }}
-                >
-                  {status === "RUNNING" ? (
-                    "処理中..."
-                  ) : (
-                    <>
-                      <span style={{ fontSize: "40px", lineHeight: 1 }}>▶</span> GPU
-                    </>
-                  )}
-                </button>
               </div>
             </div>
           )}
@@ -2197,32 +2003,13 @@ function App() {
 
       {/* アルゴリズム選択ポップアップ */}
       {showAlgorithms && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setShowAlgorithms(false)}
-        >
-          <div
-            style={{
-              width: "360px",
-              backgroundColor: colors.bgLight,
-              borderRadius: "10px",
-              padding: "20px 24px",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-              boxSizing: "border-box",
-              border: `1px solid ${colors.border}`,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: "15px", fontWeight: 500, marginBottom: "16px" }}>
+        <div style={modalOverlayStyle} onClick={() => setShowAlgorithms(false)}>
+          <div style={{ ...modalCardStyle, width: "380px" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: "15px", fontWeight: 600, marginBottom: "4px" }}>
               アルゴリズムを選択
+            </div>
+            <div style={{ fontSize: "12px", color: colors.textDim, marginBottom: "16px" }}>
+              現在は「硬貨」「論文硬貨」が選択できます
             </div>
             <div
               style={{
@@ -2302,22 +2089,22 @@ function App() {
                       }}
                       disabled={disabled}
                       title={disabled ? "現在は「硬貨」のみ選択可能です" : ""}
+                      className="tt-hover"
                       style={{
                         height: "44px",
-                        borderRadius: "6px",
-                        border: `1px solid ${algorithm === alg ? colors.primary : colors.border}`,
-                        backgroundColor: algorithm === alg ? colors.primary + "22" : "transparent",
-                        color: algorithm === alg ? colors.primary : colors.textMuted,
-                        fontSize: "11px",
-                        fontWeight: algorithm === alg ? 600 : 400,
+                        borderRadius: "8px",
+                        border: `1px solid ${algorithm === alg ? colors.primary + "80" : colors.border}`,
+                        backgroundColor: algorithm === alg ? colors.primarySoft : "transparent",
+                        color: algorithm === alg ? colors.primary : colors.text,
+                        fontSize: "12px",
+                        fontWeight: algorithm === alg ? 600 : 500,
                         fontFamily: fontFamily,
                         cursor: disabled ? "not-allowed" : "pointer",
-                        opacity: disabled ? 0.4 : 1,
-                        transition: "all 0.15s",
+                        opacity: disabled ? 0.45 : 1,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
+                        gap: "6px",
                       }}
                     >
                       <svg
@@ -2338,21 +2125,10 @@ function App() {
                 }
               )}
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "18px" }}>
               <button
-                style={{
-                  height: "44px",
-                  padding: "0 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  backgroundColor: colors.secondary,
-                  color: colors.text,
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  fontFamily: fontFamily,
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
+                className="tt-hover"
+                style={modalButtonStyle("neutral")}
                 onClick={() => setShowAlgorithms(false)}
               >
                 閉じる
@@ -2364,28 +2140,8 @@ function App() {
 
       {/* 確認モーダル */}
       {showConfirm && confirmMode && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              width: "320px",
-              backgroundColor: colors.bgLight,
-              borderRadius: "10px",
-              padding: "20px 24px",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-              boxSizing: "border-box",
-              border: `1px solid ${colors.border}`,
-            }}
-          >
+        <div style={modalOverlayStyle}>
+          <div style={{ ...modalCardStyle, width: "340px" }}>
             <div
               style={{
                 fontSize: "15px",
@@ -2414,8 +2170,8 @@ function App() {
                       style={{
                         flex: 1,
                         padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${colors.border}`,
+                        borderRadius: "8px",
+                        border: `1px solid ${colors.borderLight}`,
                         backgroundColor: colors.bgDark,
                         color: colors.text,
                         fontSize: "13px",
@@ -2455,37 +2211,15 @@ function App() {
               }}
             >
               <button
-                style={{
-                  height: "44px",
-                  padding: "0 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  backgroundColor: colors.secondary,
-                  color: colors.text,
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  fontFamily: fontFamily,
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
+                className="tt-hover"
+                style={modalButtonStyle("neutral")}
                 onClick={handleConfirmCancel}
               >
                 いいえ
               </button>
               <button
-                style={{
-                  height: "44px",
-                  padding: "0 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  backgroundColor: colors.primary,
-                  color: colors.text,
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  fontFamily: fontFamily,
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
+                className="tt-hover-strong"
+                style={modalButtonStyle("primary")}
                 onClick={handleConfirmOk}
               >
                 はい
@@ -2496,27 +2230,11 @@ function App() {
       )}
       {deleteConfirmIdx !== null && (
         <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-          }}
+          style={{ ...modalOverlayStyle, zIndex: 10000 }}
           onClick={() => setDeleteConfirmIdx(null)}
         >
           <div
-            style={{
-              backgroundColor: colors.bgLight,
-              border: `1px solid ${colors.border}`,
-              borderRadius: "8px",
-              padding: "24px",
-              minWidth: "280px",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-              textAlign: "center",
-            }}
+            style={{ ...modalCardStyle, minWidth: "300px", textAlign: "center" }}
             onClick={(e) => e.stopPropagation()}
           >
             <p style={{ margin: "0 0 16px", fontSize: "14px", color: colors.text }}>
@@ -2524,33 +2242,15 @@ function App() {
             </p>
             <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
               <button
-                style={{
-                  padding: "6px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  fontFamily,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: "4px",
-                  backgroundColor: "transparent",
-                  color: colors.text,
-                  cursor: "pointer",
-                }}
+                className="tt-hover"
+                style={modalButtonStyle("neutral")}
                 onClick={() => setDeleteConfirmIdx(null)}
               >
                 キャンセル
               </button>
               <button
-                style={{
-                  padding: "6px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  fontFamily,
-                  border: "none",
-                  borderRadius: "4px",
-                  backgroundColor: colors.danger,
-                  color: "#fff",
-                  cursor: "pointer",
-                }}
+                className="tt-hover-strong"
+                style={modalButtonStyle("danger")}
                 onClick={() => {
                   if (deleteConfirmIdx !== null) removeEntry(deleteConfirmIdx);
                   setDeleteConfirmIdx(null);
