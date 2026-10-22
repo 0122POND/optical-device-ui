@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bandOutline, bandSection } from "./bandSection";
+import { bandOutline, bandSection, lineSection } from "./bandSection";
 
 // 10×10 画素・ピッチ 10µm。値 = 列番号（横方向に傾いた面）
 const grid = Array.from({ length: 10 }, () =>
@@ -41,5 +41,28 @@ describe("bandOutline", () => {
     const o = bandOutline({ y: 0, z: 50 }, { y: 90, z: 50 }, 20);
     expect(o.y).toEqual([0, 90, 90, 0, 0]);
     expect(o.z).toEqual([60, 60, 40, 40, 60]);
+  });
+});
+
+describe("lineSection", () => {
+  it("線に沿って双一次補間する（値 = 列番号の面なら、値 = 距離/ピッチ）", () => {
+    const s = lineSection(grid, 10, 10, { y: 0, z: 25 }, { y: 90, z: 25 });
+    expect(s.t.length).toBe(10);
+    s.t.forEach((t, i) => expect(s.v[i]).toBeCloseTo(t / 10, 9));
+  });
+
+  it("斜めの線でも段々にならない（行・列とも補間）", () => {
+    // 値 = 行番号 + 列番号 の面を対角に切る → 値は距離に比例して滑らかに増える
+    const g = Array.from({ length: 10 }, (_, r) => Array.from({ length: 10 }, (_, c) => r + c));
+    const s = lineSection(g, 10, 10, { y: 0, z: 0 }, { y: 90, z: 90 });
+    s.t.forEach((t, i) => expect(s.v[i]).toBeCloseTo((2 * t) / (10 * Math.SQRT2), 9));
+  });
+
+  it("欠損の所は null（線を切る）。周りの一部だけ欠損なら最寄りの画素", () => {
+    const g = grid.map((r) => [...r]);
+    for (let c = 4; c <= 6; c++) g[2][c] = g[3][c] = null;
+    const s = lineSection(g, 10, 10, { y: 0, z: 25 }, { y: 90, z: 25 });
+    expect(s.v[5]).toBeNull();
+    expect(s.v[0]).toBeCloseTo(0);
   });
 });

@@ -158,6 +158,25 @@ export async function updateMeta(meta: HistoryMeta): Promise<void> {
   await done(tx).catch(() => undefined);
 }
 
+export async function clearAll(): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  const tx = db.transaction([META, DATA], "readwrite");
+  tx.objectStore(META).clear();
+  tx.objectStore(DATA).clear();
+  await done(tx).catch(() => undefined);
+}
+
+// このサイトがブラウザに保存している量[バイト]（分からなければ null）
+export async function storageUsage(): Promise<number | null> {
+  try {
+    const e = await navigator.storage?.estimate?.();
+    return e?.usage ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteEntry(id: string): Promise<void> {
   const db = await openDb();
   if (!db) return;

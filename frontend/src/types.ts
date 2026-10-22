@@ -81,3 +81,6 @@ export type CloudHistoryEntry = {
 // n は同じ向きを続けて押しても反映されるよう毎回増やす通し番号
 export type ViewPresetKind = "front" | "side" | "top" | "reset";
 export type ViewPresetRequest = { kind: ViewPresetKind; n: number } | null;
+
+// Plotly 3D のドラッグ操作（パン／ターンテーブル回転／自由回転）
+export type DragMode = "pan" | "turntable" | "orbit";

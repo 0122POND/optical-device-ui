@@ -4,6 +4,7 @@ import Plotly from "plotly.js-dist-min";
 import { DIM_COLORS, FILLED_COLOR, colors, fontFamily, monoFont } from "../utils/constants";
 import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
 import { bandOutline } from "../utils/bandSection";
+import { decimateForDisplay } from "../utils/displayGrid";
 import type { PointCloud } from "../utils/pointCloud";
 import {
   gridScale,
@@ -121,6 +122,14 @@ export function usePlotly(args: {
   const showSliceRef = useRef(showSlice);
   const sliceLineStartRef = useRef(sliceLineStart);
   const sliceLineEndRef = useRef(sliceLineEnd);
+  const sliceBandRef = useRef(sliceBandUm);
+  // 断面線・帯の外形の重ね描き（トレース番号と、断面座標→シーン座標の変換）。メインの描画が作り、
+  // 線や帯の変更は restyle でこの2本だけ書き換える（以前は1点クリックするたびに面や点群を
+  // 丸ごと作り直しており、10円の 1772×1008 で 0.5〜0.7 秒固まっていた）
+  const sliceOverlayRef = useRef<{
+    idx: [number, number];
+    map: (ys: number[], zs: number[]) => { x: number[]; y: number[]; z: number[] };
+  } | null>(null);
   const plotKindRef = useRef<"dim" | "surface" | "points" | null>(null);
   const dimRafRef = useRef<number | null>(null);
   const dimApplyingRef = useRef(false);
@@ -166,6 +175,7 @@ export function usePlotly(args: {
     showSliceRef.current = showSlice;
     sliceLineStartRef.current = sliceLineStart;
     sliceLineEndRef.current = sliceLineEnd;
+    sliceBandRef.current = sliceBandUm;
   });
 
   // アンマウント時にプロットを破棄（再描画ごとの purge はしない＝react で再利用するため）
@@ -210,6 +220,37 @@ export function usePlotly(args: {
 
   useEffect(() => {
     const plotEl = plotRef.current;
+    // 断面線・帯の重ね描きは、この描画で作ったときだけ有効（作らない表示では restyle しない）
+    sliceOverlayRef.current = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pushSliceOverlay = (traces: any[], map: (ys: number[], zs: number[]) => any) => {
+      const [line, outline] = sliceOverlayData(
+        sliceLineStartRef.current,
+        sliceLineEndRef.current,
+        sliceBandRef.current,
+        map
+      );
+      sliceOverlayRef.current = { idx: [traces.length, traces.length + 1], map };
+      traces.push(
+        {
+          type: "scatter3d",
+          mode: "lines+markers",
+          ...line,
+          line: { color: "#ff4444", width: 3 },
+          marker: { size: 5, color: "#ff4444" },
+          showlegend: false,
+          hoverinfo: "skip",
+        },
+        {
+          type: "scatter3d",
+          mode: "lines",
+          ...outline,
+          line: { color: "#ff4444", width: 2, dash: "dash" },
+          showlegend: false,
+          hoverinfo: "skip",
+        }
+      );
+    };
     if (!plotEl) return;
 
     if (!showPlot) {
@@ -651,9 +692,12 @@ export function usePlotly(args: {
       // （以前は「点群があればデバイス由来」と推測しており、CSVでも点群を作るため
       //  CSVの高さに X軸 µm/pix が掛かっていた）
       const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-      const surfXCoords = pg.x;
-      const surfYCoords = pg.y;
-      const surfaceZ = pg.z;
+      // 表示だけ間引く（Plotly の 3D は更新のたびに全セルを計算し直すため。utils/displayGrid）
+      const dg = decimateForDisplay(pg.x, pg.y, pg.z, filledMask);
+      const surfXCoords = dg.x;
+      const surfYCoords = dg.y;
+      const surfaceZ = dg.z;
+      const shownFilled = dg.mask;
       const xLabel = pg.xLabel;
       const yLabel = pg.yLabel;
       const zLabel = pg.zLabel;
@@ -729,17 +773,17 @@ export function usePlotly(args: {
         },
       ];
       // 補間で埋めた画素に点の印を重ねる（多いときは間引いて最大約2万点。形が隠れないよう小さく半透明に）
-      if (filledMask) {
+      if (shownFilled) {
         const fx: number[] = [];
         const fy: number[] = [];
         const fz: number[] = [];
         let nFilled = 0;
-        for (const row of filledMask) for (const f of row) if (f) nFilled++;
+        for (const row of shownFilled) for (const f of row) if (f) nFilled++;
         const stride = Math.max(1, Math.ceil(Math.sqrt(nFilled / 20000)));
-        for (let r = 0; r < filledMask.length; r += stride)
-          for (let c = 0; c < filledMask[r].length; c += stride) {
+        for (let r = 0; r < shownFilled.length; r += stride)
+          for (let c = 0; c < shownFilled[r].length; c += stride) {
             const v = surfaceZ[r]?.[c];
-            if (!filledMask[r][c] || v == null) continue;
+            if (!shownFilled[r][c] || v == null) continue;
             fx.push(surfXCoords[c]);
             fy.push(surfYCoords[r]);
             fz.push(v);
@@ -768,27 +812,43 @@ export function usePlotly(args: {
         paper_bgcolor: "rgba(0,0,0,0)",
         scene: {
           bgcolor: "rgba(0,0,0,0)",
+          // 2D（真上から）は横・縦の2軸だけ出し、高さ軸は色バーで読む（高さ軸を出すと、潰れた箱の
+          // 目盛りと題が図の下に重なって崩れていた）。目盛りの文字は斜めにしない
+          // 2D の縦軸の題は目盛りに重なる（3Dシーンの題は位置をずらせない）ので、横軸の題にまとめる
           xaxis: {
-            title: axisVisible ? { text: xLabel, font: { size: 12, color: colors.textMuted } } : "",
-            visible: viewMode === "3D" && axisVisible,
-            showgrid: viewMode === "3D" && axisVisible,
-            zeroline: viewMode === "3D" && axisVisible,
-            color: colors.textMuted,
-            gridcolor: colors.grid,
-          },
-          yaxis: {
-            title: axisVisible ? { text: yLabel, font: { size: 12, color: colors.textMuted } } : "",
+            title: axisVisible
+              ? {
+                  text:
+                    viewMode === "2D-camera"
+                      ? `${xLabel.replace(/ \[.*\]$/, "")}・${yLabel}`
+                      : xLabel,
+                  font: { size: 12, color: colors.textMuted },
+                }
+              : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
             color: colors.textMuted,
             gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0, nticks: 5 } : {}),
+          },
+          yaxis: {
+            title:
+              axisVisible && viewMode !== "2D-camera"
+                ? { text: yLabel, font: { size: 12, color: colors.textMuted } }
+                : { text: "" }, // "" だと Plotly が軸名「y」を出す
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: colors.textMuted,
+            gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0 } : {}),
           },
           zaxis: {
             title: axisVisible ? { text: zLabel, font: { size: 12, color: colors.textMuted } } : "",
-            visible: axisVisible,
-            showgrid: axisVisible,
-            zeroline: axisVisible,
+            visible: viewMode === "3D" && axisVisible,
+            showgrid: viewMode === "3D" && axisVisible,
+            zeroline: viewMode === "3D" && axisVisible,
             color: colors.textMuted,
             gridcolor: colors.grid,
           },
@@ -809,47 +869,10 @@ export function usePlotly(args: {
         },
       };
 
-      // 2Dモード + 断層表示時、クリックで決めた始点・終点のラインを描画
+      // 2Dモード + 断層表示時、クリックで決めた始点・終点のラインと帯の外形（面より手前に置く）
       if (viewMode === "2D-camera" && showSlice) {
         const frontZ = hMax + hRange * 0.05;
-
-        if (sliceLineStart && sliceLineEnd) {
-          surfData.push({
-            type: "scatter3d",
-            mode: "lines+markers",
-            x: [sliceLineStart.y, sliceLineEnd.y],
-            y: [sliceLineStart.z, sliceLineEnd.z],
-            z: [frontZ, frontZ],
-            line: { color: "#ff4444", width: 3 },
-            marker: { size: 4, color: "#ff4444" },
-            showlegend: false,
-            hoverinfo: "skip",
-          });
-          if (sliceBandUm > 0) {
-            const o = bandOutline(sliceLineStart, sliceLineEnd, sliceBandUm);
-            surfData.push({
-              type: "scatter3d",
-              mode: "lines",
-              x: o.y,
-              y: o.z,
-              z: o.y.map(() => frontZ),
-              line: { color: "#ff4444", width: 2, dash: "dash" },
-              showlegend: false,
-              hoverinfo: "skip",
-            });
-          }
-        } else if (sliceLineStart) {
-          surfData.push({
-            type: "scatter3d",
-            mode: "markers",
-            x: [sliceLineStart.y],
-            y: [sliceLineStart.z],
-            z: [frontZ],
-            marker: { size: 6, color: "#ff4444" },
-            showlegend: false,
-            hoverinfo: "skip",
-          });
-        }
+        pushSliceOverlay(surfData, (ys, zs) => ({ x: ys, y: zs, z: ys.map(() => frontZ) }));
       }
 
       // 距離計測マーカー
@@ -1134,35 +1157,11 @@ export function usePlotly(args: {
       };
     }
 
-    // 2Dモード + 断層表示時、クリックで決めた始点・終点のラインを描画
+    // 2Dモード + 断層表示時、クリックで決めた始点・終点のライン
     // X座標を点群の最大値より手前（カメラ側）に配置して常に前面に表示
     if (viewMode === "2D-camera" && showSlice && cloud) {
       const frontX = xUmMax + (xUmMax - xUmMin) * 0.01;
-
-      if (sliceLineStart && sliceLineEnd) {
-        data.push({
-          type: "scatter3d",
-          mode: "lines+markers",
-          x: [frontX, frontX],
-          y: [sliceLineStart.y, sliceLineEnd.y],
-          z: [sliceLineStart.z, sliceLineEnd.z],
-          line: { color: "#ff4444", width: 3 },
-          marker: { size: 4, color: "#ff4444" },
-          showlegend: false,
-          hoverinfo: "skip",
-        });
-      } else if (sliceLineStart) {
-        data.push({
-          type: "scatter3d",
-          mode: "markers",
-          x: [frontX],
-          y: [sliceLineStart.y],
-          z: [sliceLineStart.z],
-          marker: { size: 6, color: "#ff4444" },
-          showlegend: false,
-          hoverinfo: "skip",
-        });
-      }
+      pushSliceOverlay(data, (ys, zs) => ({ x: ys.map(() => frontX), y: ys, z: zs }));
     }
 
     // 距離計測マーカー
@@ -1270,9 +1269,6 @@ export function usePlotly(args: {
     flipX,
     viewMode,
     showSlice,
-    sliceLineStart,
-    sliceLineEnd,
-    sliceBandUm,
     dataSource,
     scale,
     flipRef,
@@ -1301,4 +1297,38 @@ export function usePlotly(args: {
     setSliceLineStart,
     setSliceLineEnd,
   ]);
+
+  // 断面線・帯の外形の変更は、重ね描きの2本だけ restyle で書き換える（面・点群は作り直さない）
+  useEffect(() => {
+    const el = plotRef.current;
+    const o = sliceOverlayRef.current;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!el || !o || !(el as any).data || (el as any).data.length <= o.idx[1]) return;
+    const [line, outline] = sliceOverlayData(sliceLineStart, sliceLineEnd, sliceBandUm, o.map);
+    markGlCamApplying();
+    Plotly.restyle(
+      el,
+      { x: [line.x, outline.x], y: [line.y, outline.y], z: [line.z, outline.z] },
+      o.idx
+    );
+  }, [sliceLineStart, sliceLineEnd, sliceBandUm, plotRef]);
+}
+
+type SlicePt = { y: number; z: number } | null;
+
+// 断面線（始点だけなら点1つ）と帯の外形を、シーン座標に変換して返す（無いものは空の配列）
+function sliceOverlayData(
+  start: SlicePt,
+  end: SlicePt,
+  bandUm: number,
+  map: (ys: number[], zs: number[]) => { x: number[]; y: number[]; z: number[] }
+) {
+  const pts = [start, end].filter((p): p is { y: number; z: number } => p != null);
+  const line = map(
+    pts.map((p) => p.y),
+    pts.map((p) => p.z)
+  );
+  const o =
+    start && end && bandUm > 0 ? bandOutline(start, end, bandUm) : { y: [] as number[], z: [] };
+  return [line, map(o.y, o.z)] as const;
 }

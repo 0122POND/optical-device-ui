@@ -24,6 +24,7 @@ export function ResultTab({
   flipRef,
   processing,
   history,
+  historyUsage,
   currentHistoryId,
   editingNameIdx,
   setEditingNameIdx,
@@ -45,6 +46,8 @@ export function ResultTab({
   // 表示中データの処理条件と深さの求め方（計測・推論・マスク読込のとき。CSV では null）
   processing: ProcessingInfo;
   history: HistoryItem[];
+  // ブラウザに保存している量[バイト]（分からなければ null）
+  historyUsage: number | null;
   currentHistoryId: string | null;
   editingNameIdx: number | null;
   setEditingNameIdx: (v: number | null) => void;
@@ -106,8 +109,38 @@ export function ResultTab({
       {history.length > 0 && (
         <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
           <h3 style={sectionTitleStyle}>測定履歴（最新{MAX_HISTORY}件）</h3>
-          <div style={{ margin: "-4px 0 10px", fontSize: "11px", color: colors.textDim }}>
-            このブラウザに保存され、再読み込みしても残ります。
+          <div
+            style={{
+              margin: "-4px 0 10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+              fontSize: "11px",
+              color: colors.textDim,
+            }}
+          >
+            <span>
+              このブラウザに保存され、再読み込みしても残ります
+              {historyUsage != null && `（保存量 約 ${(historyUsage / 1e6).toFixed(0)} MB）`}。
+            </span>
+            <button
+              className="tt-hover"
+              onClick={() => setDeleteConfirmIdx(-1)}
+              style={{
+                flexShrink: 0,
+                padding: "3px 8px",
+                fontSize: "11px",
+                fontFamily,
+                border: `1px solid ${colors.border}`,
+                borderRadius: "6px",
+                backgroundColor: "transparent",
+                color: colors.textDim,
+                cursor: "pointer",
+              }}
+            >
+              すべて削除
+            </button>
           </div>
           {(
             [
@@ -265,6 +298,14 @@ export function ResultTab({
                             >
                               {entry.points.toLocaleString()} pts
                             </span>
+                            {entry.saveFailed && (
+                              <span
+                                style={{ fontSize: "10.5px", color: colors.primary }}
+                                title="ブラウザの容量が足りず保存できませんでした。再読み込みすると消えます"
+                              >
+                                未保存（この回だけ）
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div
