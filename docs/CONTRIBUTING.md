@@ -192,7 +192,6 @@ optical-device-ui/
 ├── backend/           # FastAPI バックエンド
 │   ├── app.py
 │   ├── ai_inference.py
-│   ├── depth_inference.py / depth_calibration.py
 │   ├── preprocessing_*.py
 │   ├── models/
 │   └── requirements.txt

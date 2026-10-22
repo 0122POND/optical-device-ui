@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import os
-import random
 import re
 import sys
 import threading
@@ -14,9 +12,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 import depth_export  # サブピクセル深さとメタデータの書き出し（backend/ 内のモジュール）
@@ -148,57 +146,6 @@ app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 
 # -----------------------------
-# Utility: sample data generator
-# -----------------------------
-def generate_coin_data(size: int = 120) -> List[List[Optional[float]]]:
-    z_data: List[List[Optional[float]]] = []
-    for i in range(size):
-        row: List[Optional[float]] = []
-        for j in range(size):
-            x = (i / (size - 1)) * 2 - 1
-            y = (j / (size - 1)) * 2 - 1
-            r = math.sqrt(x * x + y * y)
-
-            if r > 1:
-                row.append(None)
-                continue
-
-            z = 0.0
-            z += 0.1 * (1 - r * r)
-
-            rim_inner, rim_outer = 0.80, 0.95
-            if rim_inner < r < rim_outer:
-                t = (r - rim_inner) / (rim_outer - rim_inner)
-                z += 0.03 * (1 - (2 * t - 1) ** 2)
-
-            z += 0.01 * math.sin(20 * r)
-
-            if z < 0:
-                z = 0.0
-
-            row.append(z)
-        z_data.append(row)
-    return z_data
-
-
-def add_noise(z_data: List[List[Optional[float]]], amplitude: float = 0.1) -> List[List[Optional[float]]]:
-    out: List[List[Optional[float]]] = []
-    for row in z_data:
-        new_row: List[Optional[float]] = []
-        for v in row:
-            if v is None:
-                new_row.append(None)
-            else:
-                n = (random.random() * 2 - 1) * amplitude
-                vv = v + n
-                if vv < 0:
-                    vv = 0.0
-                new_row.append(vv)
-        out.append(new_row)
-    return out
-
-
-# -----------------------------
 # WebSocket endpoint
 # -----------------------------
 @app.websocket("/ws")
@@ -207,34 +154,9 @@ async def ws_endpoint(ws: WebSocket):
     print("WebSocket connected")
 
     is_running = False
-    running_task: Optional[asyncio.Task] = None
     # 切断時にワーカースレッド（AI推論・前処理）を協調的に中断するためのフラグ。
     # 進捗コールバック内で is_set() を確認し、立っていれば WorkerCancelled を送出する。
     cancel_event = threading.Event()
-
-    async def stream_once(params: Dict[str, Any]):
-        size = int(params.get("size", 120))
-        noise = float(params.get("noise", 0.1))
-
-        z = generate_coin_data(size)
-        z = add_noise(z, noise)
-
-        payload = {
-            "type": "result",
-            "zData": z,
-            "meta": {
-                "size": size,
-                "noise": noise,
-            },
-        }
-        await ws.send_text(json.dumps(payload))
-        await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
-
-    async def stream_loop(params: Dict[str, Any]):
-        interval_ms = int(params.get("interval_ms", 200))
-        while True:
-            await stream_once(params)
-            await asyncio.sleep(interval_ms / 1000)
 
     async def run_ai_inference_with_progress(params: Dict[str, Any]):
         """AI推論を実行し、進捗をWebSocketで送信"""
@@ -502,31 +424,6 @@ async def ws_endpoint(ws: WebSocket):
             if cmd == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
 
-            elif cmd == "start":
-                is_running = True
-                await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
-                await stream_once(params)
-                is_running = False
-
-            elif cmd == "start_stream":
-                if running_task and not running_task.done():
-                    await ws.send_text(json.dumps({"type": "info", "message": "Already streaming"}))
-                    continue
-                is_running = True
-                await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
-                running_task = asyncio.create_task(stream_loop(params))
-
-            elif cmd == "stop":
-                if running_task and not running_task.done():
-                    running_task.cancel()
-                    try:
-                        await running_task
-                    except asyncio.CancelledError:
-                        pass
-                running_task = None
-                is_running = False
-                await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
-
             elif cmd == "preprocess":
                 # 画像処理を実行
                 if is_running:
@@ -579,131 +476,6 @@ async def ws_endpoint(ws: WebSocket):
         print("WebSocket disconnected")
         # ワーカースレッド（AI推論・前処理）を次のチェックポイントで中断させる
         cancel_event.set()
-        # ストリームタスクは cancel 後に await まで行い、後始末を完了させる
-        if running_task and not running_task.done():
-            running_task.cancel()
-            try:
-                await running_task
-            except asyncio.CancelledError:
-                pass
-
-
-# -----------------------------
-# Depth from image (monocular depth estimation → Keyence互換CSV)
-# -----------------------------
-@app.post("/depth_from_image", response_class=PlainTextResponse)
-async def depth_from_image(
-    image: UploadFile = File(...),
-    height_range: float = Form(1000.0),
-    height_min: float = Form(0.0),
-    invert: bool = Form(False),
-    max_size: int = Form(1024),
-    model_size: str = Form("small"),
-    clip_percentile: float = Form(2.0),
-    gamma: float = Form(1.0),
-):
-    """
-    単一画像を Depth Anything V2 で擬似3D化し、Keyence互換の高さマップCSVを返す。
-    """
-    import io
-    from PIL import Image as PILImage
-
-    from depth_inference import image_to_height_grid, height_grid_to_csv_text
-
-    try:
-        raw = await image.read()
-        pil = PILImage.open(io.BytesIO(raw))
-        loop = asyncio.get_event_loop()
-        grid = await loop.run_in_executor(
-            executor,
-            lambda: image_to_height_grid(
-                pil,
-                height_range=height_range,
-                height_min=height_min,
-                invert=invert,
-                max_size=max_size if max_size > 0 else None,
-                model_size=model_size,
-                clip_percentile=clip_percentile,
-                gamma=gamma,
-            ),
-        )
-        csv_text = height_grid_to_csv_text(grid)
-        return PlainTextResponse(content=csv_text, media_type="text/csv; charset=utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"深度推論失敗: {e}") from e
-
-
-# -----------------------------
-# Depth calibration (相対深度 + 干渉縞 → 絶対深度)
-# -----------------------------
-@app.post("/calibrate_depth")
-async def calibrate_depth_endpoint(
-    camera_image: UploadFile = File(...),
-    interference_csv: UploadFile = File(...),
-    depth_model_size: str = Form("base"),
-    max_size: int = Form(1024),
-    rotation_search: int = Form(5),
-):
-    """
-    カメラ画像 + 干渉縞CSV → キャリブレーション済み絶対深度マップ (JSON)。
-    欠損のない完全な絶対深度グリッドを返す。
-    """
-    import io
-    from PIL import Image as PILImage
-
-    from depth_calibration import calibrate_depth
-    from depth_inference import height_grid_to_csv_text
-
-    try:
-        img_raw = await camera_image.read()
-        csv_raw = await interference_csv.read()
-
-        pil = PILImage.open(io.BytesIO(img_raw))
-        csv_text = csv_raw.decode("utf-8")
-
-        # CSV → 2D grid (null = 欠損)
-        absolute_grid = []
-        for line in csv_text.strip().split("\n"):
-            row = []
-            for cell in line.split(","):
-                cell = cell.strip()
-                if cell == "" or cell == "-9999.9":
-                    row.append(None)
-                else:
-                    try:
-                        row.append(float(cell))
-                    except ValueError:
-                        row.append(None)
-            absolute_grid.append(row)
-
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            executor,
-            lambda: calibrate_depth(
-                pil,
-                absolute_grid,
-                depth_model_size=depth_model_size,
-                max_size=max_size if max_size > 0 else None,
-                rotation_search=rotation_search,
-            ),
-        )
-
-        csv_out = height_grid_to_csv_text(result["calibrated_grid"])
-
-        return {
-            "csv": csv_out,
-            "match_score": result["match_score"],
-            "match_position": result["match_position"],
-            "match_angle": result["match_angle"],
-            "scale": result["scale"],
-            "offset": result["offset"],
-            "valid_points": result["valid_points"],
-            "shape": result["shape"],
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"深度キャリブレーション失敗: {e}") from e
 
 
 # -----------------------------
@@ -712,39 +484,3 @@ async def calibrate_depth_endpoint(
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-# -----------------------------
-# Shutdown endpoint
-# -----------------------------
-@app.post("/shutdown")
-def shutdown():
-    """アプリケーション全体をシャットダウンする（stopスクリプトを実行）"""
-    import subprocess
-    import platform
-    import threading
-    import time
-
-    # プロジェクトルートディレクトリ（backend/の親）
-    project_root = Path(__file__).parent.parent
-
-    def delayed_shutdown():
-        """1秒後にstopスクリプトを実行"""
-        time.sleep(1)
-        system = platform.system()
-
-        if system == "Darwin":  # macOS
-            stop_script = project_root / "stop_mac.sh"
-            subprocess.run(["bash", str(stop_script)])
-        elif system == "Windows":
-            stop_script = project_root / "stop_win.bat"
-            subprocess.run(["cmd", "/c", str(stop_script)], shell=True)
-        else:  # Linux
-            stop_script = project_root / "stop_mac.sh"
-            subprocess.run(["bash", str(stop_script)])
-
-    # バックグラウンドスレッドで遅延シャットダウン
-    thread = threading.Thread(target=delayed_shutdown, daemon=True)
-    thread.start()
-
-    return {"ok": True, "message": "Shutting down..."}

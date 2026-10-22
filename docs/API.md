@@ -8,9 +8,6 @@
 |--------------|----------|------|
 | `/ws` | WebSocket | メイン通信チャネル（画像処理・AI推論） |
 | `/health` | HTTP GET | ヘルスチェック |
-| `/shutdown` | HTTP POST | アプリ全体をシャットダウン |
-| `/depth_from_image` | HTTP POST | 単一画像 → Depth Anything V2 → Keyence互換CSV |
-| `/calibrate_depth` | HTTP POST | カメラ画像 + 干渉縞CSV → 絶対深度マップ |
 | `/data/result/{filename}` | HTTP GET | 処理結果（メモリキャッシュ優先・ディスクフォールバック） |
 | `/data/mask_result/manifest.json` | HTTP GET | AI推論結果マニフェスト（自動生成） |
 | `/data/...` | HTTP GET (静的) | `data/` 配下の静的ファイル配信 |
@@ -155,68 +152,15 @@ const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws`);
 
 ---
 
-### `start` - 単発デモデータ生成
-
-```json
-{
-  "cmd": "start",
-  "params": { "size": 120, "noise": 0.1 }
-}
-```
-
-| パラメータ | 型 | デフォルト | 説明 |
-|----------|---|----------|------|
-| `size` | int | 120 | グリッドサイズ |
-| `noise` | float | 0.1 | ノイズ振幅 |
-
-**レスポンス:**
-```json
-{
-  "type": "result",
-  "zData": [[0.1, 0.2, ...], ...],
-  "meta": { "size": 120, "noise": 0.1 }
-}
-```
-
----
-
-### `start_stream` - デモストリーミング開始
-
-```json
-{
-  "cmd": "start_stream",
-  "params": { "size": 120, "noise": 0.1, "interval_ms": 200 }
-}
-```
-
-`interval_ms` ごとに `result` メッセージが送信され続けます。
-
----
-
-### `stop` - ストリーミング / 処理停止
-
-```json
-{ "cmd": "stop" }
-```
-
-**レスポンス:**
-```json
-{ "type": "status", "value": "READY" }
-```
-
----
-
 ## サーバー → クライアント（メッセージタイプ）
 
 | type | 説明 |
 |------|------|
 | `status` | ステータス変更（`READY` / `RUNNING` / `COMPLETE`） |
 | `progress` | 処理進捗（`step` / `total` / `message` / `percent` / `eta_sec?`） |
-| `result` | デモデータ結果（`start` / `start_stream` 応答） |
 | `preprocess_complete` | 画像処理完了 |
 | `ai_inference_complete` | AI推論完了 |
 | `pong` | ping応答 |
-| `info` | 情報メッセージ |
 | `error` | エラーメッセージ |
 
 ---
@@ -232,68 +176,6 @@ curl http://localhost:8000/health
 **レスポンス:**
 ```json
 { "ok": true }
-```
-
----
-
-### `POST /shutdown` - アプリ全体停止
-
-OSに応じた `stop_mac.sh` / `stop_win.bat` を 1 秒遅延で実行します。
-
-**レスポンス:**
-```json
-{ "ok": true, "message": "Shutting down..." }
-```
-
----
-
-### `POST /depth_from_image` - 単一画像 → 高さマップCSV
-
-Depth Anything V2 で単眼深度推定を行い、Keyence互換のCSV（`-9999.9` = 欠損）を返します。
-
-**Form フィールド:**
-
-| 名前 | 型 | デフォルト | 説明 |
-|------|----|----------|------|
-| `image` | File | (必須) | 入力画像 |
-| `height_range` | float | 1000.0 | 高さ方向のスケール幅 [µm] |
-| `height_min` | float | 0.0 | 高さの最小オフセット [µm] |
-| `invert` | bool | false | 深度の反転 |
-| `max_size` | int | 1024 | 長辺の上限（0 で無制限） |
-| `model_size` | string | `"small"` | `small` / `base` / `large` |
-| `clip_percentile` | float | 2.0 | 外れ値クリッピングのパーセンタイル |
-| `gamma` | float | 1.0 | ガンマ補正 |
-
-**レスポンス:** `text/csv` 形式の高さマップ。
-
----
-
-### `POST /calibrate_depth` - 深度キャリブレーション
-
-カメラ画像と干渉縞CSVを位置合わせし、欠損のない絶対深度マップを返します。
-
-**Form フィールド:**
-
-| 名前 | 型 | デフォルト | 説明 |
-|------|----|----------|------|
-| `camera_image` | File | (必須) | カメラ画像 |
-| `interference_csv` | File | (必須) | 干渉縞由来の絶対深度CSV（欠損含む） |
-| `depth_model_size` | string | `"base"` | Depth Anything V2 のモデルサイズ |
-| `max_size` | int | 1024 | 長辺上限 |
-| `rotation_search` | int | 5 | 回転探索範囲 [°] |
-
-**レスポンス（JSON）:**
-```json
-{
-  "csv": "<キャリブレーション済みCSV>",
-  "match_score": 0.87,
-  "match_position": [x, y],
-  "match_angle": 1.2,
-  "scale": 12.5,
-  "offset": -3.4,
-  "valid_points": 51234,
-  "shape": [281, 304]
-}
 ```
 
 ---

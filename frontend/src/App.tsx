@@ -78,6 +78,9 @@ import type {
 } from "./types";
 import "./App.css";
 
+// AI推論のモデル（学習済みで使えるのはこの1つ。backend/ai_inference.py の MODEL_CONFIGS のキー）
+const AI_MODEL_TYPE = "resnet50";
+
 function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +99,7 @@ function App() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
-  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "ai" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"plot" | "ai" | null>(null);
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
@@ -473,18 +476,6 @@ function App() {
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
-  // AIモデルタイプ選択
-  type AiModelType =
-    | "resnet34"
-    | "resnet50"
-    | "resnet101"
-    | "resnet152"
-    | "deeplabv3plus_effv2m"
-    | "segformer_b2"
-    | "unetpp_effv2m"
-    | "unetpp_effv2l"
-    | "unetpp_2_5d";
-  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet50");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -793,33 +784,36 @@ function App() {
 
       const ws = connect();
 
-      sendWhenOpen(ws, { cmd: "ai_inference", params: { model_type: aiModelType } }, () =>
+      sendWhenOpen(ws, { cmd: "ai_inference", params: { model_type: AI_MODEL_TYPE } }, () =>
         backendUnreachable("ai")
       );
-    } else if (confirmMode === "csv") {
-      // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
-      // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
-      // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
-      const sc = gridScale(dataSource, scale);
-      const pointSrc = exportPoints();
-      if (pointSrc) {
-        await downloadPointCSV(
-          pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
-          pitchFilename(
-            `${(dataName ?? "points").replace(/\.csv$/i, "")}_points`,
-            sc.col,
-            sc.row,
-            sc.valueUnit
-          )
-        );
-      } else if (zData && zData.length > 0) {
-        const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-        await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row, sc.valueUnit));
-      }
     }
 
     setShowConfirm(false);
     setConfirmMode(null);
+  };
+
+  // CSV出力（保存ダイアログが確認を兼ねるので、確認モーダルは出さない）
+  const exportCsv = async () => {
+    // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
+    // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
+    // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
+    const sc = gridScale(dataSource, scale);
+    const pointSrc = exportPoints();
+    if (pointSrc) {
+      await downloadPointCSV(
+        pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
+        pitchFilename(
+          `${(dataName ?? "points").replace(/\.csv$/i, "")}_points`,
+          sc.col,
+          sc.row,
+          sc.valueUnit
+        )
+      );
+    } else if (zData && zData.length > 0) {
+      const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+      await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row, sc.valueUnit));
+    }
   };
 
   // 「いいえ」の処理
@@ -1874,17 +1868,16 @@ function App() {
                             !canExport
                               ? "書き出せるデータがありません"
                               : exportPoints()
-                                ? "点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
+                                ? dataOrigin?.kind === "csvPoints"
+                                  ? "点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
+                                  : "同じ位置に縞が複数ある（複数層の）データのため、層ごとの点を点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
                                 : "表示中の高さマップを µm で書き出す（ピッチはファイル名に記録）"
                           }
                           style={{
                             ...buttonFileStyle,
                             ...enabledStateStyle(canExport),
                           }}
-                          onClick={() => {
-                            setConfirmMode("csv");
-                            setShowConfirm(true);
-                          }}
+                          onClick={exportCsv}
                         >
                           <Icon size={15} color={colors.textMuted}>
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -2426,8 +2419,12 @@ function App() {
                 {sideTab === "result" && (
                   <ResultTab
                     cloud={cloud}
+                    zData={zData}
+                    dataSource={dataSource}
+                    scale={scale}
+                    flipX={flipX}
+                    flipRef={flipRef}
                     processing={processing}
-                    viewMode={viewMode}
                     history={cloudHistory}
                     editingNameIdx={editingNameIdx}
                     setEditingNameIdx={setEditingNameIdx}
@@ -2611,47 +2608,11 @@ function App() {
                 lineHeight: 1.6,
               }}
             >
-              {confirmMode === "csv" ? (
-                exportPoints() ? (
-                  <>
-                    csvファイルを出力しますか？
-                    <div style={{ marginTop: "8px", fontSize: "12.5px", color: colors.textMuted }}>
-                      {dataOrigin?.kind === "csvPoints"
-                        ? "点群形式（x,y,z）で出力します。"
-                        : "同じ位置に縞が複数ある（複数層の）データのため、層ごとの点を点群形式（x,y,z）で出力します。"}
-                    </div>
-                  </>
-                ) : (
-                  "csvファイルを出力しますか？"
-                )
-              ) : confirmMode === "ai" ? (
+              {confirmMode === "ai" ? (
                 <>
                   AI推論を実行しますか？
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
-                    <span style={{ fontSize: "13px", whiteSpace: "nowrap" }}>モデル:</span>
-                    <select
-                      value={aiModelType}
-                      onChange={(e) => setAiModelType(e.target.value as AiModelType)}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        border: `1px solid ${colors.borderLight}`,
-                        backgroundColor: colors.bgDark,
-                        color: colors.text,
-                        fontSize: "13px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <option value="resnet50">U-Net++ (ResNet50)</option>
-                    </select>
+                  <div style={{ marginTop: "8px", fontSize: "12.5px", color: colors.textMuted }}>
+                    モデル: U-Net++ (ResNet50)
                   </div>
                 </>
               ) : (

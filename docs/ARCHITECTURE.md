@@ -21,8 +21,8 @@
 │           ▼                                                     │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │  FastAPI (backend/app.py)                                │    │
-│  │  - WebSocket: preprocess / ai_inference / start / stop    │    │
-│  │  - HTTP: /depth_from_image  /calibrate_depth  /shutdown   │    │
+│  │  - WebSocket: preprocess / ai_inference / ping            │    │
+│  │  - HTTP: /health                                          │    │
 │  │  - 静的配信 + インメモリ結果キャッシュ                       │    │
 │  └────────────┬─────────────────────────────────────────────┘    │
 │               │ ThreadPoolExecutor                              │
@@ -32,11 +32,8 @@
 │  │  (CPU / GPU 動的選択)  │  │  (PyTorch + SMP モデル群)   │     │
 │  │  coin / coin2 / tgv  │  │                              │     │
 │  │  elec / medical /    │  └──────────────────────────────┘     │
-│  │  semi                │  ┌──────────────────────────────┐     │
-│  └──────────────────────┘  │  depth_inference.py          │     │
-│                            │  depth_calibration.py        │     │
-│                            │  (Depth Anything V2)         │     │
-│                            └──────────────────────────────┘     │
+│  │  semi                │                                       │
+│  └──────────────────────┘                                       │
 │                       Python Backend                            │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -48,9 +45,7 @@
 | ファイル | 責務 |
 |--------------|------|
 | `App.tsx` | UI、状態管理、WebSocket通信、Plotly描画、断層抽出、距離計測、計測履歴 |
-| `utils/surface.ts` | デモ用パラメトリック3Dサーフェス生成 |
 | `utils/pointCloud.ts` | マスク/ピーク画像群（PNG/BMP）から3D点群を構築 |
-| `utils/stream.ts` | 蛇行順序での漸進的レンダリング |
 | `utils/csv.ts` | CSVエクスポート / インポート |
 
 ### バックエンド（`backend/`）
@@ -60,8 +55,6 @@
 | `app.py` | FastAPI エントリ。WebSocket / HTTP / 静的配信を統合 |
 | `ai_inference.py` | PyTorch + segmentation-models-pytorch によるマスク推論 |
 | `convert_to_hdf5.py` | BMP群を HDF5 に一括変換（初回キャッシュ生成） |
-| `depth_inference.py` | Depth Anything V2 による単眼深度推定 |
-| `depth_calibration.py` | 単眼深度 + 干渉縞CSV の位置合わせ・絶対深度化 |
 | `preprocessing_cpu.py` / `preprocessing_gpu.py` | 標準コイン計測パイプライン（CPU / CuPy） |
 | `preprocessing_std_cpu.py` | 標準系CPU（elec/medical/semi共用。coinとの差はσ=1・膨張なし） |
 | `preprocessing_coin2_*.py` | コイン計測パイプライン改良版 |
@@ -133,19 +126,6 @@ backend/ai_inference.py が PyTorch モデルで全スライスを推論
 フロントエンドが /data/mask_result/* から取得 → 点群化
 ```
 
-### 深度推定ルート（オプショナル）
-
-```
-カメラ画像 (HTTP POST /depth_from_image)
-        │
-        ▼
-Depth Anything V2 → Keyence互換CSV
-        │
-       (+ 既存干渉縞CSV を /calibrate_depth に POST)
-        ▼
-深度キャリブレーション → 欠損なし絶対深度マップ JSON
-```
-
 ## 技術選定理由
 
 | 技術 | 選定理由 |
@@ -167,7 +147,6 @@ optical-device-ui/
 ├── backend/           # FastAPI + Python 処理一式
 │   ├── app.py
 │   ├── ai_inference.py
-│   ├── depth_inference.py / depth_calibration.py
 │   ├── preprocessing_*.py    # アルゴリズム別バリアント
 │   └── models/               # 学習済み重み
 ├── tools/             # 実験・解析用 CLI スクリプト群
