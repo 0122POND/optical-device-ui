@@ -22,8 +22,10 @@ npm run test:watch   # テストをwatchモードで実行
 ### バックエンド（backend/ディレクトリで実行）
 
 ```bash
-python app.py        # FastAPIサーバー起動
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000   # FastAPIサーバー起動
 ```
+
+Mac ではリポジトリ直下の `start_mac.sh`（バックエンドとフロントをまとめて起動）／`stop_mac.sh` も使える。
 
 ## アーキテクチャ
 
@@ -47,9 +49,16 @@ python app.py        # FastAPIサーバー起動
 ### WebSocketプロトコル
 
 ```
-Client → Server: {"cmd": "start/start_stream/stop/ping", "params": {...}}
-Server → Client: {"type": "status/result/error/pong", "zData": [[...]], "meta": {...}}
+Client → Server: {"cmd": "preprocess", "params": {"algorithm", "use_gpu", "peak_threshold"}}   # 前処理（data/row_data → data/result）
+                 {"cmd": "ai_inference", "params": {"model_type", "threshold"}}              # AI推論（data/row_data → data/mask_result）
+                 {"cmd": "ping"} / {"cmd": "start" | "start_stream" | "stop"}（デモ用の合成データ）
+Server → Client: {"type": "status", "value": "READY|RUNNING|COMPLETE"}
+                 {"type": "progress", "step", "total", "message", "percent"}
+                 {"type": "preprocess_complete" | "ai_inference_complete", "files", "count"}
+                 {"type": "error", "message"} / {"type": "pong"}
 ```
+
+完了通知を受けたフロントは、結果フォルダの manifest.json・結果画像と、あれば `depth_meta.json`／`depth_grid.f32`（サブピクセル深さ）・`prob/`（AIの確率マップ）を読む。フォルダ指定（input_dir 等）は `data/` 配下に限られる。
 
 ## 補間ツール
 
