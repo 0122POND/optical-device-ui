@@ -9,11 +9,14 @@ import { physicalPoints, type DataSource, type ScaleInputs } from "../utils/unit
 const AUTO_ROTATE_SPEED = 2.5;
 
 // 深さ配列に対しカラーレンジ（手動 or 自動ロバスト）を解決し、色バッファへ
-// 書き込む（レンジ外はグレー）
+// 書き込む（手動で指定した側のレンジ外だけグレー）
 function fillColors(depthUm: Float64Array, arr: Float32Array, min: string, max: string) {
   const range = resolveColorRange(depthUm, min, max);
   for (let i = 0; i < depthUm.length; i++) {
-    const [r, g, b] = colorForValue(depthUm[i], range.lo, range.hi);
+    const [r, g, b] = colorForValue(depthUm[i], range.lo, range.hi, {
+      below: range.grayBelow,
+      above: range.grayAbove,
+    });
     arr[i * 3] = r;
     arr[i * 3 + 1] = g;
     arr[i * 3 + 2] = b;

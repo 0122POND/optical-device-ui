@@ -169,7 +169,7 @@ export function SettingsTab({
         <div
           style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
         >
-          範囲外の点はグレー表示。自動時は外れ値を除いた範囲で色付けします。
+          手動で指定した範囲の外はグレー表示。自動時は外れ値を除いた範囲で色付けし、外れ値は端の色（赤・青）で塗ります。
         </div>
       </section>
     </>

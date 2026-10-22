@@ -30,6 +30,11 @@ export interface ColorRange {
   hi: number; // カラースケール上端（この値超はグレー）
   min: number; // データの生の最小値
   max: number; // データの生の最大値
+  // レンジ外をグレーにするか（省略時 true）。手動で指定した側だけ true にし、
+  // 自動レンジの側は端の色（下=青/上=赤）のまま塗る。自動の 1〜99% 切り替えで
+  // 上端の一番高い部分が灰色になり、カラーバーの上にも灰色の帯が出て見づらかったため
+  grayBelow?: boolean;
+  grayAbove?: boolean;
 }
 
 // 有限値の min/max と、外れ値に頑健な自動レンジを求める。
@@ -73,11 +78,15 @@ export function resolveColorRange(
   const ma = parseFloat(manualMax);
   let lo = isFinite(mi) ? mi : auto.lo;
   let hi = isFinite(ma) ? ma : auto.hi;
+  let grayBelow = isFinite(mi);
+  let grayAbove = isFinite(ma);
   if (!(hi > lo)) {
     lo = auto.lo;
     hi = auto.hi;
+    grayBelow = false;
+    grayAbove = false;
   }
-  return { lo, hi, min: auto.min, max: auto.max };
+  return { lo, hi, min: auto.min, max: auto.max, grayBelow, grayAbove };
 }
 
 // Plotly 用のカラースケールと cmin/cmax を生成する。
@@ -93,8 +102,8 @@ export function buildClippedColorscale(range: ColorRange): {
 } {
   const { lo, hi, min, max } = range;
   const span = hi - lo || 1;
-  const hasBelow = min < lo;
-  const hasAbove = max > hi;
+  const hasBelow = (range.grayBelow ?? true) && min < lo;
+  const hasAbove = (range.grayAbove ?? true) && max > hi;
   const band = span * 0.05;
   const cmin = hasBelow ? lo - band : lo;
   const cmax = hasAbove ? hi + band : hi;
@@ -110,8 +119,15 @@ export function buildClippedColorscale(range: ColorRange): {
 }
 
 // three.js 用: 値→RGB(0-1)。レンジ外はグレー。
-export function colorForValue(v: number, lo: number, hi: number): [number, number, number] {
-  if (v < lo || v > hi) return OUT_OF_RANGE_RGB;
+export function colorForValue(
+  v: number,
+  lo: number,
+  hi: number,
+  gray: { below?: boolean; above?: boolean } = {}
+): [number, number, number] {
+  // グレーにしない側のレンジ外は端の色にクランプする
+  if (v < lo && (gray.below ?? true)) return OUT_OF_RANGE_RGB;
+  if (v > hi && (gray.above ?? true)) return OUT_OF_RANGE_RGB;
   const t = (v - lo) / (hi - lo || 1);
   const tt = Math.max(0, Math.min(1, t));
   for (let i = 1; i < COLOR_STOPS_RGB.length; i++) {
