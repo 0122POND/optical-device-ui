@@ -1,131 +1,77 @@
-# Optical Device UI
+# Optical Device UI（Tori-Ton UI）
 
-光学デバイスで取得したデータから三次元形状を可視化するWebアプリケーションです。
+光学デバイス（干渉計測）で取得した画像から3次元の面形状を求め、ブラウザで表示・計測するアプリケーションです。
+
+![画面](docs/images/ui_overview.jpg)
 
 ## 機能
 
-- 光学計測画像の前処理（背景差分、ガウス窓、ピーク検出など）
-- 処理結果からの3D点群生成・表示
-- リアルタイム進捗表示
-- インタラクティブな3Dビューア（回転、ズーム、軸表示切替）
-- CSV出力
+- **計測**: 掃引で撮った干渉画像から高さマップと点群を作る（古典的な前処理 CPU/GPU、AI推論）。進捗表示と中止
+- **読込・書き出し**: 高さマップCSV（Keyence・WI5000・自社）、点群形式CSV（複数層）、マスク画像フォルダ。µm で書き出し、ピッチと単位をファイル名に記録
+- **表示**: 3D / 2D、Surface / 点群、Plotly / three.js（高密度点群・CAD風メッシュ）、視点のプリセット、自動回転、画像保存
+- **後処理**: 外れ値の除去（近傍 / 全体）、走査方向の補間（補った画素は印で区別）
+- **計測ツール**: 2点間距離、2D寸法、断面（線 / 帯の幅で中央値とばらつき）
+- **統計**: 有効率（全体・中央50%×50%・中央面積50%）、高さの分布、平面除去後の Sq/Sa、処理条件
+- **測定履歴**: ブラウザに最新20件を保存（再読み込みしても残る）
+
+画面の詳しい仕様と、結果を読むときの注意は **[UI仕様書](docs/UI仕様書.md)** を見てください。
 
 ## 技術スタック
 
-**フロントエンド**
-- React 19 + TypeScript
-- Plotly.js（3D可視化）
-- Vite（ビルドツール）
+- **フロントエンド**: React 19 + TypeScript、Vite、Plotly.js、three.js
+- **バックエンド**: Python + FastAPI（WebSocket）、NumPy / SciPy / OpenCV、PyTorch + segmentation-models-pytorch（AI推論）、CuPy（GPU、任意）
 
-**バックエンド**
-- Python + FastAPI
-- WebSocket（リアルタイム通信）
-- NumPy / SciPy / Pillow（画像処理）
-
-## 起動手順
-
-### 1. 依存関係のインストール
+## はじめかた
 
 ```bash
-# フロントエンド
-cd frontend
-npm install
-
-# バックエンド（プロジェクトルートで実行）
-pip3 install fastapi uvicorn websockets numpy Pillow scipy
-
-# AI推論機能を使用する場合（追加）
-pip3 install torch segmentation-models-pytorch albumentations opencv-python-headless
+# 依存関係（初回のみ）
+npm install                                  # ルート（コミット時の整形フック）
+cd frontend && npm install && cd ..
+pip3 install -r backend/requirements.txt     # GPU を使うなら CuPy も（requirements.txt の説明参照）
 ```
 
-### 2. 画像データの配置
+- 計測する画像は `data/row_data/` に置きます（`img_NNN.png` など。番号は数値順に並べる）
+- AI計測には学習済みモデル `backend/models/best_model_resnet50.pth` が必要です（リポジトリには含まれません）
 
-処理対象の画像を以下に配置してください：
-
-```
-data/row_data/
-├── 001.bmp
-├── 002.bmp
-├── ...
-└── (任意の枚数)
-```
-
-### 3. サーバー起動
-
-#### 簡単な起動方法（推奨）
-
-**Windows:**
-- `start_win.bat` をダブルクリック
-
-**macOS / Linux:**
 ```bash
-./start_mac.sh
+./start_mac.sh     # macOS / Linux（Windows は start_win.bat をダブルクリック）
+./stop_mac.sh      # 停止（Windows は stop_win.bat）
 ```
 
-#### 終了方法
+http://localhost:5173 を開きます。手動で起動する場合は `backend/` で `python3 -m uvicorn app:app --host 0.0.0.0 --port 8000`、`frontend/` で `npm run dev`。
 
-- `Ctrl+C` を押す、または
-- 終了スクリプトを実行:
-  - Windows: `stop_win.bat` をダブルクリック
-  - macOS / Linux: `./stop_mac.sh`
+## 資料
 
-※ 起動スクリプトは、前回のプロセスが残っていた場合も自動でクリーンアップします。
-
-#### 手動で起動する場合
-
-**ターミナル1: バックエンド**
-```bash
-cd backend
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-**ターミナル2: フロントエンド**
-```bash
-cd frontend
-npm run dev
-```
-
-### 4. ブラウザでアクセス
-
-http://localhost:5173 を開き、「START」ボタンをクリックすると：
-1. 画像処理が実行される（進捗バー表示）
-2. 処理完了後、3D点群が表示される
+| 資料 | 内容 |
+|---|---|
+| [UI仕様書](docs/UI仕様書.md) | 画面の構成と各機能、データの種類と単位、読み方の注意、既知の制約（新しく入った人はここから） |
+| [開発手順](docs/開発手順.md) | 開発の進め方、どこを直すか、確認のしかた |
+| [開発ガイド](docs/CONTRIBUTING.md) | ブランチ・コミット規約 |
+| [アーキテクチャ](docs/ARCHITECTURE.md) | 構成図とファイルの役割 |
+| [API仕様書](docs/API.md) | バックエンドの WebSocket / HTTP |
+| [デプロイ手順](docs/デプロイ手順.md) | 対象 PC への配備・起動停止 |
+| [CLAUDE.md](CLAUDE.md) | 解析ツール（`tools/`）の使い方と検証済みの知見 |
 
 ## ディレクトリ構成
 
 ```
 optical-device-ui/
-├── data/                   # 画像データ格納場所
-│   ├── row_data/          # 入力画像
-│   └── result/            # 処理結果
-├── frontend/               # React フロントエンド
-│   ├── src/
-│   │   ├── App.tsx        # メインコンポーネント
-│   │   └── utils/         # ユーティリティ関数
-│   └── public/
-├── backend/
-│   ├── app.py             # FastAPI サーバー（静的ファイル配信含む）
-│   └── preprocessing_*.py # 画像処理モジュール（algorithm×GPU/CPU別）
-├── docs/                   # ドキュメント
-├── start_win.bat          # 起動スクリプト（Windows用）
-├── start_mac.sh           # 起動スクリプト（macOS/Linux用）
-├── stop_win.bat           # 終了スクリプト（Windows用）
-├── stop_mac.sh            # 終了スクリプト（macOS/Linux用）
-├── CLAUDE.md              # Claude Code用ガイド
-└── README.md
+├── frontend/            # React + Vite（src/App.tsx, components/, hooks/, utils/）
+├── backend/             # FastAPI（app.py）、前処理（preprocessing_*.py）、AI推論（ai_inference.py）
+├── tools/               # 補間・評価・スティッチングなどの解析ツール（CLAUDE.md 参照）
+├── data/                # 入力画像と結果（row_data/, result/, mask_result/ など。大半は git 管理外）
+├── docs/                # 資料
+├── start_mac.sh / stop_mac.sh / start_win.bat / stop_win.bat
+└── CLAUDE.md
 ```
 
-## 開発コマンド
+## 開発コマンド（frontend/ で）
 
 ```bash
-# フロントエンド
-cd frontend
-npm run dev      # 開発サーバー起動
-npm run build    # 本番ビルド
-npm run lint     # ESLint実行
-
-# バックエンド
-python3 -m uvicorn backend.app:app --reload --port 8000
+npm run dev      # 開発サーバー
+npm test         # ユニットテスト（vitest）
+npm run lint     # ESLint
+npm run build    # 型チェック + 本番ビルド
 ```
 
 ## ライセンス

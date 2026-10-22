@@ -44,9 +44,17 @@
 
 | ファイル | 責務 |
 |--------------|------|
-| `App.tsx` | UI、状態管理、WebSocket通信、Plotly描画、断層抽出、距離計測、計測履歴 |
-| `utils/pointCloud.ts` | マスク/ピーク画像群（PNG/BMP）から3D点群を構築 |
+| `App.tsx` | 状態と処理（計測・読込・WebSocket・履歴）の配線 |
+| `components/operate/*` | 操作タブの各区画（計測・ファイル・後処理・表示・計測ツール） |
+| `components/plot/*`・`components/modals/*` | プロットのツールバー・視点プリセット・チップ／確認・アルゴリズム選択・履歴削除 |
+| `components/{SettingsTab,ResultTab,SlicePanel,ProgressOverlay,Header}.tsx` | 設定タブ・測定結果タブ・断層パネル・進捗表示・ヘッダー |
+| `components/ThreePointCloudView.tsx`・`ThreeSurfaceMeshView.tsx` | three.js の高密度点群・メッシュ |
+| `hooks/usePlotly.ts`・`useSlicePlot.ts` | Plotly の描画（メイン・断層） |
+| `hooks/useWebSocket.ts`・`useCloudHistory.ts`・`useScaleSettings.ts`・`usePostprocess.ts`・`usePlotControls.ts` | 通信・履歴・設定・後処理・プロット操作 |
+| `utils/units.ts` | µm への換算（出どころ device / csv ごと。全表示がここを通す） |
+| `utils/pointCloud.ts` | 結果フォルダ（PNG/BMP・深さファイル）から高さマップと3D点群を構築 |
 | `utils/csv.ts` | CSVエクスポート / インポート |
+| `utils/{postprocess,surfaceStats,bandSection,displayGrid,historyStore}.ts` | 後処理・統計・断面・表示の間引き・履歴の保存 |
 
 ### バックエンド（`backend/`）
 
@@ -54,7 +62,6 @@
 |--------------|------|
 | `app.py` | FastAPI エントリ。WebSocket / HTTP / 静的配信を統合 |
 | `ai_inference.py` | PyTorch + segmentation-models-pytorch によるマスク推論 |
-| `convert_to_hdf5.py` | BMP群を HDF5 に一括変換（初回キャッシュ生成） |
 | `preprocessing_cpu_core.py` | CPU前処理の本体（coin / 標準系 / coin2 で共通。違いは掃引方向σ・ガウス窓の縦方向・進捗文言の設定だけ） |
 | `preprocessing_cpu.py` / `preprocessing_std_cpu.py` / `preprocessing_coin2_cpu.py` | 上の本体を各アルゴリズムの設定で呼ぶ入口（coin: σ=10・窓は縦横／標準系: σ=1・縦横／coin2: σ=1・横のみ） |
 | `preprocessing_gpu.py` | 標準コイン計測パイプライン（CuPy） |
