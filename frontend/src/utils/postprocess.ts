@@ -13,10 +13,17 @@ export const MAX_SPLINE_GAP = 8;
 export interface PostSettings {
   removeOutliers: boolean;
   sigma: number;
+  // 外れ値の基準。local=近傍の中央値からのずれ（凹凸を残す・推奨）/ global=全体の中央値（tools と同じ）
+  outlierBase: "local" | "global";
   interpolate: boolean;
 }
 
-export const POST_OFF: PostSettings = { removeOutliers: false, sigma: 3, interpolate: false };
+export const POST_OFF: PostSettings = {
+  removeOutliers: false,
+  sigma: 3,
+  outlierBase: "local",
+  interpolate: false,
+};
 
 export const postActive = (p: PostSettings) => p.removeOutliers || p.interpolate;
 
@@ -61,6 +68,65 @@ export function removeOutliersMAD(
     })
   );
   return { grid: out, removed, median: med, threshold };
+}
+
+// 近傍の中央値を基準にした外れ値除去（Hampel フィルタ）。同じ走査行の左右 ±radius 画素（自分を含む）の
+// 有効値で中央値 m と MAD s を取り、|値−m| が σ×1.4826×s を超える点を欠損にする。硬貨の凹凸のように近くの
+// 画素と一緒に高い・低い部分は残り、行の中で突き出た点だけが外れる。
+// - 上下の行を窓に入れないのは、デバイスのデータに走査の行ごとの段差（横縞）があり、行ごと消えるため
+//   （10円で上下を含めると除去が 9〜13% になった）
+// - 自分を窓に入れるのは、段差の縁の画素で中央値が段差の中間になって縁が削られないため
+// - s は窓ごと（段差や荒れた所では大きくなり、本物の凹凸を消しにくい）。s≈0 で過敏にならないよう、
+//   面全体の s の中央値を下限にする
+// 窓の有効値が minCount 未満の画素は判定できないので残す
+export function removeOutliersLocal(
+  grid: Grid,
+  sigma: number,
+  radius = 4,
+  minCount = 5
+): { grid: Grid; removed: number; threshold: number } {
+  const rows = grid.length;
+  const cols = rows > 0 ? grid[0].length : 0;
+  const med: (number | null)[][] = grid.map((row) => row.map(() => null));
+  const mad: (number | null)[][] = grid.map((row) => row.map(() => null));
+  const buf: number[] = [];
+  const allMad: number[] = [];
+  for (let r = 0; r < rows; r++) {
+    const row = grid[r];
+    for (let c = 0; c < cols; c++) {
+      if (row[c] == null) continue;
+      buf.length = 0;
+      for (let cc = Math.max(0, c - radius); cc <= Math.min(cols - 1, c + radius); cc++) {
+        const u = row[cc];
+        if (u != null) buf.push(u);
+      }
+      if (buf.length < minCount) continue;
+      buf.sort((a, b) => a - b);
+      const m = median(buf);
+      for (let k = 0; k < buf.length; k++) buf[k] = Math.abs(buf[k] - m);
+      buf.sort((a, b) => a - b);
+      const s = median(buf);
+      med[r][c] = m;
+      mad[r][c] = s;
+      allMad.push(s);
+    }
+  }
+  if (allMad.length === 0) return { grid, removed: 0, threshold: NaN };
+  allMad.sort((a, b) => a - b);
+  const floor = median(allMad);
+  let removed = 0;
+  const out = grid.map((row, r) =>
+    row.map((v, c) => {
+      const m = med[r][c];
+      const s = mad[r][c];
+      if (v == null || m == null || s == null) return v;
+      if (Math.abs(v - m) <= sigma * MAD_TO_SIGMA * Math.max(s, floor)) return v;
+      removed++;
+      return null;
+    })
+  );
+  // 表示用の目安: ばらつきが面全体の典型値のときの閾値
+  return { grid: out, removed, threshold: sigma * MAD_TO_SIGMA * floor };
 }
 
 // 自然境界の3次スプライン（x は昇順・不等間隔可）。scipy の CubicSpline(bc_type="natural") と同じ
@@ -185,7 +251,8 @@ export function applyPostprocess(grid: Grid, p: PostSettings): PostResult {
   let g = grid;
   let removed = 0;
   if (p.removeOutliers) {
-    const r = removeOutliersMAD(g, p.sigma);
+    const r =
+      p.outlierBase === "global" ? removeOutliersMAD(g, p.sigma) : removeOutliersLocal(g, p.sigma);
     g = r.grid;
     removed = r.removed;
   }

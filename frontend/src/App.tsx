@@ -866,7 +866,9 @@ function App() {
       const pg = physicalGrid(viewZ, dataSource, scale, flipX, flipRef);
       const base = (dataName ?? "surface").replace(/\.csv$/i, "");
       const tag =
-        (post.removeOutliers ? `_mad${post.sigma}` : "") + (post.interpolate ? "_interp" : "");
+        (post.removeOutliers
+          ? `_${post.outlierBase === "global" ? "mad" : "hampel"}${post.sigma}`
+          : "") + (post.interpolate ? "_interp" : "");
       await downloadCSV(pg.z, pitchFilename(base + tag, sc.col, sc.row, sc.valueUnit));
     }
   };
@@ -2007,7 +2009,7 @@ function App() {
                           <div style={settingRowStyle}>
                             <span
                               style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
-                              title="全体の中央値から MAD×1.4826×σ を超えて外れた点を欠損にする"
+                              title="中央値から MAD×1.4826×σ を超えて外れた点を欠損にする（基準は下で選ぶ）"
                             >
                               外れ値の除去
                             </span>
@@ -2036,6 +2038,31 @@ function App() {
                               })}
                             </div>
                           </div>
+                          {post.removeOutliers && (
+                            <div style={settingRowStyle}>
+                              <span
+                                style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
+                                title={
+                                  "近傍: 同じ走査行の左右の中央値から突き出た点だけを外す（凹凸・段差は残る）\n" +
+                                  "全体: 面全体の中央値から外れた点を外す（tools/remove_outliers.py と同じ。帯状の大きな異常も拾うが、起伏の大きい面では本物の凹凸も消える）"
+                                }
+                              >
+                                外れ値の基準
+                              </span>
+                              <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                                {(["local", "global"] as const).map((b) => (
+                                  <button
+                                    key={b}
+                                    className="tt-hover"
+                                    style={segmentButtonStyle(post.outlierBase === b)}
+                                    onClick={() => setPost((p) => ({ ...p, outlierBase: b }))}
+                                  >
+                                    {b === "local" ? "近傍" : "全体"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div style={settingRowStyle}>
                             <span
                               style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}

@@ -4,6 +4,7 @@ import {
   interpolateScan,
   orientFilled,
   POST_OFF,
+  removeOutliersLocal,
   removeOutliersMAD,
 } from "./postprocess";
 
@@ -20,6 +21,28 @@ describe("removeOutliersMAD", () => {
     expect(r.threshold).toBeCloseTo(3 * 1.4826);
     expect(r.removed).toBe(1);
     expect(flat(r.grid)).toEqual([9, 10, 11, 10, 9, 11, 10, null, null]);
+  });
+});
+
+describe("removeOutliersLocal", () => {
+  // 1行 40画素: 段差（705→725）＋小さなノイズ＋スパイク1点
+  const row = Array.from({ length: 40 }, (_, c) => (c < 20 ? 705 : 725) + Math.sin(c * 7.3) * 0.5);
+  row[30] += 40;
+
+  it("行の中で突き出た点だけを外し、段差の縁は残す", () => {
+    const g = Array.from({ length: 5 }, () => [...row]);
+    const r = removeOutliersLocal(g, 3);
+    expect(r.removed).toBe(5);
+    expect(r.grid[0][30]).toBeNull();
+    expect(r.grid[0][19]).not.toBeNull();
+    expect(r.grid[0][20]).not.toBeNull();
+  });
+
+  it("行ごとの段差（横縞）は外さない（上下の行は窓に入れない）", () => {
+    // スパイクを除いた行を、1行おきに 15 ずらす
+    const clean = row.map((v, c) => (c === 30 ? v - 40 : v));
+    const g = Array.from({ length: 6 }, (_, r) => clean.map((v) => v + (r % 2 ? 15 : 0)));
+    expect(removeOutliersLocal(g, 3).removed).toBe(0);
   });
 });
 
@@ -58,7 +81,12 @@ describe("interpolateScan", () => {
 describe("applyPostprocess", () => {
   it("外れ値除去 → 補間 の順に掛け、外した点も補間で埋まる", () => {
     const g = col([10, 10, 10, 50, 10, 10, 10]);
-    const r = applyPostprocess(g, { removeOutliers: true, sigma: 3, interpolate: true });
+    const r = applyPostprocess(g, {
+      removeOutliers: true,
+      sigma: 3,
+      outlierBase: "global",
+      interpolate: true,
+    });
     expect(r.removed).toBe(1);
     expect(flat(r.grid)).toEqual([10, 10, 10, 10, 10, 10, 10]);
     expect(r.filled?.[3][0]).toBe(true);
