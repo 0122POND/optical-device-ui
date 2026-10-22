@@ -119,6 +119,8 @@ function App() {
 
   // 断層グラフを表示するかどうか
   const [showSlice, setShowSlice] = useState(false);
+  // 断面の帯の幅[µm]（0=線の上だけ）。帯なら幅の中の画素の中央値で断面を描く
+  const [sliceBandUm, setSliceBandUm] = useState(0);
 
   // 断層ライン始点・終点（2クリックで決定）
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
@@ -653,6 +655,7 @@ function App() {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
@@ -700,6 +703,7 @@ function App() {
     flipX,
     flipRef,
     plotType,
+    bandWidthUm: viewZ && viewZ.length > 0 ? sliceBandUm : 0,
     sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
@@ -1667,6 +1671,39 @@ function App() {
                     gap: "6px",
                   }}
                 >
+                  {/* 帯の幅（高さマップがあるとき）。帯なら幅の中の画素の中央値で断面を描く */}
+                  {viewZ && viewZ.length > 0 && (
+                    <div
+                      title="断面線の両側 ±幅/2 の画素を集めて横から見る（線は距離ごとの中央値、薄い帯は P10〜P90）"
+                      style={{ display: "flex", alignItems: "center", gap: "2px" }}
+                    >
+                      <span
+                        style={{ fontSize: "11px", color: colors.textMuted, marginRight: "4px" }}
+                      >
+                        帯の幅
+                      </span>
+                      {[0, 200, 500, 1000].map((w) => (
+                        <button
+                          key={w}
+                          onClick={() => setSliceBandUm(w)}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            fontFamily,
+                            borderRadius: "4px",
+                            border: `1px solid ${sliceBandUm === w ? colors.primary : colors.border}`,
+                            backgroundColor:
+                              sliceBandUm === w ? colors.primarySoft : "rgba(22, 27, 34, 0.86)",
+                            color: sliceBandUm === w ? colors.primary : colors.text,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {w === 0 ? "線" : `${w} µm`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {/* 計測中で2点が確定済みのときだけ「クリア」を出す（やり直し用） */}
                   {sliceMeasureMode && sliceMeasureStart && sliceMeasureEnd && (
                     <button

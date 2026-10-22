@@ -3,6 +3,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import Plotly from "plotly.js-dist-min";
 import { DIM_COLORS, FILLED_COLOR, colors, fontFamily, monoFont } from "../utils/constants";
 import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
+import { bandOutline } from "../utils/bandSection";
 import type { PointCloud } from "../utils/pointCloud";
 import {
   gridScale,
@@ -47,6 +48,8 @@ export function usePlotly(args: {
   viewMode: ViewMode;
   showSlice: boolean;
   sliceLineStart: { y: number; z: number } | null;
+  // 断面の帯の幅[µm]（0=線だけ）。2D 表示に帯の外形を描く
+  sliceBandUm: number;
   sliceLineEnd: { y: number; z: number } | null;
   // 表示中データの出どころと換算設定（µm への換算は utils/units に集約）。
   // scale は App 側で useMemo して参照を安定させること（描画 effect の依存に入るため）
@@ -91,6 +94,7 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
@@ -821,6 +825,19 @@ export function usePlotly(args: {
             showlegend: false,
             hoverinfo: "skip",
           });
+          if (sliceBandUm > 0) {
+            const o = bandOutline(sliceLineStart, sliceLineEnd, sliceBandUm);
+            surfData.push({
+              type: "scatter3d",
+              mode: "lines",
+              x: o.y,
+              y: o.z,
+              z: o.y.map(() => frontZ),
+              line: { color: "#ff4444", width: 2, dash: "dash" },
+              showlegend: false,
+              hoverinfo: "skip",
+            });
+          }
         } else if (sliceLineStart) {
           surfData.push({
             type: "scatter3d",
@@ -1255,6 +1272,7 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
