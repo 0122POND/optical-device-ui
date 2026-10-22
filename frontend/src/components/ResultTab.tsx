@@ -1,4 +1,5 @@
-import { colors, fontFamily } from "../utils/constants";
+import { colors, fontFamily, monoFont } from "../utils/constants";
+import { panelSectionStyle, sectionTitleStyle } from "../utils/styles";
 import type { CloudHistoryEntry, HistorySource, ViewMode } from "../types";
 import type { PointCloud } from "../utils/pointCloud";
 
@@ -29,31 +30,36 @@ export function ResultTab({
   return (
     <>
       {cloud ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-            <span style={{ color: colors.textMuted }}>点数</span>
-            <span>{cloud.x.length.toLocaleString()} pts</span>
+        <section style={panelSectionStyle}>
+          <h3 style={sectionTitleStyle}>表示中のデータ</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+              <span style={{ color: colors.textMuted }}>点数</span>
+              <span style={{ fontFamily: monoFont }}>{cloud.x.length.toLocaleString()} pts</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+              <span style={{ color: colors.textMuted }}>閾値</span>
+              <span style={{ fontFamily: monoFont }}>{">"} 128</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+              <span style={{ color: colors.textMuted }}>表示モード</span>
+              <span style={{ fontFamily: monoFont }}>{viewMode === "3D" ? "3D" : "2D"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+              <span style={{ color: colors.textMuted }}>カラー軸</span>
+              <span style={{ fontFamily: monoFont }}>
+                {viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)"}
+              </span>
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-            <span style={{ color: colors.textMuted }}>閾値</span>
-            <span>{">"} 128</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-            <span style={{ color: colors.textMuted }}>表示モード</span>
-            <span>{viewMode === "3D" ? "3D" : "2D"}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-            <span style={{ color: colors.textMuted }}>カラー軸</span>
-            <span>{viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)"}</span>
-          </div>
-        </div>
+        </section>
       ) : (
         <div
           style={{
             fontSize: "13px",
             color: colors.textMuted,
             textAlign: "center",
-            marginTop: "20px",
+            padding: "28px 0",
           }}
         >
           計測データがありません
@@ -62,19 +68,8 @@ export function ResultTab({
 
       {/* 測定履歴 */}
       {history.length > 0 && (
-        <div style={{ marginTop: "16px" }}>
-          <div
-            style={{
-              fontSize: "12px",
-              fontWeight: 600,
-              color: colors.textMuted,
-              marginBottom: "8px",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-            }}
-          >
-            測定履歴（最新5件）
-          </div>
+        <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
+          <h3 style={sectionTitleStyle}>測定履歴（最新5件）</h3>
           {(
             [
               "coin",
@@ -113,8 +108,8 @@ export function ResultTab({
                 <div
                   style={{
                     fontSize: "11px",
-                    color: colors.textMuted,
-                    marginBottom: "4px",
+                    color: colors.textDim,
+                    marginBottom: "6px",
                   }}
                 >
                   {srcLabel}
@@ -129,22 +124,30 @@ export function ResultTab({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
+                          gap: "8px",
                           padding: "8px 10px",
-                          borderRadius: "6px",
-                          backgroundColor: isCurrent ? colors.primary + "22" : colors.bgDark,
+                          borderRadius: "8px",
+                          backgroundColor: isCurrent ? colors.primarySoft : colors.bgLight,
                           border: isCurrent
-                            ? `1px solid ${colors.primary}`
+                            ? `1px solid ${colors.primary}80`
                             : `1px solid ${colors.border}`,
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            minWidth: 0,
+                          }}
+                        >
                           <img
                             src={entry.thumbnail}
                             alt={`#${history.length - i}`}
                             style={{
                               width: "48px",
                               height: "48px",
-                              borderRadius: "4px",
+                              borderRadius: "6px",
                               border: `1px solid ${colors.border}`,
                               flexShrink: 0,
                             }}
@@ -154,6 +157,7 @@ export function ResultTab({
                               display: "flex",
                               flexDirection: "column",
                               gap: "2px",
+                              minWidth: 0,
                             }}
                           >
                             {editingNameIdx === i ? (
@@ -199,15 +203,38 @@ export function ResultTab({
                                 {entry.name || `#${history.length - i}`}
                               </span>
                             )}
-                            <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                            <span
+                              style={{
+                                fontFamily: monoFont,
+                                fontSize: "10.5px",
+                                color: colors.textMuted,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
                               {entry.measuredAt}
                             </span>
-                            <span style={{ fontSize: "11px", color: colors.textMuted }}>
+                            <span
+                              style={{
+                                fontFamily: monoFont,
+                                fontSize: "11px",
+                                color: colors.textDim,
+                              }}
+                            >
                               {entry.points.toLocaleString()} pts
                             </span>
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "6px",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {isCurrent ? (
                             <span
                               style={{
@@ -220,15 +247,16 @@ export function ResultTab({
                             </span>
                           ) : (
                             <button
+                              className="tt-hover"
                               style={{
                                 padding: "4px 10px",
                                 fontSize: "11px",
                                 fontWeight: 600,
                                 fontFamily,
-                                border: `1px solid ${colors.primary}`,
-                                borderRadius: "4px",
+                                border: `1px solid ${colors.borderLight}`,
+                                borderRadius: "6px",
                                 backgroundColor: "transparent",
-                                color: colors.primary,
+                                color: colors.text,
                                 cursor: "pointer",
                               }}
                               onClick={() => onRestore(entry.cloud)}
@@ -237,15 +265,16 @@ export function ResultTab({
                             </button>
                           )}
                           <button
+                            className="tt-hover"
                             style={{
                               padding: "4px 10px",
                               fontSize: "11px",
                               fontWeight: 600,
                               fontFamily,
-                              border: `1px solid ${colors.danger}`,
-                              borderRadius: "4px",
+                              border: `1px solid ${colors.border}`,
+                              borderRadius: "6px",
                               backgroundColor: "transparent",
-                              color: colors.danger,
+                              color: colors.textDim,
                               cursor: "pointer",
                             }}
                             onClick={() => setDeleteConfirmIdx(i)}
@@ -260,7 +289,7 @@ export function ResultTab({
               </div>
             );
           })}
-        </div>
+        </section>
       )}
     </>
   );

@@ -56,6 +56,35 @@ export function ThreeSurfaceMeshView(props: {
   const [contour, setContour] = useState(false);
   const [flipZ, setFlipZ] = useState(false);
   const [legend, setLegend] = useState<{ lo: number; hi: number; tris: number } | null>(null);
+  // カラーバーの位置（null=既定の右下）。ドラッグで動かすと親要素内の left/top[px] を持つ
+  const [legendPos, setLegendPos] = useState<{ x: number; y: number } | null>(null);
+  const legendDragRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  // カラーバーのドラッグ移動（つかんだ位置のずれを保ったまま、親の枠内に収める）
+  const onLegendPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const parent = el.offsetParent as HTMLElement | null;
+    if (!parent) return;
+    const r = el.getBoundingClientRect();
+    legendDragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    el.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  };
+  const onLegendPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = legendDragRef.current;
+    if (!d) return;
+    const el = e.currentTarget;
+    const parent = el.offsetParent as HTMLElement | null;
+    if (!parent) return;
+    const pr = parent.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX - pr.left - d.dx, 0), pr.width - el.offsetWidth);
+    const y = Math.min(Math.max(e.clientY - pr.top - d.dy, 0), pr.height - el.offsetHeight);
+    setLegendPos({ x, y });
+  };
+  const onLegendPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    legendDragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
 
   const stateRef = useRef<MeshViewState | null>(null);
   // 描画ループ（マウント時に1回だけ生成）から最新値を読むための ref
@@ -71,7 +100,7 @@ export function ThreeSurfaceMeshView(props: {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(container.clientWidth || 1, container.clientHeight || 1);
-    renderer.setClearColor(0x000000, 1);
+    renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -326,8 +355,9 @@ export function ThreeSurfaceMeshView(props: {
 
   const panel: React.CSSProperties = {
     position: "absolute",
-    top: 8,
-    left: 8,
+    // 左上はフローティングツールバーがあるので、その下に出す
+    top: 56,
+    left: 12,
     width: 220,
     padding: "10px 12px",
     background: "rgba(20,22,27,0.78)",
@@ -437,14 +467,19 @@ export function ThreeSurfaceMeshView(props: {
       </div>
       {legend && cmap !== "metal" && (
         <div
+          title="ドラッグで移動"
+          onPointerDown={onLegendPointerDown}
+          onPointerMove={onLegendPointerMove}
+          onPointerUp={onLegendPointerUp}
           style={{
             position: "absolute",
-            right: 12,
-            top: "50%",
-            transform: "translateY(-50%)",
+            ...(legendPos ? { left: legendPos.x, top: legendPos.y } : { right: 12, bottom: 44 }),
+            cursor: "grab",
+            touchAction: "none",
+            userSelect: "none",
             display: "flex",
             gap: 6,
-            height: 220,
+            height: 180,
             fontSize: 11,
             color: "#b6bdc9",
             fontFamily: "ui-monospace, Menlo, monospace",

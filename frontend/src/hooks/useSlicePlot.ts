@@ -271,11 +271,11 @@ export function useSlicePlot(args: {
     const layout: any = {
       title: titleText,
       margin: { l: 50, r: 20, t: 40, b: 50 },
-      xaxis: { title: { text: "距離 [µm]" }, color: colors.text, gridcolor: colors.border },
-      yaxis: { title: { text: "深さ [µm]" }, color: colors.text, gridcolor: colors.border },
+      xaxis: { title: { text: "距離 [µm]" }, color: colors.textMuted, gridcolor: colors.grid },
+      yaxis: { title: { text: "深さ [µm]" }, color: colors.textMuted, gridcolor: colors.grid },
       height: 250,
-      paper_bgcolor: colors.bgDark,
-      plot_bgcolor: colors.bgDark,
+      paper_bgcolor: colors.surface,
+      plot_bgcolor: "rgba(0,0,0,0)",
       font: { color: colors.text, family: fontFamily },
     };
 

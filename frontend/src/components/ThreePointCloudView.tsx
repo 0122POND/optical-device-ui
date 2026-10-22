@@ -71,11 +71,12 @@ export function ThreePointCloudView(props: {
 
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
+      alpha: true,
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, h);
-    renderer.setClearColor(0x0b0b0f, 1);
+    renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -221,8 +222,9 @@ export function ThreePointCloudView(props: {
         <div
           style={{
             position: "absolute",
-            top: 8,
-            left: 8,
+            // 左上はフローティングツールバーがあるので、その下に出す
+            top: 56,
+            left: 12,
             padding: "4px 10px",
             background: "rgba(0,0,0,0.6)",
             color: "#fff",

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import Plotly from "plotly.js-dist-min";
-import { DIM_COLORS, fontFamily } from "../utils/constants";
+import { DIM_COLORS, colors, fontFamily, monoFont } from "../utils/constants";
 import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
 import type {
@@ -109,6 +109,22 @@ export function usePlotly(args: {
   // plotly_relayout の scene.camera は Plotly が内部生成した異常値のことがあり、
   // 保存するとクリック後の再描画で視点が飛ぶ（断層の点選択で画面が真っ黒になる症状）。
   const glCamApplyingRef = useRef(false);
+  // カラーバーの位置（ドラッグで動かした値を覚え、再描画しても戻らないようにする）。
+  // 既定は右下。xanchor=right / yanchor=bottom 基準の paper 座標
+  const colorbarPosRef = useRef({ x: 0.995, y: 0.04 });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rememberColorbarPos = (e: any) => {
+    const u = e?.[0];
+    if (!u) return;
+    const pick = (k: string) => {
+      const v = u[k] ?? u[`marker.${k}`];
+      return Array.isArray(v) ? v[0] : v;
+    };
+    const x = pick("colorbar.x");
+    const y = pick("colorbar.y");
+    if (typeof x === "number") colorbarPosRef.current.x = x;
+    if (typeof y === "number") colorbarPosRef.current.y = y;
+  };
   // シーン再構築後の非同期イベントまで抑制期間に含めるための共通ヘルパー
   const markGlCamApplying = () => {
     glCamApplyingRef.current = true;
@@ -228,7 +244,7 @@ export function usePlotly(args: {
               showarrow: false,
               font: { color: "#ffffff", size: 13, family: fontFamily },
               bgcolor: "rgba(0,0,0,0.7)",
-              bordercolor: "#f59e0b",
+              bordercolor: colors.primary,
               borderwidth: 1,
               borderpad: 3,
               yshift: 12,
@@ -426,12 +442,17 @@ export function usePlotly(args: {
           zsmooth: false,
           connectgaps: false,
           colorbar: {
-            x: -0.05,
-            thickness: 18,
-            len: 0.9,
-            ypad: 10,
-            tickfont: { color: "#ffffff" },
-            title: { text: zLabel, font: { color: "#ffffff", size: 11 }, side: "right" },
+            // モック準拠: 右下に細く置き、単位は上に
+            x: colorbarPosRef.current.x,
+            xanchor: "right",
+            y: colorbarPosRef.current.y,
+            yanchor: "bottom",
+            len: 0.34,
+            thickness: 8,
+            outlinewidth: 0,
+            ypad: 0,
+            tickfont: { color: colors.textMuted, family: monoFont, size: 10.5 },
+            title: { text: zLabel, font: { color: colors.textDim, size: 10.5 }, side: "top" },
           },
           hovertemplate: `${xLabel}: %{x:.1f}<br>${yLabel}: %{y:.1f}<br>${zLabel}: %{z:.2f}<extra></extra>`,
         },
@@ -441,20 +462,20 @@ export function usePlotly(args: {
       const dimLayout: any = {
         autosize: true,
         margin: { l: 50, r: 10, t: 30, b: 45 },
-        paper_bgcolor: "#000000",
-        plot_bgcolor: "#000000",
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
         dragmode: "pan",
         xaxis: {
-          title: { text: xLabel, font: { size: 12, color: "#ffffff" } },
-          color: "#ffffff",
-          gridcolor: "#222222",
+          title: { text: xLabel, font: { size: 12, color: colors.textMuted } },
+          color: colors.textMuted,
+          gridcolor: colors.grid,
           zeroline: false,
           constrain: "domain",
         },
         yaxis: {
-          title: { text: yLabel, font: { size: 12, color: "#ffffff" } },
-          color: "#ffffff",
-          gridcolor: "#222222",
+          title: { text: yLabel, font: { size: 12, color: colors.textMuted } },
+          color: colors.textMuted,
+          gridcolor: colors.grid,
           zeroline: false,
           scaleanchor: "x",
           scaleratio: 1,
@@ -471,7 +492,7 @@ export function usePlotly(args: {
         scrollZoom: true, // ホイールでズームイン/アウト（寸法線ドラッグと両立）
         modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
         editable: false,
-        edits: { shapePosition: true, annotationPosition: true },
+        edits: { shapePosition: true, annotationPosition: true, colorbarPosition: true },
       };
 
       // 寸法測定の relayout ハンドラは tol などその場のクロージャに依存するため、
@@ -484,6 +505,8 @@ export function usePlotly(args: {
       dimApplyingRef.current = false;
       Plotly.purge(plotEl);
       Plotly.newPlot(plotEl, dimData, dimLayout, dimConfig);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_restyle", rememberColorbarPos);
       plotKindRef.current = "dim";
 
       const toReadouts = (ls: DimLine[]) =>
@@ -735,12 +758,17 @@ export function usePlotly(args: {
           cmax: surfColor.cmax,
           showscale: true,
           colorbar: {
-            x: -0.05,
-            thickness: 18,
-            len: 0.9,
-            ypad: 10,
-            tickfont: { color: "#ffffff" },
-            title: { text: zLabel, font: { color: "#ffffff", size: 11 }, side: "right" },
+            // モック準拠: 右下に細く置き、単位は上に
+            x: colorbarPosRef.current.x,
+            xanchor: "right",
+            y: colorbarPosRef.current.y,
+            yanchor: "bottom",
+            len: 0.34,
+            thickness: 8,
+            outlinewidth: 0,
+            ypad: 0,
+            tickfont: { color: colors.textMuted, family: monoFont, size: 10.5 },
+            title: { text: zLabel, font: { color: colors.textDim, size: 10.5 }, side: "top" },
           },
           contours: {
             z: { show: false },
@@ -757,32 +785,32 @@ export function usePlotly(args: {
         title: "",
         autosize: true,
         margin: { l: 0, r: 0, t: 30, b: 0 },
-        paper_bgcolor: "#000000",
+        paper_bgcolor: "rgba(0,0,0,0)",
         scene: {
-          bgcolor: "#000000",
+          bgcolor: "rgba(0,0,0,0)",
           xaxis: {
-            title: axisVisible ? { text: xLabel, font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: xLabel, font: { size: 12, color: colors.textMuted } } : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           yaxis: {
-            title: axisVisible ? { text: yLabel, font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: yLabel, font: { size: 12, color: colors.textMuted } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           zaxis: {
-            title: axisVisible ? { text: zLabel, font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible ? { text: zLabel, font: { size: 12, color: colors.textMuted } } : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           aspectmode: "manual",
           aspectratio:
@@ -848,7 +876,13 @@ export function usePlotly(args: {
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
+      const config: any = {
+        responsive: true,
+        displaylogo: false,
+        displayModeBar: false,
+        // カラーバーはドラッグで好きな位置へ動かせる
+        edits: { colorbarPosition: true },
+      };
       // surface は react だとクリックのヒットテストが更新されず、2点目が1点目と同じ座標を
       // 返す不具合がある。グリッドは軽いので常に purge+newPlot で作り直す（カメラは
       // savedCameraRef→layout.camera で維持されるため視点は戻らない）。
@@ -856,6 +890,8 @@ export function usePlotly(args: {
         markGlCamApplying();
         Plotly.purge(plotEl);
         Plotly.newPlot(plotEl, surfData, surfLayout, config);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_restyle", rememberColorbarPos);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (plotEl as any).on("plotly_click", (eventData: any) => {
           if (!eventData.points || eventData.points.length === 0) return;
@@ -1008,11 +1044,15 @@ export function usePlotly(args: {
             cmax: pointColor.cmax,
             showscale: true,
             colorbar: {
-              x: -0.05,
-              thickness: 18,
-              len: 0.9,
-              ypad: 10,
-              tickfont: { color: "#ffffff" },
+              x: colorbarPosRef.current.x,
+              xanchor: "right",
+              y: colorbarPosRef.current.y,
+              yanchor: "bottom",
+              len: 0.34,
+              thickness: 8,
+              outlinewidth: 0,
+              ypad: 0,
+              tickfont: { color: colors.textMuted, family: monoFont, size: 10.5 },
               tickvals,
               ticktext,
             },
@@ -1027,37 +1067,41 @@ export function usePlotly(args: {
         title: "",
         autosize: true,
         margin: { l: 0, r: 0, t: 30, b: 0 },
-        paper_bgcolor: "#000000",
+        paper_bgcolor: "rgba(0,0,0,0)",
         scene: {
-          bgcolor: "#000000",
+          bgcolor: "rgba(0,0,0,0)",
           xaxis: {
-            title: axisVisible ? { text: "Z [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible
+              ? { text: "Z [µm]", font: { size: 12, color: colors.textMuted } }
+              : "",
             visible: viewMode === "3D" && axisVisible,
             showgrid: viewMode === "3D" && axisVisible,
             zeroline: viewMode === "3D" && axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           yaxis: {
-            title: axisVisible ? { text: "X [µm]", font: { size: 12, color: "#ffffff" } } : "",
+            title: axisVisible
+              ? { text: "X [µm]", font: { size: 12, color: colors.textMuted } }
+              : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           zaxis: {
             title: axisVisible
               ? {
                   text: hasSweep ? "Y [µm]" : "Y (仮定値)",
-                  font: { size: 12, color: "#ffffff" },
+                  font: { size: 12, color: colors.textMuted },
                 }
               : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
-            color: "#ffffff",
-            gridcolor: "#333333",
+            color: colors.textMuted,
+            gridcolor: colors.grid,
           },
           aspectmode: "manual",
           aspectratio: (() => {
@@ -1134,7 +1178,13 @@ export function usePlotly(args: {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = { responsive: true, displaylogo: false, displayModeBar: false };
+    const config: any = {
+      responsive: true,
+      displaylogo: false,
+      displayModeBar: false,
+      // カラーバーはドラッグで好きな位置へ動かせる
+      edits: { colorbarPosition: true },
+    };
 
     // クリックのヒットテスト鮮度が必要な間（断層の点選択・距離計測）は、surface と
     // 同様に purge+newPlot で作り直す。react 差分更新では gl3d のピッキングが更新されず、
@@ -1149,6 +1199,8 @@ export function usePlotly(args: {
       markGlCamApplying();
       Plotly.purge(plotEl);
       Plotly.newPlot(plotEl, data, layout, config);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_restyle", rememberColorbarPos);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (plotEl as any).on("plotly_click", (eventData: any) => {
         if (!eventData.points || eventData.points.length === 0) return;
