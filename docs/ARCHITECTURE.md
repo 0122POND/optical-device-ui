@@ -55,8 +55,9 @@
 | `app.py` | FastAPI エントリ。WebSocket / HTTP / 静的配信を統合 |
 | `ai_inference.py` | PyTorch + segmentation-models-pytorch によるマスク推論 |
 | `convert_to_hdf5.py` | BMP群を HDF5 に一括変換（初回キャッシュ生成） |
-| `preprocessing_cpu.py` / `preprocessing_gpu.py` | 標準コイン計測パイプライン（CPU / CuPy） |
-| `preprocessing_std_cpu.py` | 標準系CPU（elec/medical/semi共用。coinとの差はσ=1・膨張なし） |
+| `preprocessing_cpu_core.py` | CPU前処理の本体（coin / 標準系 / coin2 で共通。違いは掃引方向σ・ガウス窓の縦方向・進捗文言の設定だけ） |
+| `preprocessing_cpu.py` / `preprocessing_std_cpu.py` / `preprocessing_coin2_cpu.py` | 上の本体を各アルゴリズムの設定で呼ぶ入口（coin: σ=10・窓は縦横／標準系: σ=1・縦横／coin2: σ=1・横のみ） |
+| `preprocessing_gpu.py` | 標準コイン計測パイプライン（CuPy） |
 | `preprocessing_coin2_*.py` | コイン計測パイプライン改良版 |
 | `preprocessing_tgv*.py` | TGV正則化バリアント |
 | `models/` | 学習済みモデル（重み）格納 |

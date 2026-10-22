@@ -261,7 +261,8 @@ async def ws_endpoint(ws: WebSocket):
         def blocking_preprocess():
             # use_gpu / algorithm に応じて適切なモジュールを動的にインポート。
             # elec/medical/semi は標準系と同一処理（GPUは preprocessing_gpu、
-            # CPUは preprocessing_std_cpu を共用）。coin(=else)のみ CPUが σ=10+膨張で別。
+            # CPUは preprocessing_std_cpu を共用）。CPU の coin / 標準系 / coin2 は本体
+            # preprocessing_cpu_core を共有し、掃引方向 σ とガウス窓の形の設定だけが違う。
             if algorithm == "tgv":
                 if use_gpu:
                     from preprocessing_tgv_gpu import run_preprocess

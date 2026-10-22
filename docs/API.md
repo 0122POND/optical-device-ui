@@ -70,12 +70,12 @@ const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws`);
 
 | 値 | モジュール（GPU/CPU） | 用途 |
 |---|---|---|
-| `coin` | `preprocessing_gpu.py` / `preprocessing_cpu.py` | コイン計測（標準。CPUは σ=10＋1px膨張） |
+| `coin` | `preprocessing_gpu.py` / `preprocessing_cpu.py` | コイン計測（標準。CPUは掃引方向 σ=10） |
 | `coin2` | `preprocessing_coin2_gpu.py` / `preprocessing_coin2_cpu.py` | コイン計測（改良版。X方向のみガウス窓） |
 | `tgv` | `preprocessing_tgv_gpu.py` / `preprocessing_tgv.py` | TGV正則化（構造別） |
 | `elec` / `medical` / `semi` | `preprocessing_gpu.py` / `preprocessing_std_cpu.py` | 電子部品・医療・半導体（標準系。3者は同一処理を共用） |
 
-> 備考: `elec` / `medical` / `semi` は処理内容が同一だったため、GPUは標準の `preprocessing_gpu.py`、CPUは `preprocessing_std_cpu.py`（旧 `preprocessing_elec_cpu.py`）を共用します。`coin` との違いはCPU側の σ 値（1 vs 10）と1px膨張の有無のみです。
+> 備考: `elec` / `medical` / `semi` は処理内容が同一だったため、GPUは標準の `preprocessing_gpu.py`、CPUは `preprocessing_std_cpu.py`（旧 `preprocessing_elec_cpu.py`）を共用します。`coin` との違いはCPU側の掃引方向 σ（1 vs 10）のみです（1px膨張は両方とも行う）。CPU の3アルゴリズムは本体 `preprocessing_cpu_core.py` を共有し、設定だけが違います。
 
 ※ 初回実行時は `data/row_data.h5` （HDF5キャッシュ）が自動生成され、以降の処理が高速化されます。
 
