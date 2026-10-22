@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surface Viewer</title>
+<style>
+  :root {
+    --bg0: #eef0f3; --bg1: #d9dde3; --ink: #1d2128; --muted: #5d6573; --panel: rgba(255,255,255,.82);
+    --line: rgba(0,0,0,.12); --accent: #2f6fd6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg0: #23262d; --bg1: #121418; --ink: #e6e8ec; --muted: #9aa3b2; --panel: rgba(28,31,37,.85);
+      --line: rgba(255,255,255,.12); --accent: #6aa0ff; }
+  }
+  html, body { margin: 0; height: 100%; color: var(--ink);
+    font: 13px/1.45 -apple-system, "Hiragino Sans", "Segoe UI", sans-serif;
+    background: radial-gradient(ellipse at 50% 35%, var(--bg0), var(--bg1)); overflow: hidden; }
+  #cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #panel { position: fixed; top: 12px; left: 12px; width: 250px; padding: 12px 14px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px); }
+  #panel h1 { font-size: 14px; margin: 0 0 2px; }
+  #info { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; word-break: break-all; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+  .row label { flex: 0 0 76px; color: var(--muted); }
+  .row input[type=range] { flex: 1; min-width: 0; }
+  .row input[type=number] { width: 64px; }
+  .row output { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+  select, input[type=number] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+    border-radius: 5px; padding: 2px 4px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 9px 0 4px; }
+  button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #stats { position: fixed; right: 12px; bottom: 10px; color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
+  #drop { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none;
+    font-size: 16px; color: var(--muted); }
+  body.dragging #drop { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+  #colorbar { position: fixed; right: 16px; top: 50%; transform: translateY(-50%); display: flex; gap: 6px;
+    align-items: stretch; height: 220px; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+  #colorbar canvas { width: 12px; height: 100%; border-radius: 3px; border: 1px solid var(--line); }
+  #colorbar .ticks { display: flex; flex-direction: column; justify-content: space-between; }
+  [hidden] { display: none !important; }
+  @media (max-width: 600px) { #panel { width: auto; right: 12px; } #colorbar { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="drop">CSV（-9999.9 = 欠損）をドロップ、または左上から選択</div>
+<div id="panel">
+  <h1>Surface Viewer（試作）</h1>
+  <div id="info">データ未読込</div>
+  <div class="row"><button id="open" type="button">CSVを開く…</button><input id="file" type="file" accept=".csv,.txt" hidden></div>
+  <div class="row"><label>ピッチ x/y</label><input id="px" type="number" step="any" value="10"><input id="py" type="number" step="any" value="10"><span>µm</span></div>
+  <div class="row"><label>z 強調</label><input id="zex" type="range" min="1" max="50" step="0.5" value="5"><output id="zexv">5×</output></div>
+  <div class="row"><label>色</label>
+    <select id="cmap"><option value="turbo">高さ（turbo）</option><option value="viridis">高さ（viridis）</option><option value="metal">金属（単色）</option></select></div>
+  <div class="row"><label>前処理</label>
+    <select id="detrend"><option value="none">なし</option><option value="plane" selected>平面除去</option><option value="quad">2次曲面除去</option></select></div>
+  <div class="checks">
+    <label><input id="rotate" type="checkbox" checked> 自動回転</label>
+    <label><input id="contour" type="checkbox"> 等高線</label>
+    <label><input id="flipz" type="checkbox"> z 反転</label>
+  </div>
+  <div class="row"><button id="reset" type="button">視点リセット</button></div>
+</div>
+<div id="colorbar" hidden><canvas id="cbar" width="1" height="256"></canvas><div class="ticks"><span id="cbHi"></span><span id="cbMid"></span><span id="cbLo"></span></div></div>
+<div id="stats"></div>
+<!-- pack_surface_viewer.py がここに埋め込みデータを差し込む -->
+<script type="application/json" id="embed-meta">null</script>
+<script type="text/plain" id="embed-pack"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const MISSING = -9999.9;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------------------------------------
+// データ: grid = { w, h, z: Float32Array (NaN = 欠損), name }
+let grid = null;
+
+function parseCSV(text, name) {
+  const rows = text.trim().split(/\r?\n/).filter((l) => l.trim() !== '');
+  const h = rows.length, w = rows[0].split(',').length;
+  const z = new Float32Array(w * h);
+  for (let r = 0; r < h; r++) {
+    const cells = rows[r].split(',');
+    for (let c = 0; c < w; c++) {
+      const v = parseFloat(cells[c]);
+      z[r * w + c] = !Number.isFinite(v) || v <= MISSING + 0.05 ? NaN : v;
+    }
+  }
+  return { w, h, z, name };
+}
+
+// 埋め込みデータ: gzip(Uint16 量子化高さ, 65535 = 欠損) を base64 で格納
+async function loadEmbedded() {
+  const meta = JSON.parse($('embed-meta').textContent);
+  const b64 = $('embed-pack').textContent.trim();
+  if (!meta || !b64) return null;
+  const s = atob(b64), bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  const buf = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const q = new Uint16Array(buf), z = new Float32Array(q.length), sc = (meta.hi - meta.lo) / 65534;
+  for (let i = 0; i < q.length; i++) z[i] = q[i] === 65535 ? NaN : meta.lo + q[i] * sc;
+  if (meta.pitch_x) $('px').value = meta.pitch_x;
+  if (meta.pitch_y) $('py').value = meta.pitch_y;
+  if (meta.z_exaggeration) $('zex').value = meta.z_exaggeration;
+  return { w: meta.w, h: meta.h, z, name: meta.name };
+}
+
+// 最小二乗で平面 / 2次曲面を当てて引く（大域的な傾き・すり鉢を消して起伏を見せる）
+function detrend(src, mode) {
+  const { w, h, z } = src, out = new Float32Array(z);
+  if (mode === 'none') return out;
+  const basis = mode === 'plane'
+    ? (x, y) => [1, x, y]
+    : (x, y) => [1, x, y, x * x, x * y, y * y];
+  const n = basis(0, 0).length, A = new Float64Array(n * n), b = new Float64Array(n);
+  const step = Math.max(1, Math.floor(Math.sqrt(w * h / 200000)));
+  for (let r = 0; r < h; r += step) for (let c = 0; c < w; c += step) {
+    const v = z[r * w + c];
+    if (Number.isNaN(v)) continue;
+    const f = basis(c / w - 0.5, r / h - 0.5);
+    for (let i = 0; i < n; i++) { b[i] += f[i] * v; for (let j = 0; j < n; j++) A[i * n + j] += f[i] * f[j]; }
+  }
+  const coef = solve(A, b, n);
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const k = r * w + c;
+    if (Number.isNaN(z[k])) continue;
+    const f = basis(c / w - 0.5, r / h - 0.5);
+    let t = 0;
+    for (let i = 0; i < n; i++) t += coef[i] * f[i];
+    out[k] = z[k] - t;
+  }
+  return out;
+}
+function solve(A, b, n) { // ガウス消去（部分ピボット）
+  A = A.slice(); b = b.slice();
+  for (let i = 0; i < n; i++) {
+    let p = i;
+    for (let k = i + 1; k < n; k++) if (Math.abs(A[k * n + i]) > Math.abs(A[p * n + i])) p = k;
+    for (let j = 0; j < n; j++) [A[i * n + j], A[p * n + j]] = [A[p * n + j], A[i * n + j]];
+    [b[i], b[p]] = [b[p], b[i]];
+    for (let k = i + 1; k < n; k++) {
+      const f = A[k * n + i] / A[i * n + i];
+      for (let j = i; j < n; j++) A[k * n + j] -= f * A[i * n + j];
+      b[k] -= f * b[i];
+    }
+  }
+  const x = new Float64Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let j = i + 1; j < n; j++) s -= A[i * n + j] * x[j];
+    x[i] = s / A[i * n + i];
+  }
+  return x;
+}
+
+function percentile(arr, p) {
+  const v = [];
+  const step = Math.max(1, Math.floor(arr.length / 200000));
+  for (let i = 0; i < arr.length; i += step) if (!Number.isNaN(arr[i])) v.push(arr[i]);
+  v.sort((a, b) => a - b);
+  return v.length ? v[Math.min(v.length - 1, Math.floor(p / 100 * v.length))] : 0;
+}
+
+// ---------------------------------------------------------------------------------------------
+// カラーマップ（多項式近似）
+const CMAPS = {
+  turbo: (t) => [
+    0.13572138 + t * (4.6153926 + t * (-42.66032258 + t * (132.13108234 + t * (-152.94239396 + t * 59.28637943)))),
+    0.09140261 + t * (2.19418839 + t * (4.84296658 + t * (-14.18503333 + t * (4.27729857 + t * 2.82956604)))),
+    0.1066733 + t * (12.64194608 + t * (-60.58204836 + t * (110.36276771 + t * (-89.90310912 + t * 27.34824973)))),
+  ],
+  viridis: (t) => [
+    0.2777273 + t * (0.1050930 + t * (-0.3308618 + t * (-4.6342305 + t * (6.2282699 + t * (4.7763849 + t * -5.4354559))))),
+    0.0054073 + t * (1.4046134 + t * (0.2148476 + t * (-5.7991009 + t * (14.1799334 + t * (-13.7451454 + t * 4.6458526))))),
+    0.3340998 + t * (1.3845901 + t * (0.0950952 + t * (-19.3324409 + t * (56.6905526 + t * (-65.3530326 + t * 26.3124352))))),
+  ],
+  metal: () => [0.80, 0.81, 0.84],
+};
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+// ---------------------------------------------------------------------------------------------
+// three.js ステージ（sc150 と同じ流儀: ジオメトリは1回だけ GPU へ、以降は uniform / 行列だけ変える）
+const cv = $('cv');
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 1, 1e7);
+scene.add(camera);
+// カメラ固定ライト（VTK風）: どこから見ても陰影の調子が変わらない
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+for (const [p, i] of [[[1, 1, 1], 2.2], [[-1, -0.5, 0.5], 0.9], [[0, 0.3, -1], 0.5]]) {
+  const l = new THREE.DirectionalLight(0xffffff, i);
+  l.position.set(...p);
+  camera.add(l); camera.add(l.target);
+}
+const ctl = new OrbitControls(camera, cv);
+ctl.enableDamping = true;
+ctl.dampingFactor = 0.08;
+
+// 等高線は onBeforeCompile でフラグメントシェーダに差し込む（ジオメトリ再生成なし）
+const uniforms = { uContour: { value: 0 }, uContourStep: { value: 1 } };
+const material = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x333333, shininess: 30, side: THREE.DoubleSide });
+material.onBeforeCompile = (sh) => {
+  Object.assign(sh.uniforms, uniforms);
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float aH;\nvarying float vH;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvH = aH;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uContour;\nuniform float uContourStep;\nvarying float vH;')
+    .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+      if (uContour > 0.5) {
+        float f = vH / uContourStep;
+        float d = abs(fract(f - 0.5) - 0.5) / fwidth(f);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb * 0.35, gl_FragColor.rgb, clamp(d, 0.0, 1.0));
+      }`);
+};
+let mesh = null, geom = null, heights = null, range = null, size = { x: 1, y: 1 };
+
+function buildMesh() {
+  if (!grid) return;
+  const { w, h } = grid;
+  heights = detrend(grid, $('detrend').value);
+  if ($('flipz').checked) for (let i = 0; i < heights.length; i++) heights[i] = -heights[i];
+  const lo = percentile(heights, 0.5), hi = percentile(heights, 99.5);
+  range = { lo, hi };
+  const px = +$('px').value || 1, py = +$('py').value || 1;
+  size = { x: (w - 1) * px, y: (h - 1) * py };
+
+  // 頂点: x,y は µm、z は µm（強調は mesh.scale.z で掛ける＝法線は normalMatrix が正しく補正）
+  const pos = new Float32Array(w * h * 3), col = new Float32Array(w * h * 3), aH = new Float32Array(w * h);
+  const cmap = CMAPS[$('cmap').value];
+  const mid = (lo + hi) / 2;
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const k = r * w + c, v = heights[k], ok = !Number.isNaN(v);
+    pos[k * 3] = c * px - size.x / 2;
+    pos[k * 3 + 1] = (h - 1 - r) * py - size.y / 2;
+    pos[k * 3 + 2] = ok ? v - mid : 0;
+    aH[k] = ok ? v : 0;
+    const rgb = cmap(clamp01((v - lo) / (hi - lo || 1)));
+    // カラーマップは sRGB で定義 → three.js の線形作業空間へ
+    const color = new THREE.Color().setRGB(clamp01(rgb[0]), clamp01(rgb[1]), clamp01(rgb[2]), THREE.SRGBColorSpace);
+    col[k * 3] = color.r; col[k * 3 + 1] = color.g; col[k * 3 + 2] = color.b;
+  }
+  // インデックス: 4隅のうち有効な3点以上で三角形を張る（欠損の縁もギザギザになりにくい）
+  const idx = new Uint32Array((w - 1) * (h - 1) * 6);
+  let n = 0;
+  const ok = (k) => !Number.isNaN(heights[k]);
+  for (let r = 0; r < h - 1; r++) for (let c = 0; c < w - 1; c++) {
+    const a = r * w + c, b = a + 1, d = a + w, e = d + 1;
+    const A = ok(a), B = ok(b), D = ok(d), E = ok(e);
+    if (A && B && D && E) { idx[n++] = a; idx[n++] = d; idx[n++] = b; idx[n++] = b; idx[n++] = d; idx[n++] = e; }
+    else if (A && B && D) { idx[n++] = a; idx[n++] = d; idx[n++] = b; }
+    else if (B && D && E) { idx[n++] = b; idx[n++] = d; idx[n++] = e; }
+    else if (A && D && E) { idx[n++] = a; idx[n++] = d; idx[n++] = e; }
+    else if (A && B && E) { idx[n++] = a; idx[n++] = e; idx[n++] = b; }
+  }
+  if (geom) geom.dispose();
+  geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geom.setAttribute('aH', new THREE.BufferAttribute(aH, 1));
+  geom.setIndex(new THREE.BufferAttribute(idx.subarray(0, n), 1));
+  geom.computeVertexNormals();
+  geom.computeBoundingSphere();
+  if (!mesh) {
+    mesh = new THREE.Mesh(geom, material);
+    mesh.rotation.x = -Math.PI / 2; // データの z を画面の上方向へ
+    scene.add(mesh);
+  } else mesh.geometry = geom;
+  applyZex();
+  applyContour();
+  updateColorbar();
+  const valid = heights.reduce((s, v) => s + (Number.isNaN(v) ? 0 : 1), 0);
+  $('info').textContent = `${grid.name} — ${w}×${h}, 有効 ${(valid / (w * h) * 100).toFixed(1)}%`;
+  $('stats').textContent = `${(n / 3).toLocaleString()} 三角形`;
+}
+
+function applyZex() {
+  if (!mesh) return;
+  const k = +$('zex').value;
+  mesh.scale.set(1, 1, k);
+  $('zexv').textContent = `${k}×`;
+}
+function applyContour() {
+  uniforms.uContour.value = $('contour').checked ? 1 : 0;
+  if (range) uniforms.uContourStep.value = niceStep((range.hi - range.lo) / 15);
+}
+const niceStep = (x) => { const e = 10 ** Math.floor(Math.log10(x)), m = x / e; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e; };
+
+function updateColorbar() {
+  const cb = $('cbar'), ctx = cb.getContext('2d'), cmap = CMAPS[$('cmap').value];
+  $('colorbar').hidden = $('cmap').value === 'metal';
+  for (let i = 0; i < 256; i++) {
+    const [r, g, b] = cmap(1 - i / 255).map((v) => Math.round(clamp01(v) * 255));
+    ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fillRect(0, i, 1, 1);
+  }
+  const f = (v) => `${v.toFixed(1)} µm`;
+  $('cbHi').textContent = f(range.hi); $('cbMid').textContent = f((range.lo + range.hi) / 2); $('cbLo').textContent = f(range.lo);
+}
+
+// ---------------------------------------------------------------------------------------------
+// カメラ: 方位角・仰角・距離を指数平滑で目標へ寄せる。操作中は手動、放置で自動回転に戻る
+const cam = { az: 30, el: 35, dist: 1, target: new THREE.Vector3() };
+let auto = true, idle = 0;
+const RESUME_AFTER = 4.0; // 秒
+function homeDist() {
+  const r = Math.hypot(size.x, size.y) / 2;
+  return r / Math.sin(camera.fov / 2 * Math.PI / 180) * 0.95;
+}
+function resetView() {
+  cam.az = 30; cam.el = 35; cam.dist = homeDist(); cam.target.set(0, 0, 0);
+  auto = true; place(cam.az, cam.el, cam.dist, cam.target);
+}
+function place(az, el, d, t) {
+  const a = az * Math.PI / 180, e = el * Math.PI / 180;
+  camera.position.set(t.x + d * Math.cos(e) * Math.sin(a), t.y + d * Math.sin(e), t.z + d * Math.cos(e) * Math.cos(a));
+  camera.lookAt(t);
+  ctl.target.copy(t);
+  camera.near = d / 200; camera.far = d * 20; camera.updateProjectionMatrix();
+}
+function takeOverFromUser() { // 手動操作後の視点から自動回転を続ける（カメラが跳ばない）
+  const off = camera.position.clone().sub(ctl.target);
+  cam.dist = off.length();
+  cam.az = Math.atan2(off.x, off.z) * 180 / Math.PI;
+  cam.el = Math.asin(off.y / cam.dist) * 180 / Math.PI;
+  cam.target.copy(ctl.target);
+}
+let dragging = false;
+ctl.addEventListener('start', () => { auto = false; dragging = true; });
+ctl.addEventListener('end', () => { idle = 0; dragging = false; });
+
+let spin = 0; // 回転速度も平滑化して、止まる・動き出すをなめらかに
+let last = performance.now(), fps = 60;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  fps += (1 / Math.max(dt, 1e-3) - fps) * 0.05;
+  if (!mesh) { renderer.render(scene, camera); return; }
+  const want = $('rotate').checked && !reduceMotion;
+  if (!auto) {
+    idle += dt;
+    ctl.update();
+    if (want && idle > RESUME_AFTER && !dragging) { takeOverFromUser(); auto = true; spin = 0; }
+  }
+  if (auto) {
+    spin += ((want ? 15 : 0) - spin) * (1 - Math.exp(-dt / 0.8)); // 15°/s ≒ 24秒で1周
+    cam.az += spin * dt;
+    place(cam.az, cam.el, cam.dist, cam.target);
+  }
+  renderer.render(scene, camera);
+  if (Math.floor(now / 500) !== Math.floor((now - dt * 1000) / 500))
+    $('stats').textContent = `${(geom.index.count / 3).toLocaleString()} 三角形 · ${fps.toFixed(0)} fps`;
+}
+requestAnimationFrame(frame);
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// ---------------------------------------------------------------------------------------------
+// UI
+async function loadFile(f) {
+  $('info').textContent = `${f.name} を読込中…`;
+  grid = parseCSV(await f.text(), f.name);
+  buildMesh(); resetView();
+}
+$('open').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => e.target.files[0] && loadFile(e.target.files[0]));
+addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
+addEventListener('dragleave', () => document.body.classList.remove('dragging'));
+addEventListener('drop', (e) => {
+  e.preventDefault(); document.body.classList.remove('dragging');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+$('zex').addEventListener('input', applyZex);
+$('contour').addEventListener('change', applyContour);
+for (const id of ['cmap', 'detrend', 'flipz']) $(id).addEventListener('change', buildMesh);
+for (const id of ['px', 'py']) $(id).addEventListener('change', () => { buildMesh(); resetView(); });
+$('reset').addEventListener('click', resetView);
+
+try {
+  grid = await loadEmbedded();
+  if (grid) { buildMesh(); resetView(); $('drop').hidden = true; }
+} catch (err) {
+  $('info').textContent = `埋め込みデータを展開できませんでした: ${err.message}`;
+}
+const hideDrop = () => { $('drop').hidden = true; };
+$('file').addEventListener('change', hideDrop);
+addEventListener('drop', hideDrop);
+</script>
+</body>
+</html>

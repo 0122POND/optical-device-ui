@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
@@ -28,6 +28,7 @@ import { usePlotly } from "./hooks/usePlotly";
 import { usePlotlyAutoRotate } from "./hooks/usePlotlyAutoRotate";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { ThreePointCloudView } from "./components/ThreePointCloudView";
+import { ThreeSurfaceMeshView } from "./components/ThreeSurfaceMeshView";
 import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
 import type {
   PlotType,
@@ -187,6 +188,8 @@ function App() {
 
   // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
   const [pointEngine, setPointEngine] = useState<"plotly" | "three">("plotly");
+  // Surface エンジン: "plotly"(既定) or "three"(CAD風メッシュ、3D表示のときのみ)
+  const [surfaceEngine, setSurfaceEngine] = useState<"plotly" | "three">("plotly");
   // 自動回転（表示中の Surface / 点群をターンテーブルのように水平周回）
   const [autoRotate, setAutoRotate] = useState(false);
   const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
@@ -434,6 +437,7 @@ function App() {
     showPlot,
     axisVisible,
     renderPointsWithThree: pointEngine === "three",
+    renderSurfaceWithThree: surfaceEngine === "three",
     cloud,
     flipX,
     viewMode,
@@ -469,7 +473,8 @@ function App() {
       autoRotate &&
       showPlot &&
       viewMode === "3D" &&
-      !(plotType === "scatter3d" && pointEngine === "three"),
+      !(plotType === "scatter3d" && pointEngine === "three") &&
+      !(plotType === "surface" && surfaceEngine === "three"),
   });
 
   // --- 2D 断層グラフ描画（sliceRef へ） ---
@@ -718,6 +723,27 @@ function App() {
       cancelled = true;
     };
   }, [pointEngine, plotType, cloud]);
+
+  // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]。usePlotly の surface と同じ換算
+  // （列=Y方向ピクセル×umPerPixelY, 行=スライス×掃引間隔, 値=X重心×umPerPixelX）
+  const meshSurface = useMemo(() => {
+    if (surfaceEngine !== "three" || !zData || zData.length === 0) return null;
+    const sweepVal = parseFloat(sweepInterval);
+    const pitchY = !isNaN(sweepVal) && sweepVal > 0 ? sweepVal : umPerPixelY;
+    const isOpticalDevice = cloud !== null && cloud.x.length > 0;
+    let grid: (number | null)[][];
+    if (isOpticalDevice) {
+      let maxRawX = -Infinity;
+      if (flipX)
+        for (const row of zData) for (const v of row) if (v != null && v > maxRawX) maxRawX = v;
+      grid = zData.map((row) =>
+        row.map((v) => (v == null ? null : (flipX ? maxRawX - v : v) * umPerPixelX))
+      );
+    } else {
+      grid = flipX ? zData.map((row) => [...row].reverse()) : zData;
+    }
+    return { grid, pitchX: umPerPixelY, pitchY };
+  }, [surfaceEngine, zData, cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
 
   return (
     <>
@@ -1203,6 +1229,23 @@ function App() {
                     autoRotate={autoRotate}
                   />
                 )}
+
+                {/* three.js エンジン: 3D表示の Surface をCAD風メッシュで描く */}
+                {surfaceEngine === "three" &&
+                  plotType === "surface" &&
+                  viewMode === "3D" &&
+                  showPlot &&
+                  meshSurface && (
+                    <ThreeSurfaceMeshView
+                      grid={meshSurface.grid}
+                      pitchX={meshSurface.pitchX}
+                      pitchY={meshSurface.pitchY}
+                      colorRangeMin={colorRangeMin}
+                      colorRangeMax={colorRangeMax}
+                      autoRotate={autoRotate}
+                      onAutoRotateChange={setAutoRotate}
+                    />
+                  )}
 
                 {(isAcquiring || isLoadingAI) && (
                   <div
@@ -2008,6 +2051,44 @@ function App() {
                           </button>
                         ))}
                       </div>
+
+                      {/* Surface エンジン切替（Surface のときのみ） */}
+                      {plotType === "surface" && (
+                        <>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: colors.textMuted,
+                              margin: "10px 0 6px",
+                            }}
+                          >
+                            Surface エンジン
+                          </div>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            {(["plotly", "three"] as const).map((eng) => (
+                              <button
+                                key={eng}
+                                onClick={() => setSurfaceEngine(eng)}
+                                style={{
+                                  flex: 1,
+                                  height: "32px",
+                                  borderRadius: "6px",
+                                  border: `1px solid ${surfaceEngine === eng ? colors.primary : colors.border}`,
+                                  backgroundColor:
+                                    surfaceEngine === eng ? colors.primary + "22" : "transparent",
+                                  color: surfaceEngine === eng ? colors.primary : colors.textMuted,
+                                  fontSize: "12px",
+                                  fontWeight: surfaceEngine === eng ? 600 : 400,
+                                  fontFamily: fontFamily,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {eng === "plotly" ? "Plotly" : "three.js メッシュ"}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
 
                       {/* 点群エンジン切替（Point Cloud のときのみ） */}
                       {plotType === "scatter3d" && (

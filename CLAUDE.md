@@ -211,6 +211,16 @@ python tools/plot_contrast_vs_y.py 粗さ標準機/
 
 粗さ標準機では閾値≈3〜5階調。注: 明るい中央部では階調差が閾値を下回っても検出される（光量が高いため）＝閾値線は端部境界での値で、検出が純粋に階調差だけで決まるわけではない点に留意。
 
+### `tools/surface_viewer.html` / `tools/pack_surface_viewer.py`
+
+高さマップCSV（-9999.9=欠損）を three.js でCAD風メッシュ表示する単体ビューア。ジオメトリは1回だけGPUへ送り、z強調（`mesh.scale.z`）・等高線（シェーダ差し込み）・自動回転は再構築なしで切り替えるため、260万三角形でも60fps超でなめらかに動く。カメラ固定ライト＋Phong、色は高さ(turbo/viridis)／金属単色、前処理は平面／2次曲面除去。HTML単体ならCSVをドロップして使う。`pack_surface_viewer.py` はCSVを Uint16量子化＋gzip＋base64 で埋め込み、ダブルクリックで開ける1ファイルにする（three.js はCDN読込のためネット接続が必要）。
+
+```bash
+python tools/pack_surface_viewer.py WI5000/10円表_stitched.csv --pitch 37.4 -o out/10円裏_viewer.html
+```
+
+見栄えの目安: WI5000 データは「金属（単色）」＋「2次曲面除去」（すり鉢状の大域形状を消す）。自社CSVはz符号反転なので「z 反転」をオンにする。WI5000 のピッチ37.4µmは硬貨径23.5mmからの推定値。
+
 ## コード規約
 
 - **TypeScript**: strict モード有効（noUnusedLocals, noUnusedParameters）

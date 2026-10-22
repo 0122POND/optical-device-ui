@@ -28,6 +28,8 @@ export function usePlotly(args: {
   axisVisible: boolean;
   // true のとき点群(scatter3d)は three.js 側で描くので Plotly では描画しない
   renderPointsWithThree: boolean;
+  // true のとき3D表示の Surface は three.js メッシュ側で描くので Plotly では描画しない
+  renderSurfaceWithThree: boolean;
   cloud: PointCloud | null;
   flipX: boolean;
   viewMode: ViewMode;
@@ -63,6 +65,7 @@ export function usePlotly(args: {
     showPlot,
     axisVisible,
     renderPointsWithThree,
+    renderSurfaceWithThree,
     cloud,
     flipX,
     viewMode,
@@ -185,7 +188,10 @@ export function usePlotly(args: {
     }
 
     // three.js エンジンが点群を担当する間は Plotly を描かない（二重描画・負荷回避）
-    if (renderPointsWithThree && plotType === "scatter3d") {
+    if (
+      (renderPointsWithThree && plotType === "scatter3d") ||
+      (renderSurfaceWithThree && plotType === "surface" && viewMode === "3D")
+    ) {
       Plotly.purge(plotEl);
       plotKindRef.current = null;
       return;
@@ -1201,6 +1207,7 @@ export function usePlotly(args: {
     showPlot,
     axisVisible,
     renderPointsWithThree,
+    renderSurfaceWithThree,
     cloud,
     flipX,
     viewMode,
