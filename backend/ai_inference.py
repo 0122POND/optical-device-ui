@@ -103,6 +103,10 @@ MODEL_CONFIGS = {
 # モデルファイルパス
 MODEL_DIR = Path(__file__).parent / "models"
 
+# 確率マップの保存先（出力フォルダ内のサブフォルダ）と、0 として捨てる下限
+PROB_DIR_NAME = "prob"
+PROB_MIN = 0.05
+
 # シングルトンでモデルをキャッシュ
 _cached_model = None
 _cached_device = None
@@ -306,6 +310,11 @@ def run_ai_inference(
     mask_data = []
     # 行ごとの縞位置（確率加重重心、サブピクセル）。結果フォルダに depth_grid.f32 として書く
     depth_rows = []
+    # 確率マップ（0〜255）。アプリで推論をやり直さずにしきい値を変え、信頼度を表示するために残す。
+    # PROB_MIN 未満は 0 にして容量を抑える（それより低いしきい値は実用上使わない）
+    prob_dir = os.path.join(output_dir, PROB_DIR_NAME)
+    os.makedirs(prob_dir, exist_ok=True)
+    prob_files = []
     inference_start_time = None
 
     with torch.no_grad():
@@ -379,6 +388,11 @@ def run_ai_inference(
             output_files.append(out_name)
             mask_data.append(binary_mask)
             depth_rows.append(depth_export.row_centroid_depth(binary_mask > 0, pred_prob_crop))
+            prob_u8 = np.clip(np.rint(pred_prob_crop * 255), 0, 255).astype(np.uint8)
+            prob_u8[pred_prob_crop < PROB_MIN] = 0
+            prob_name = f"{base}_prob.png"
+            Image.fromarray(prob_u8).save(os.path.join(prob_dir, prob_name))
+            prob_files.append(prob_name)
 
     # Step 6: manifest.json 生成
     progress_callback(5, 6, "manifest.json を生成中...", percent=92)
@@ -403,8 +417,12 @@ def run_ai_inference(
             input_dir=input_dir,
             files=output_files,
             depth_method="prob_centroid" if depth_grid is not None else None,
+            prob_dir=PROB_DIR_NAME,
+            prob_min=PROB_MIN,
         ),
     )
+    with open(os.path.join(prob_dir, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump({"files": prob_files}, f, ensure_ascii=False, indent=2)
 
     # PNGエンコード（メモリキャッシュ用）
     progress_callback(6, 6, "結果を準備中...", percent=95)

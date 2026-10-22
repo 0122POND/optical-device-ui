@@ -40,6 +40,8 @@ export function usePlotly(args: {
   renderSurfaceWithThree: boolean;
   // 点群(3D)の奥行き軸の見た目の強調倍率（1=従来）。値・ホバー・計測は変えない
   depthExaggeration: number;
+  // 点群の色分け。confidence は cloud.c（AI の確率 0〜255）を信頼度 0〜1 として塗る
+  pointColorBy: "depth" | "confidence";
   cloud: PointCloud | null;
   flipX: boolean;
   viewMode: ViewMode;
@@ -80,6 +82,7 @@ export function usePlotly(args: {
     renderPointsWithThree,
     renderSurfaceWithThree,
     depthExaggeration,
+    pointColorBy,
     cloud,
     flipX,
     viewMode,
@@ -915,13 +918,15 @@ export function usePlotly(args: {
             })();
 
       // カラーレンジ（手動指定 or 自動ロバスト、レンジ外はグレー）
-      const pointColor = buildClippedColorscale(
-        resolveColorRange(xDataUm, colorRangeMin, colorRangeMax)
-      );
+      // 信頼度で色分けするときは AI の確率（cloud.c, 0〜255）を 0〜1 で固定レンジに塗る
+      const byConfidence = pointColorBy === "confidence" && !!cloud;
+      const pointColor = byConfidence
+        ? buildClippedColorscale({ lo: 0, hi: 1, min: 0, max: 1 })
+        : buildClippedColorscale(resolveColorRange(xDataUm, colorRangeMin, colorRangeMax));
 
       // カラーバーのカスタムtick（最大値のみ単位表示、colorDataはµm単位）。
       // tickはグレー帯を除いたグラデーション範囲 [lo, hi] に振る
-      const colorData = xDataUm;
+      const colorData = byConfidence ? cloud!.c.map((v) => v / 255) : xDataUm;
       const cMin = pointColor.lo;
       const cMax = pointColor.hi;
       // mm超えたらmm表示（未校正の px はそのまま px）
@@ -954,6 +959,10 @@ export function usePlotly(args: {
       // 最大tickにのみ単位を付与
       if (ticktext.length > 0) {
         ticktext[ticktext.length - 1] = `${ticktext[ticktext.length - 1]} ${unitLabel}`;
+      }
+      if (byConfidence) {
+        tickvals.splice(0, tickvals.length, 0, 0.25, 0.5, 0.75, 1);
+        ticktext.splice(0, ticktext.length, "0", "0.25", "0.5", "0.75", "1 信頼度");
       }
 
       data = [
@@ -1193,6 +1202,7 @@ export function usePlotly(args: {
     renderPointsWithThree,
     renderSurfaceWithThree,
     depthExaggeration,
+    pointColorBy,
     cloud,
     flipX,
     viewMode,

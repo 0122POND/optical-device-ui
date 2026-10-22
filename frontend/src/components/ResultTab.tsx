@@ -108,7 +108,9 @@ export function ResultTab({
                           ? "医療"
                           : src === "semi"
                             ? "半導体"
-                            : "CSVインポート";
+                            : src === "ai"
+                              ? "AI推論"
+                              : "CSVインポート";
             return (
               <div key={src} style={{ marginBottom: "10px" }}>
                 <div
@@ -319,11 +321,13 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function ProcessingSection({ processing }: { processing: NonNullable<ProcessingInfo> }) {
   const m = processing.meta;
   const depth =
-    processing.depthSource === "subpixel"
-      ? m?.depth_method === "prob_centroid"
-        ? "サブピクセル（確率加重重心）"
-        : "サブピクセル（3点放物線）"
-      : "画素の重心（従来）";
+    processing.depthSource === "prob"
+      ? `確率マップから再抽出（しきい値 ${processing.threshold?.toFixed(2) ?? "—"}・確率加重重心）`
+      : processing.depthSource === "subpixel"
+        ? m?.depth_method === "prob_centroid"
+          ? "サブピクセル（確率加重重心）"
+          : "サブピクセル（3点放物線）"
+        : "画素の重心（従来）";
   const rows: [string, string][] = [["深さの求め方", depth]];
   if (m?.source === "preprocess") {
     if (m.algorithm) rows.push(["アルゴリズム", m.algorithm]);
