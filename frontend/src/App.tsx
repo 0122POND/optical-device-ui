@@ -23,7 +23,7 @@ import {
   type ScaleInputs,
 } from "./utils/units";
 import { useElapsedTimer } from "./hooks/useElapsedTimer";
-import { useCloudHistory } from "./hooks/useCloudHistory";
+import { useCloudHistory, type HistoryItem } from "./hooks/useCloudHistory";
 import {
   DEFAULT_UM_PER_PIXEL_X,
   DEFAULT_UM_PER_PIXEL_Y,
@@ -70,7 +70,6 @@ import type {
   ViewMode,
   MeasureState,
   DimLine,
-  CloudHistoryEntry,
   DataOrigin,
   ViewPresetKind,
   ViewPresetRequest,
@@ -338,7 +337,15 @@ function App() {
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）。データ管理は useCloudHistory に集約、UI状態(編集/削除)は App 保持
-  const { history: cloudHistory, pushEntry, renameEntry, removeEntry } = useCloudHistory();
+  const {
+    history: cloudHistory,
+    pushEntry,
+    renameEntry,
+    removeEntry,
+    loadEntry,
+  } = useCloudHistory();
+  // 表示中の履歴（一覧の「表示中」の印）
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
@@ -441,7 +448,7 @@ function App() {
     setLastMeasuredAt(now);
     setMeasureCount((c) => c + 1);
     const thumb = generateThumbnail(newCloud);
-    pushEntry({
+    const id = pushEntry({
       cloud: newCloud,
       grid,
       plotType: opts.plotType,
@@ -455,6 +462,7 @@ function App() {
       name: opts.name ?? "",
       source: opts.source,
     });
+    setCurrentHistoryId(id);
   };
   // WebSocket 接続・onmessage ルーティングは useWebSocket フックへ集約。
   // 完了時の点群反映は applyCloudResult、進捗・状態・エラーはコールバックで App 側へ委譲。
@@ -562,8 +570,11 @@ function App() {
   }, [showPlot, showSlice, sidePanelVisible]);
 
   // --- AI の確率マップ（推論をやり直さずにしきい値を変える・信頼度で色分けする） ---
+  // 保存した履歴から戻したもの（snapshot）は確率マップが上書きされうるので使わない
   const aiMeta =
-    processing?.meta?.source === "ai_inference" && processing.meta.prob_dir
+    processing?.meta?.source === "ai_inference" &&
+    processing.meta.prob_dir &&
+    dataOrigin?.kind === "folder"
       ? processing.meta
       : null;
   const probDir = aiMeta?.prob_dir ?? null;
@@ -716,7 +727,7 @@ function App() {
   const exportPoints = (): PointCloud | null =>
     dataOrigin?.kind === "csvPoints"
       ? dataOrigin.points
-      : dataOrigin?.kind === "folder" && dataOrigin.layers
+      : (dataOrigin?.kind === "folder" || dataOrigin?.kind === "snapshot") && dataOrigin.layers
         ? dataOrigin.layers
         : null;
   const canExport = exportPoints() !== null || (!!zData && zData.length > 0);
@@ -2576,15 +2587,23 @@ function App() {
                     flipRef={flipRef}
                     processing={processing}
                     history={cloudHistory}
+                    currentHistoryId={currentHistoryId}
                     editingNameIdx={editingNameIdx}
                     setEditingNameIdx={setEditingNameIdx}
                     editingNameValue={editingNameValue}
                     setEditingNameValue={setEditingNameValue}
                     renameEntry={renameEntry}
                     setDeleteConfirmIdx={setDeleteConfirmIdx}
-                    onRestore={(entry: CloudHistoryEntry) => {
+                    onRestore={async (item: HistoryItem) => {
+                      // 古い履歴はブラウザの保存から読む
+                      const entry = await loadEntry(item);
+                      if (!entry) {
+                        alert("この測定履歴のデータを読み込めませんでした");
+                        return;
+                      }
                       // 高さマップ・表示タイプ・出どころまで丸ごと戻す（点群だけ戻すと、
                       // Surface や断面に別の計測の高さマップが出ていた）
+                      setCurrentHistoryId(item.id);
                       setShowSlice(false);
                       setCloud(entry.cloud);
                       setZData(entry.grid);

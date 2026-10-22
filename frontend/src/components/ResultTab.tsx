@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { colors, fontFamily, monoFont } from "../utils/constants";
 import { panelSectionStyle, sectionTitleStyle } from "../utils/styles";
-import type { CloudHistoryEntry, HistorySource, ProcessingInfo } from "../types";
+import type { HistorySource, ProcessingInfo } from "../types";
+import { MAX_HISTORY, type HistoryItem } from "../hooks/useCloudHistory";
 import type { PointCloud } from "../utils/pointCloud";
 import type { PostResult } from "../utils/postprocess";
 import { gridScale, physicalGrid, type DataSource, type ScaleInputs } from "../utils/units";
@@ -23,6 +24,7 @@ export function ResultTab({
   flipRef,
   processing,
   history,
+  currentHistoryId,
   editingNameIdx,
   setEditingNameIdx,
   editingNameValue,
@@ -42,14 +44,15 @@ export function ResultTab({
   flipRef: number;
   // 表示中データの処理条件と深さの求め方（計測・推論・マスク読込のとき。CSV では null）
   processing: ProcessingInfo;
-  history: CloudHistoryEntry[];
+  history: HistoryItem[];
+  currentHistoryId: string | null;
   editingNameIdx: number | null;
   setEditingNameIdx: (v: number | null) => void;
   editingNameValue: string;
   setEditingNameValue: (v: string) => void;
   renameEntry: (index: number, name: string) => void;
   setDeleteConfirmIdx: (v: number | null) => void;
-  onRestore: (entry: CloudHistoryEntry) => void;
+  onRestore: (entry: HistoryItem) => void;
 }) {
   return (
     <>
@@ -102,7 +105,10 @@ export function ResultTab({
       {/* 測定履歴 */}
       {history.length > 0 && (
         <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
-          <h3 style={sectionTitleStyle}>測定履歴（最新5件）</h3>
+          <h3 style={sectionTitleStyle}>測定履歴（最新{MAX_HISTORY}件）</h3>
+          <div style={{ margin: "-4px 0 10px", fontSize: "11px", color: colors.textDim }}>
+            このブラウザに保存され、再読み込みしても残ります。
+          </div>
           {(
             [
               "coin",
@@ -151,10 +157,10 @@ export function ResultTab({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {entries.map(({ entry, idx: i }) => {
-                    const isCurrent = cloud === entry.cloud;
+                    const isCurrent = entry.id === currentHistoryId;
                     return (
                       <div
-                        key={entry.measuredAt + i}
+                        key={entry.id}
                         style={{
                           display: "flex",
                           alignItems: "center",
