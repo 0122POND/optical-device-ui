@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, List
 
 import cv2
+
+from depth_export import subpixel_peak_depth
 from scipy.ndimage import gaussian_filter1d
 
 
@@ -188,6 +190,9 @@ def run_preprocess(
     report(8, "ピークマスクを適用中...")
     peak_result = _apply_peak_mask(peak_result)
 
+    # サブピクセルの深さ（結果PNGとは別に depth_grid.f32 として書き出す。depth_export 参照）
+    depth_grid = subpixel_peak_depth(contrast, max_indices, peak_result)
+
     # 出力ファイル名リストを生成（保存は呼び出し側で行う）
     output_files = []
     for fname in image_files:
@@ -197,6 +202,8 @@ def run_preprocess(
 
     return {
         "peak_data": peak_result,
+        "depth_grid": depth_grid,
+        "depth_info": {"method": "argmax+parabolic3", "sweep_sigma": 1, "xy_sigma": 7},
         "image_files": image_files,
         "output_files": output_files,
     }

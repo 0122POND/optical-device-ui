@@ -1,5 +1,5 @@
 // アプリ全体で共有する型定義
-import type { FolderSource, PointCloud } from "./utils/pointCloud";
+import type { DepthMeta, FolderSource, PointCloud } from "./utils/pointCloud";
 import type { DataSource } from "./utils/units";
 
 // 3D表示のプロット種別
@@ -48,6 +48,12 @@ export type DataOrigin =
   | null;
 export type { FolderSource };
 
+// 計測・推論の処理条件と、高さマップの深さの求め方（結果タブに表示する）
+export type ProcessingInfo = {
+  meta: DepthMeta | null;
+  depthSource: "subpixel" | "centroid";
+} | null;
+
 // 測定履歴の1エントリ。復元時に表示を丸ごと戻せるよう、高さマップ・表示タイプ・
 // 出どころ（単位の解釈に必須）・元データも保持する
 export type CloudHistoryEntry = {
@@ -57,6 +63,7 @@ export type CloudHistoryEntry = {
   dataSource: DataSource;
   dataName: string | null;
   origin: DataOrigin;
+  processing: ProcessingInfo;
   measuredAt: string;
   points: number;
   thumbnail: string;

@@ -136,7 +136,16 @@ describe("useWebSocket", () => {
   it("ai_inference_complete で mask_result を読み、source='ai' として applyCloudResult する", async () => {
     const cloud = { x: [1], y: [2], z: [3], c: [1] };
     const grid = [[1]];
-    mockedBuild.mockResolvedValue({ cloud, grid, layers: null, width: 1, height: 1, depth: 1 });
+    mockedBuild.mockResolvedValue({
+      cloud,
+      grid,
+      layers: null,
+      meta: null,
+      depthSource: "centroid",
+      width: 1,
+      height: 1,
+      depth: 1,
+    });
     const args = makeArgs();
     renderHook(() => useWebSocket(args));
 
@@ -160,6 +169,7 @@ describe("useWebSocket", () => {
         src: expect.objectContaining({ folderUrl: "/data/mask_result" }),
         layers: null,
       },
+      processing: { meta: null, depthSource: "centroid" },
       progress: { message: "AI推論完了 (cuda)", percent: 100 },
       clearLoading: "ai",
     });
@@ -167,7 +177,16 @@ describe("useWebSocket", () => {
 
   it("preprocess_complete は algorithm を source にし、tgv のときだけ maxTotalPoints=250000", async () => {
     const cloud = { x: [], y: [], z: [], c: [] };
-    mockedBuild.mockResolvedValue({ cloud, grid: [], layers: null, width: 0, height: 0, depth: 0 });
+    mockedBuild.mockResolvedValue({
+      cloud,
+      grid: [],
+      layers: null,
+      meta: null,
+      depthSource: "centroid",
+      width: 0,
+      height: 0,
+      depth: 0,
+    });
     const args = makeArgs({ algorithm: "tgv" });
     renderHook(() => useWebSocket(args));
 
@@ -188,6 +207,7 @@ describe("useWebSocket", () => {
         src: expect.objectContaining({ folderUrl: "/data/result" }),
         layers: null,
       },
+      processing: { meta: null, depthSource: "centroid" },
       progress: { message: "完了", percent: 100 },
       clearLoading: "acquire",
     });

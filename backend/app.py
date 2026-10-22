@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import random
 import re
 import sys
@@ -17,6 +18,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, W
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+import depth_export  # サブピクセル深さとメタデータの書き出し（backend/ 内のモジュール）
 
 # 同一ディレクトリのモジュールをインポートできるようにパスを追加
 sys.path.insert(0, str(Path(__file__).parent))
@@ -54,6 +57,18 @@ def _data_subpath(value: Any, default: Path) -> str:
     return str(resolved)
 
 
+def _preprocess_note(algorithm: str, use_gpu: bool, has_depth: bool) -> Optional[str]:
+    """メタデータに残す注意書き（同じデータでも結果が変わる条件などを利用者に知らせる）"""
+    notes = []
+    if algorithm == "coin":
+        notes.append(
+            "coin は CPU（掃引方向σ=10）と GPU（σ=1）でブラーが異なり、同じデータでも高さが変わる"
+        )
+    if not has_depth:
+        notes.append("この前処理はサブピクセルの深さを出さないため、結果画像の重心から深さを求める")
+    return " / ".join(notes) or None
+
+
 def _natural_key(name: str):
     """img_2 < img_10 < img_200 < img_1000 の順に並べるキー（数字部分を数値で比較）"""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
@@ -71,21 +86,26 @@ _result_cache: Dict[str, bytes] = {}
 _result_cache_lock = threading.Lock()
 
 
+def _media_type(filename: str) -> str:
+    if filename.endswith(".json"):
+        return "application/json"
+    if filename.endswith(".f32"):
+        return "application/octet-stream"  # サブピクセル深さ（depth_export 参照）
+    return "image/png"
+
+
 @app.get("/data/result/{filename}")
 async def serve_cached_result(filename: str):
     """メモリキャッシュから結果画像を配信（キャッシュミス時はディスクフォールバック）"""
     with _result_cache_lock:
         data = _result_cache.get(filename)
     if data is not None:
-        media_type = "application/json" if filename.endswith(".json") else "image/png"
-        return Response(content=data, media_type=media_type)
+        return Response(content=data, media_type=_media_type(filename))
 
     # ディスクフォールバック
     file_path = DATA_DIR / "result" / filename
     if file_path.exists():
-        content = file_path.read_bytes()
-        media_type = "application/json" if filename.endswith(".json") else "image/png"
-        return Response(content=content, media_type=media_type)
+        return Response(content=file_path.read_bytes(), media_type=_media_type(filename))
 
     raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
@@ -389,12 +409,34 @@ async def ws_endpoint(ws: WebSocket):
         result = await asyncio.wrap_future(future)
         output_files = result["output_files"]
 
+        # サブピクセルの深さと処理条件（depth_grid.f32 / depth_meta.json）。深さを返さない前処理
+        # （GPU・TGV・論文用）でも処理条件は残し、フロントは従来どおりPNGから深さを求める
+        depth_grid = result.get("depth_grid")
+        depth_meta = depth_export.build_meta(
+            depth_grid,
+            source="preprocess",
+            algorithm=algorithm,
+            use_gpu=bool(use_gpu),
+            peak_threshold=peak_threshold,
+            input_dir=data_path,
+            files=output_files,
+            depth_method=(result.get("depth_info") or {}).get("method"),
+            blur=(
+                {k: v for k, v in (result.get("depth_info") or {}).items() if k != "method"}
+                or None
+            ),
+            note=_preprocess_note(algorithm, bool(use_gpu), depth_grid is not None),
+        )
+        depth_files = depth_export.encode(depth_grid, depth_meta)
+
         # インメモリキャッシュに格納（フロントエンドが即座にフェッチ可能に）
         manifest_json = json.dumps({"files": output_files}).encode()
         with _result_cache_lock:
             _result_cache.clear()
             _result_cache["manifest.json"] = manifest_json
             for name, data in result["encoded"].items():
+                _result_cache[name] = data
+            for name, data in depth_files.items():
                 _result_cache[name] = data
 
         # フロントエンドに即座に完了通知（ディスク保存を待たない）
@@ -432,6 +474,10 @@ async def ws_endpoint(ws: WebSocket):
                 else:
                     from preprocessing_cpu import save_peak_results
             save_peak_results(peak_data, image_files, result_path)
+            # save_peak_results は保存先を空にするので、深さファイルはその後に書く
+            for name, data in depth_files.items():
+                with open(os.path.join(result_path, name), "wb") as f:
+                    f.write(data)
             # キャッシュクリアは次回の処理実行時に行う
             # （フロントエンドがまだフェッチ中の可能性があるため）
 

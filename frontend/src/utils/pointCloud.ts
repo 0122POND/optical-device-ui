@@ -227,6 +227,47 @@ export type FolderSource = {
   colorMode?: "z" | "intensity";
 };
 
+// バックエンドが結果フォルダに置く処理条件（backend/depth_export.py の depth_meta.json）
+export type DepthMeta = {
+  version: number;
+  created_at?: string;
+  // サブピクセルの深さファイル名（depth_grid.f32）。無ければ結果画像の重心から深さを求める
+  depth_grid: string | null;
+  shape: [number, number] | null; // [フレーム数, 画像の行数]
+  source?: "preprocess" | "ai_inference";
+  depth_method?: string; // argmax+parabolic3 / prob_centroid
+  algorithm?: string;
+  use_gpu?: boolean;
+  peak_threshold?: number;
+  blur?: { sweep_sigma?: number; xy_sigma?: number };
+  model_type?: string;
+  threshold?: number;
+  device?: string;
+  input_dir?: string;
+  note?: string;
+};
+
+// depth_grid.f32（float32 リトルエンディアン、[フレーム数, 行数]、欠損は NaN）を高さマップの行に変換する
+export function depthGridFromBuffer(
+  buf: ArrayBuffer,
+  shape: [number, number]
+): (number | null)[][] {
+  const [n, h] = shape;
+  const dv = new DataView(buf);
+  if (buf.byteLength < n * h * 4)
+    throw new Error("depth_grid.f32 の大きさが depth_meta.json と合いません");
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: (number | null)[] = new Array(h);
+    for (let j = 0; j < h; j++) {
+      const v = dv.getFloat32((i * h + j) * 4, true);
+      row[j] = Number.isNaN(v) ? null : v;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 // buildPointCloudFromFolder の戻り値。layers は複数層の行が MULTI_LAYER_MIN_RATIO 以上あるときだけ、
 // 全スライス・全行の層ごとの重心点（PointCloud 規約: x=重心, y=行, z=スライス）。
 // 1層だけのデータでは null（高さマップで表せるため）
@@ -234,6 +275,10 @@ export type FolderCloudResult = {
   cloud: PointCloud;
   grid: DepthGrid;
   layers: PointCloud | null;
+  // 処理条件（depth_meta.json が無いフォルダでは null）
+  meta: DepthMeta | null;
+  // 高さマップの深さの求め方。subpixel=バックエンドのサブピクセル値 / centroid=結果画像の重心（従来）
+  depthSource: "subpixel" | "centroid";
   width: number;
   height: number;
   depth: number;
@@ -260,6 +305,26 @@ export async function buildPointCloudFromFolder(options: FolderSource): Promise<
   if (files.length === 0) throw new Error("manifest.json に files がありません");
 
   const D = files.length;
+
+  // サブピクセルの深さと処理条件（あれば使う。無い・壊れている場合は従来どおり画像の重心から求める）
+  let meta: DepthMeta | null = null;
+  let subpixelRows: (number | null)[][] | null = null;
+  try {
+    const metaRes = await fetch(`${folderUrl}/depth_meta.json?t=${cacheKey}`);
+    if (metaRes.ok) {
+      meta = (await metaRes.json()) as DepthMeta;
+      if (meta.depth_grid && meta.shape && meta.shape[0] === D) {
+        const gridRes = await fetch(`${folderUrl}/${meta.depth_grid}?t=${cacheKey}`);
+        if (gridRes.ok) subpixelRows = depthGridFromBuffer(await gridRes.arrayBuffer(), meta.shape);
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "depth_meta.json / depth_grid.f32 を読めなかったため、画像の重心から深さを求めます",
+      e
+    );
+    subpixelRows = null;
+  }
 
   // ボクセル間引き前に、最終目標の約3倍まで収集して均一化の余地を残す
   // （スライス数Dで割ってメモリ上限も兼ねる）
@@ -324,7 +389,11 @@ export async function buildPointCloudFromFolder(options: FolderSource): Promise<
   }
 
   // flipZ時はグリッド行も反転
-  const grid: DepthGrid = flipZ ? gridRows.reverse() : gridRows;
+  // サブピクセルの深さが画像の大きさと合っていれば、高さマップはそちらを使う
+  const useSubpixel = subpixelRows !== null && meta?.shape?.[1] === height;
+  const rows = useSubpixel ? subpixelRows! : gridRows;
+  const depthSource: FolderCloudResult["depthSource"] = useSubpixel ? "subpixel" : "centroid";
+  const grid: DepthGrid = flipZ ? rows.reverse() : rows;
   const multiLayer = validRows > 0 && multiRows / validRows >= MULTI_LAYER_MIN_RATIO;
   const layers: PointCloud | null = multiLayer ? { x: lx, y: ly, z: lz, c: lx } : null;
 
@@ -332,10 +401,10 @@ export async function buildPointCloudFromFolder(options: FolderSource): Promise<
   // ランダム間引きは密度ムラで面が「ノイズ」に見えるため廃止。
   if (x.length > maxTotalPoints) {
     const cloud = voxelDownsample(x, y, z, c, maxTotalPoints);
-    return { cloud, grid, layers, width, height, depth: D };
+    return { cloud, grid, layers, meta, depthSource, width, height, depth: D };
   }
 
-  return { cloud: { x, y, z, c }, grid, layers, width, height, depth: D };
+  return { cloud: { x, y, z, c }, grid, layers, meta, depthSource, width, height, depth: D };
 }
 
 // CSV由来の2Dグリッド(高さマップ)から高密度点群を作る。
