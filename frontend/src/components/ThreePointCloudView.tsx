@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { colorForValue, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
+import type { ViewPresetRequest } from "../types";
 import { physicalPoints, type DataSource, type ScaleInputs } from "../utils/units";
 
 // 自動回転の速さ（OrbitControls.autoRotateSpeed 単位。2.0 ≒ 60fpsで1周30秒）
@@ -34,6 +35,8 @@ export function ThreePointCloudView(props: {
   flipRef: number;
   // 奥行き軸の見た目の強調倍率（1=Plotly 点群の既定と同じ見え方）。値・色は変えない
   depthExaggeration?: number;
+  // 視点のプリセット（正面・側面・上面・既定）
+  viewPreset?: ViewPresetRequest;
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
   colorRangeMin: string;
   colorRangeMax: string;
@@ -48,6 +51,7 @@ export function ThreePointCloudView(props: {
     flipX,
     flipRef,
     depthExaggeration = 1,
+    viewPreset = null,
     colorRangeMin,
     colorRangeMax,
     isBuilding,
@@ -63,6 +67,8 @@ export function ThreePointCloudView(props: {
     depthUm?: Float64Array;
     // 奥行きを横幅と同じ長さに見せる基準倍率（Plotly 点群の既定 aspect x=y=1 と揃える）
     depthBase?: number;
+    // 表示上の最大の広がり（カメラのフィットに使う）
+    radius?: number;
   } | null>(null);
   // 自動回転の最新状態。描画ループ（マウント時に1回だけ生成）から参照するため ref に持つ
   const rotateRef = useRef(false);
@@ -103,9 +109,11 @@ export function ThreePointCloudView(props: {
     let raf = requestAnimationFrame(function loop() {
       // 自動回転: カメラを注視点まわりに水平周回させる（画面の縦軸まわり）。
       // どの視点からでも「水平方向の回転」に見え、ドラッグ操作中は自動で一時停止する
-      controls.autoRotate = rotateRef.current;
-      controls.autoRotateSpeed = AUTO_ROTATE_SPEED;
-      controls.update();
+      // 視点プリセットで OrbitControls を作り直すことがあるので、常に最新の controls を使う
+      const ctl = stateRef.current?.controls ?? controls;
+      ctl.autoRotate = rotateRef.current;
+      ctl.autoRotateSpeed = AUTO_ROTATE_SPEED;
+      ctl.update();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(loop);
     });
@@ -124,7 +132,7 @@ export function ThreePointCloudView(props: {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      controls.dispose();
+      (stateRef.current?.controls ?? controls).dispose();
       const pts = stateRef.current?.points;
       if (pts) {
         pts.geometry.dispose();
@@ -215,6 +223,9 @@ export function ThreePointCloudView(props: {
 
     // カメラをデータ範囲にフィット（奥行きは表示上の長さで評価）
     const radius = Math.max(depthRange * points.scale.x, maxYu - minY, maxZu - minZ, 1);
+    st.radius = radius;
+    st.camera.fov = 50;
+    st.camera.up.set(0, 1, 0);
     st.controls.target.set(0, 0, 0);
     st.camera.position.set(radius * 0.8, radius * 0.6, radius * 1.2);
     st.camera.near = radius / 1000;
@@ -222,6 +233,46 @@ export function ThreePointCloudView(props: {
     st.camera.updateProjectionMatrix();
     st.controls.update();
   }, [cloud, dataSource, scale, flipX, flipRef]);
+
+  // 視点のプリセット。座標は x=奥行き, y=縦方向(列), z=横方向(掃引) なので
+  //   正面: 縦方向に沿って見る（横方向×奥行き） / 側面: 横方向に沿って見る（縦方向×奥行き）
+  //   上面: 奥行きに沿って見る（横方向×縦方向）
+  // 正面・側面・上面は画角を狭めて遠くから見る（ほぼ平行投影になり、層の重なりや高さを比べやすい）。
+  // OrbitControls はカメラの up を生成時に固定するため、up を変えるときは作り直す
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st || !viewPreset || st.radius == null) return;
+    const r = st.radius;
+    const cam = st.camera;
+    let dist: number;
+    if (viewPreset.kind === "reset") {
+      cam.fov = 50;
+      cam.up.set(0, 1, 0);
+      cam.position.set(r * 0.8, r * 0.6, r * 1.2);
+      dist = r * 1.6;
+    } else {
+      const p = {
+        front: { dir: [0, 1, 0], up: [1, 0, 0] },
+        side: { dir: [0, 0, 1], up: [1, 0, 0] },
+        top: { dir: [1, 0, 0], up: [0, 0, 1] },
+      }[viewPreset.kind];
+      cam.fov = 12;
+      dist = (r / 2 / Math.tan(((cam.fov / 2) * Math.PI) / 180)) * 1.15;
+      cam.up.set(p.up[0], p.up[1], p.up[2]);
+      cam.position.set(p.dir[0] * dist, p.dir[1] * dist, p.dir[2] * dist);
+    }
+    cam.near = dist / 1000;
+    cam.far = dist * 20;
+    cam.lookAt(0, 0, 0);
+    cam.updateProjectionMatrix();
+    st.controls.dispose();
+    const controls = new OrbitControls(cam, st.renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.target.set(0, 0, 0);
+    controls.update();
+    st.controls = controls;
+  }, [viewPreset]);
 
   // 奥行き強調だけが変わったときはスケールのみ更新（ジオメトリ・カメラは維持）
   useEffect(() => {
