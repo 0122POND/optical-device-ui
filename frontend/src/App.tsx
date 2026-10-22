@@ -1553,7 +1553,7 @@ function App() {
                         onClick={handleShowAIResult}
                         title="AI推論でマスク画像から3次元形状を再構成して表示する"
                       >
-                        <span style={{ color: colors.primary, display: "flex" }}>
+                        <span style={{ color: colors.textMuted, display: "flex" }}>
                           <Icon>
                             <circle cx="5" cy="6" r="2" />
                             <circle cx="19" cy="6" r="2" />
