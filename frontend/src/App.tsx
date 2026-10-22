@@ -23,12 +23,13 @@ import {
   type ScaleInputs,
 } from "./utils/units";
 import { useElapsedTimer } from "./hooks/useElapsedTimer";
-import { useCloudHistory } from "./hooks/useCloudHistory";
+import { useCloudHistory, type HistoryItem } from "./hooks/useCloudHistory";
 import {
   DEFAULT_UM_PER_PIXEL_X,
   DEFAULT_UM_PER_PIXEL_Y,
   DIM_COLORS,
   CSV_MAX_TOTAL_POINTS,
+  FILLED_COLOR,
   colors,
   fontFamily,
   monoFont,
@@ -69,14 +70,23 @@ import type {
   ViewMode,
   MeasureState,
   DimLine,
-  CloudHistoryEntry,
   DataOrigin,
   ViewPresetKind,
   ViewPresetRequest,
   FolderSource,
   ProcessingInfo,
 } from "./types";
+import {
+  applyPostprocess,
+  orientFilled,
+  postActive,
+  POST_OFF,
+  type PostSettings,
+} from "./utils/postprocess";
 import "./App.css";
+
+// AI推論のモデル（学習済みで使えるのはこの1つ。backend/ai_inference.py の MODEL_CONFIGS のキー）
+const AI_MODEL_TYPE = "resnet50";
 
 function App() {
   const plotRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +106,7 @@ function App() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   // 確認ダイアログの種類（3D開始 or CSV出力 or 終了）
-  const [confirmMode, setConfirmMode] = useState<"plot" | "csv" | "ai" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"plot" | "ai" | null>(null);
 
   // GPU使用フラグ（STARTボタンで選択）
   const [useGpu, setUseGpu] = useState(false);
@@ -109,6 +119,8 @@ function App() {
 
   // 断層グラフを表示するかどうか
   const [showSlice, setShowSlice] = useState(false);
+  // 断面の帯の幅[µm]（0=線の上だけ）。帯なら幅の中の画素の中央値で断面を描く
+  const [sliceBandUm, setSliceBandUm] = useState(0);
 
   // 断層ライン始点・終点（2クリックで決定）
   const [sliceLineStart, setSliceLineStart] = useState<{ y: number; z: number } | null>(null);
@@ -286,6 +298,20 @@ function App() {
   // 表示中データの名前（ヘッダーに出す。CSV読込=ファイル名、マスク読込=フォルダ名）
   const [dataName, setDataName] = useState<string | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
+  // 高さマップの後処理（外れ値除去・走査方向の補間）。新しいデータを開くと切に戻す
+  const [post, setPost] = useState<PostSettings>(POST_OFF);
+  const [showFilled, setShowFilled] = useState(true);
+  const postResult = useMemo(
+    () => (zData && zData.length > 0 && postActive(post) ? applyPostprocess(zData, post) : null),
+    [zData, post]
+  );
+  // 表示・断面・統計・CSV出力に使う高さマップ（後処理が切なら元のまま）。履歴には元の zData を残す
+  const viewZ = postResult?.grid ?? zData;
+  // 補った画素の印（表示の向きに合わせる。印を消しているときは null）
+  const filledView = useMemo(
+    () => (showFilled ? orientFilled(postResult?.filled ?? null, dataSource, flipX) : null),
+    [showFilled, postResult, dataSource, flipX]
+  );
   // デバイスデータの左右反転の基準値（全表示で共通。表示ごとに別の最大値を使うと深さがずれる）
   const flipRef = useMemo(
     () => (dataSource === "device" ? deviceFlipRef(zData, cloud) : 0),
@@ -313,7 +339,15 @@ function App() {
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
 
   // 測定履歴（最大5件）。データ管理は useCloudHistory に集約、UI状態(編集/削除)は App 保持
-  const { history: cloudHistory, pushEntry, renameEntry, removeEntry } = useCloudHistory();
+  const {
+    history: cloudHistory,
+    pushEntry,
+    renameEntry,
+    removeEntry,
+    loadEntry,
+  } = useCloudHistory();
+  // 表示中の履歴（一覧の「表示中」の印）
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
@@ -395,6 +429,7 @@ function App() {
   ) => {
     setCloud(newCloud);
     setZData(grid);
+    setPost(POST_OFF);
     setDataSource(opts.dataSource);
     setDataName(opts.dataName ?? null);
     setPlotType(opts.plotType);
@@ -415,7 +450,7 @@ function App() {
     setLastMeasuredAt(now);
     setMeasureCount((c) => c + 1);
     const thumb = generateThumbnail(newCloud);
-    pushEntry({
+    const id = pushEntry({
       cloud: newCloud,
       grid,
       plotType: opts.plotType,
@@ -429,10 +464,11 @@ function App() {
       name: opts.name ?? "",
       source: opts.source,
     });
+    setCurrentHistoryId(id);
   };
   // WebSocket 接続・onmessage ルーティングは useWebSocket フックへ集約。
   // 完了時の点群反映は applyCloudResult、進捗・状態・エラーはコールバックで App 側へ委譲。
-  const { connect } = useWebSocket({
+  const { connect, cancel } = useWebSocket({
     algorithm,
     applyCloudResult,
     onProgress: (p) => {
@@ -442,7 +478,15 @@ function App() {
       setProgressPercent(p.percent);
     },
     onStatus: (value) => setStatus(value),
+    onCancelled: () => {
+      setIsLoadingAI(false);
+      setIsAcquiring(false);
+      setCancelling(false);
+      setStatus("READY");
+      setProgressMessage("中止しました");
+    },
     onError: (kind, msg) => {
+      setCancelling(false);
       // generic（サーバーの error 型）は AI 推論中にも届くので、どちらのフラグも下ろす
       // （以前は AI 推論中のサーバーエラーで「AI推論中...」の表示が消えなかった）
       if (kind === "ai" || kind === "generic") setIsLoadingAI(false);
@@ -470,21 +514,11 @@ function App() {
 
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
+  // 中止ボタンを押してから止まるまで（バックエンドは次の区切りで止まる）
+  const [cancelling, setCancelling] = useState(false);
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
-  // AIモデルタイプ選択
-  type AiModelType =
-    | "resnet34"
-    | "resnet50"
-    | "resnet101"
-    | "resnet152"
-    | "deeplabv3plus_effv2m"
-    | "segformer_b2"
-    | "unetpp_effv2m"
-    | "unetpp_effv2l"
-    | "unetpp_2_5d";
-  const [aiModelType, setAiModelType] = useState<AiModelType>("resnet50");
 
   // マスク読込中フラグ
   const [isLoadingMask, setIsLoadingMask] = useState(false);
@@ -548,8 +582,11 @@ function App() {
   }, [showPlot, showSlice, sidePanelVisible]);
 
   // --- AI の確率マップ（推論をやり直さずにしきい値を変える・信頼度で色分けする） ---
+  // 保存した履歴から戻したもの（snapshot）は確率マップが上書きされうるので使わない
   const aiMeta =
-    processing?.meta?.source === "ai_inference" && processing.meta.prob_dir
+    processing?.meta?.source === "ai_inference" &&
+    processing.meta.prob_dir &&
+    dataOrigin?.kind === "folder"
       ? processing.meta
       : null;
   const probDir = aiMeta?.prob_dir ?? null;
@@ -618,13 +655,15 @@ function App() {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
     colorRangeMin,
     colorRangeMax,
     plotType,
-    zData,
+    zData: viewZ,
+    filledMask: filledView,
     measureMode,
     measurePt1,
     measurePt2,
@@ -655,7 +694,7 @@ function App() {
   useSlicePlot({
     sliceRef,
     showSlice,
-    zData,
+    zData: viewZ,
     cloud,
     sliceLineStart,
     sliceLineEnd,
@@ -664,6 +703,7 @@ function App() {
     flipX,
     flipRef,
     plotType,
+    bandWidthUm: viewZ && viewZ.length > 0 ? sliceBandUm : 0,
     sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
@@ -701,7 +741,7 @@ function App() {
   const exportPoints = (): PointCloud | null =>
     dataOrigin?.kind === "csvPoints"
       ? dataOrigin.points
-      : dataOrigin?.kind === "folder" && dataOrigin.layers
+      : (dataOrigin?.kind === "folder" || dataOrigin?.kind === "snapshot") && dataOrigin.layers
         ? dataOrigin.layers
         : null;
   const canExport = exportPoints() !== null || (!!zData && zData.length > 0);
@@ -756,6 +796,7 @@ function App() {
 
       setStatus("RUNNING");
       setIsAcquiring(true);
+      setCancelling(false);
 
       console.log("画像処理開始...");
 
@@ -780,6 +821,7 @@ function App() {
       setShowPlot(true);
       setCloud(null);
       setIsLoadingAI(true);
+      setCancelling(false);
 
       // 進捗初期化
       setProgressStep(0);
@@ -793,33 +835,40 @@ function App() {
 
       const ws = connect();
 
-      sendWhenOpen(ws, { cmd: "ai_inference", params: { model_type: aiModelType } }, () =>
+      sendWhenOpen(ws, { cmd: "ai_inference", params: { model_type: AI_MODEL_TYPE } }, () =>
         backendUnreachable("ai")
       );
-    } else if (confirmMode === "csv") {
-      // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
-      // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
-      // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
-      const sc = gridScale(dataSource, scale);
-      const pointSrc = exportPoints();
-      if (pointSrc) {
-        await downloadPointCSV(
-          pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
-          pitchFilename(
-            `${(dataName ?? "points").replace(/\.csv$/i, "")}_points`,
-            sc.col,
-            sc.row,
-            sc.valueUnit
-          )
-        );
-      } else if (zData && zData.length > 0) {
-        const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-        await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row, sc.valueUnit));
-      }
     }
 
     setShowConfirm(false);
     setConfirmMode(null);
+  };
+
+  // CSV出力（保存ダイアログが確認を兼ねるので、確認モーダルは出さない）
+  const exportCsv = async () => {
+    // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
+    // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
+    // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
+    const sc = gridScale(dataSource, scale);
+    // 後処理を掛けているときは、掛けた高さマップを書き出す（ファイル名に処理を残す）
+    const pointSrc = postActive(post) ? null : exportPoints();
+    if (pointSrc) {
+      await downloadPointCSV(
+        pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
+        pitchFilename(
+          `${(dataName ?? "points").replace(/\.csv$/i, "")}_points`,
+          sc.col,
+          sc.row,
+          sc.valueUnit
+        )
+      );
+    } else if (viewZ && viewZ.length > 0) {
+      const pg = physicalGrid(viewZ, dataSource, scale, flipX, flipRef);
+      const base = (dataName ?? "surface").replace(/\.csv$/i, "");
+      const tag =
+        (post.removeOutliers ? `_mad${post.sigma}` : "") + (post.interpolate ? "_interp" : "");
+      await downloadCSV(pg.z, pitchFilename(base + tag, sc.col, sc.row, sc.valueUnit));
+    }
   };
 
   // 「いいえ」の処理
@@ -1000,11 +1049,11 @@ function App() {
 
   // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]（Plotly の surface と同じ utils/units の換算）
   const meshSurface = useMemo(() => {
-    if (surfaceEngine !== "three" || !zData || zData.length === 0) return null;
-    const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+    if (surfaceEngine !== "three" || !viewZ || viewZ.length === 0) return null;
+    const pg = physicalGrid(viewZ, dataSource, scale, flipX, flipRef);
     const sc = gridScale(dataSource, scale);
     return { grid: pg.z, pitchX: sc.col, pitchY: sc.row };
-  }, [surfaceEngine, zData, dataSource, scale, flipX, flipRef]);
+  }, [surfaceEngine, viewZ, dataSource, scale, flipX, flipRef]);
 
   // --- プロット操作（フローティングツールバーから呼ぶ） ---
   const handleZoom = (factor: number) => {
@@ -1136,11 +1185,11 @@ function App() {
     if ((!zData || zData.length === 0) && dataOrigin?.kind === "csvPoints") {
       return { name: dataName, points: dataOrigin.points.x.length };
     }
-    if (!zData || zData.length === 0) return null;
-    const h = zData.length;
-    const w = zData[0].length;
+    if (!viewZ || viewZ.length === 0) return null;
+    const h = viewZ.length;
+    const w = viewZ[0].length;
     let valid = 0;
-    for (const row of zData) for (const v of row) if (v != null) valid++;
+    for (const row of viewZ) for (const v of row) if (v != null) valid++;
     return { name: dataName, w, h, validPct: (valid / (w * h)) * 100 };
   })();
 
@@ -1297,6 +1346,7 @@ function App() {
                       grid={meshSurface.grid}
                       pitchX={meshSurface.pitchX}
                       pitchY={meshSurface.pitchY}
+                      filledMask={filledView}
                       heightUnit={gridScale(dataSource, scale).valueUnit}
                       colorRangeMin={colorRangeMin}
                       colorRangeMax={colorRangeMax}
@@ -1354,6 +1404,27 @@ function App() {
                     <div style={{ fontSize: "13px", opacity: 0.8 }}>
                       経過時間: {formatElapsed(elapsedMs)}
                     </div>
+                    <button
+                      className="tt-hover"
+                      disabled={cancelling}
+                      title={
+                        isLoadingAI
+                          ? "1枚の推論が終わったところで止めます（途中までのマスクは残しません）"
+                          : "今の工程が終わったところで止めます"
+                      }
+                      style={{
+                        ...modalButtonStyle("neutral"),
+                        pointerEvents: "auto",
+                        opacity: cancelling ? 0.6 : 1,
+                        cursor: cancelling ? "default" : "pointer",
+                      }}
+                      onClick={() => {
+                        setCancelling(true);
+                        cancel();
+                      }}
+                    >
+                      {cancelling ? "中止しています…" : "中止"}
+                    </button>
                   </div>
                 )}
               </div>
@@ -1600,6 +1671,39 @@ function App() {
                     gap: "6px",
                   }}
                 >
+                  {/* 帯の幅（高さマップがあるとき）。帯なら幅の中の画素の中央値で断面を描く */}
+                  {viewZ && viewZ.length > 0 && (
+                    <div
+                      title="断面線の両側 ±幅/2 の画素を集めて横から見る（線は距離ごとの中央値、薄い帯は P10〜P90）"
+                      style={{ display: "flex", alignItems: "center", gap: "2px" }}
+                    >
+                      <span
+                        style={{ fontSize: "11px", color: colors.textMuted, marginRight: "4px" }}
+                      >
+                        帯の幅
+                      </span>
+                      {[0, 200, 500, 1000].map((w) => (
+                        <button
+                          key={w}
+                          onClick={() => setSliceBandUm(w)}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            fontFamily,
+                            borderRadius: "4px",
+                            border: `1px solid ${sliceBandUm === w ? colors.primary : colors.border}`,
+                            backgroundColor:
+                              sliceBandUm === w ? colors.primarySoft : "rgba(22, 27, 34, 0.86)",
+                            color: sliceBandUm === w ? colors.primary : colors.text,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {w === 0 ? "線" : `${w} µm`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {/* 計測中で2点が確定済みのときだけ「クリア」を出す（やり直し用） */}
                   {sliceMeasureMode && sliceMeasureStart && sliceMeasureEnd && (
                     <button
@@ -1874,17 +1978,16 @@ function App() {
                             !canExport
                               ? "書き出せるデータがありません"
                               : exportPoints()
-                                ? "点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
+                                ? dataOrigin?.kind === "csvPoints"
+                                  ? "点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
+                                  : "同じ位置に縞が複数ある（複数層の）データのため、層ごとの点を点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
                                 : "表示中の高さマップを µm で書き出す（ピッチはファイル名に記録）"
                           }
                           style={{
                             ...buttonFileStyle,
                             ...enabledStateStyle(canExport),
                           }}
-                          onClick={() => {
-                            setConfirmMode("csv");
-                            setShowConfirm(true);
-                          }}
+                          onClick={exportCsv}
                         >
                           <Icon size={15} color={colors.textMuted}>
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -1895,6 +1998,126 @@ function App() {
                         </button>
                       </div>
                     </section>
+
+                    {/* 後処理（高さマップ。tools/remove_outliers.py・interpolate_scan.py と同じ処理） */}
+                    {zData && zData.length > 0 && (
+                      <section style={panelSectionStyle}>
+                        <h3 style={sectionTitleStyle}>後処理</h3>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          <div style={settingRowStyle}>
+                            <span
+                              style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
+                              title="全体の中央値から MAD×1.4826×σ を超えて外れた点を欠損にする"
+                            >
+                              外れ値の除去
+                            </span>
+                            <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                              {([null, 3, 4] as const).map((sg) => {
+                                const on =
+                                  sg == null
+                                    ? !post.removeOutliers
+                                    : post.removeOutliers && post.sigma === sg;
+                                return (
+                                  <button
+                                    key={String(sg)}
+                                    className="tt-hover"
+                                    style={segmentButtonStyle(on)}
+                                    onClick={() =>
+                                      setPost((p) =>
+                                        sg == null
+                                          ? { ...p, removeOutliers: false }
+                                          : { ...p, removeOutliers: true, sigma: sg }
+                                      )
+                                    }
+                                  >
+                                    {sg == null ? "なし" : `${sg}σ`}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div style={settingRowStyle}>
+                            <span
+                              style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
+                              title="走査方向（行の並び）の欠損を、3行以下は線形・4〜8行は局所スプラインで埋める（9行以上は埋めない）"
+                            >
+                              走査方向の補間
+                            </span>
+                            <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                              {([false, true] as const).map((on) => (
+                                <button
+                                  key={String(on)}
+                                  className="tt-hover"
+                                  style={segmentButtonStyle(post.interpolate === on)}
+                                  onClick={() => setPost((p) => ({ ...p, interpolate: on }))}
+                                >
+                                  {on ? "あり" : "なし"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {post.interpolate && (
+                            <div style={settingRowStyle}>
+                              <span style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}>
+                                補った画素の印
+                              </span>
+                              <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                                {([true, false] as const).map((on) => (
+                                  <button
+                                    key={String(on)}
+                                    className="tt-hover"
+                                    style={segmentButtonStyle(showFilled === on)}
+                                    onClick={() => setShowFilled(on)}
+                                  >
+                                    {on ? "表示" : "隠す"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {postResult && (
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              fontSize: "11.5px",
+                              color: colors.textMuted,
+                              lineHeight: 1.7,
+                            }}
+                          >
+                            {post.removeOutliers && (
+                              <div>
+                                外れ値 {postResult.removed.toLocaleString()} 点を欠損にしました
+                              </div>
+                            )}
+                            {post.interpolate && (
+                              <div>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    width: "8px",
+                                    height: "8px",
+                                    borderRadius: "2px",
+                                    backgroundColor: FILLED_COLOR,
+                                    marginRight: "6px",
+                                  }}
+                                />
+                                {(
+                                  postResult.filledLinear + postResult.filledSpline
+                                ).toLocaleString()}{" "}
+                                画素を補間（線形 {postResult.filledLinear.toLocaleString()}
+                                ・スプライン {postResult.filledSpline.toLocaleString()}、長い欠損{" "}
+                                {postResult.skipped.toLocaleString()} 画素は埋めず）
+                              </div>
+                            )}
+                            <div style={{ color: colors.textDim, marginTop: "4px" }}>
+                              Surface・2D・断面・統計・CSV出力に効きます（点群表示は元のまま）。
+                              補間値は実測ではないので、精度評価には後処理前のデータを使ってください。
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    )}
 
                     {/* 表示 */}
                     <section style={panelSectionStyle}>
@@ -2426,21 +2649,35 @@ function App() {
                 {sideTab === "result" && (
                   <ResultTab
                     cloud={cloud}
+                    zData={viewZ}
+                    postResult={postResult}
+                    dataSource={dataSource}
+                    scale={scale}
+                    flipX={flipX}
+                    flipRef={flipRef}
                     processing={processing}
-                    viewMode={viewMode}
                     history={cloudHistory}
+                    currentHistoryId={currentHistoryId}
                     editingNameIdx={editingNameIdx}
                     setEditingNameIdx={setEditingNameIdx}
                     editingNameValue={editingNameValue}
                     setEditingNameValue={setEditingNameValue}
                     renameEntry={renameEntry}
                     setDeleteConfirmIdx={setDeleteConfirmIdx}
-                    onRestore={(entry: CloudHistoryEntry) => {
+                    onRestore={async (item: HistoryItem) => {
+                      // 古い履歴はブラウザの保存から読む
+                      const entry = await loadEntry(item);
+                      if (!entry) {
+                        alert("この測定履歴のデータを読み込めませんでした");
+                        return;
+                      }
                       // 高さマップ・表示タイプ・出どころまで丸ごと戻す（点群だけ戻すと、
                       // Surface や断面に別の計測の高さマップが出ていた）
+                      setCurrentHistoryId(item.id);
                       setShowSlice(false);
                       setCloud(entry.cloud);
                       setZData(entry.grid);
+                      setPost(POST_OFF);
                       setPlotType(entry.plotType);
                       setDataSource(entry.dataSource);
                       setDataName(entry.dataName);
@@ -2611,47 +2848,11 @@ function App() {
                 lineHeight: 1.6,
               }}
             >
-              {confirmMode === "csv" ? (
-                exportPoints() ? (
-                  <>
-                    csvファイルを出力しますか？
-                    <div style={{ marginTop: "8px", fontSize: "12.5px", color: colors.textMuted }}>
-                      {dataOrigin?.kind === "csvPoints"
-                        ? "点群形式（x,y,z）で出力します。"
-                        : "同じ位置に縞が複数ある（複数層の）データのため、層ごとの点を点群形式（x,y,z）で出力します。"}
-                    </div>
-                  </>
-                ) : (
-                  "csvファイルを出力しますか？"
-                )
-              ) : confirmMode === "ai" ? (
+              {confirmMode === "ai" ? (
                 <>
                   AI推論を実行しますか？
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
-                    <span style={{ fontSize: "13px", whiteSpace: "nowrap" }}>モデル:</span>
-                    <select
-                      value={aiModelType}
-                      onChange={(e) => setAiModelType(e.target.value as AiModelType)}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        border: `1px solid ${colors.borderLight}`,
-                        backgroundColor: colors.bgDark,
-                        color: colors.text,
-                        fontSize: "13px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <option value="resnet50">U-Net++ (ResNet50)</option>
-                    </select>
+                  <div style={{ marginTop: "8px", fontSize: "12.5px", color: colors.textMuted }}>
+                    モデル: U-Net++ (ResNet50)
                   </div>
                 </>
               ) : (

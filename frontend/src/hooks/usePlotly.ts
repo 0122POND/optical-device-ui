@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import Plotly from "plotly.js-dist-min";
-import { DIM_COLORS, colors, fontFamily, monoFont } from "../utils/constants";
+import { DIM_COLORS, FILLED_COLOR, colors, fontFamily, monoFont } from "../utils/constants";
 import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
+import { bandOutline } from "../utils/bandSection";
 import type { PointCloud } from "../utils/pointCloud";
 import {
   gridScale,
@@ -47,6 +48,8 @@ export function usePlotly(args: {
   viewMode: ViewMode;
   showSlice: boolean;
   sliceLineStart: { y: number; z: number } | null;
+  // 断面の帯の幅[µm]（0=線だけ）。2D 表示に帯の外形を描く
+  sliceBandUm: number;
   sliceLineEnd: { y: number; z: number } | null;
   // 表示中データの出どころと換算設定（µm への換算は utils/units に集約）。
   // scale は App 側で useMemo して参照を安定させること（描画 effect の依存に入るため）
@@ -59,6 +62,8 @@ export function usePlotly(args: {
   colorRangeMax: string;
   plotType: PlotType;
   zData: (number | null)[][] | null;
+  // 後処理の補間で埋めた画素（表示の向き）。印を付けないときは null
+  filledMask: boolean[][] | null;
   measureMode: boolean;
   measurePt1: MeasurePt;
   measurePt2: MeasurePt;
@@ -89,6 +94,7 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
@@ -96,6 +102,7 @@ export function usePlotly(args: {
     colorRangeMax,
     plotType,
     zData,
+    filledMask,
     measureMode,
     measurePt1,
     measurePt2,
@@ -430,6 +437,22 @@ export function usePlotly(args: {
           hovertemplate: `${xLabel}: %{x:.1f}<br>${yLabel}: %{y:.1f}<br>${zLabel}: %{z:.2f}<extra></extra>`,
         },
       ];
+      if (filledMask) {
+        dimData.push({
+          type: "heatmap",
+          x: surfXCoords,
+          y: surfYCoords,
+          z: filledMask.map((row) => row.map((f) => (f ? 1 : null))),
+          colorscale: [
+            [0, FILLED_COLOR],
+            [1, FILLED_COLOR],
+          ],
+          opacity: 0.55,
+          showscale: false,
+          hoverinfo: "skip",
+          zsmooth: false,
+        });
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dimLayout: any = {
@@ -705,6 +728,33 @@ export function usePlotly(args: {
           },
         },
       ];
+      // 補間で埋めた画素に点の印を重ねる（多いときは間引いて最大約2万点。形が隠れないよう小さく半透明に）
+      if (filledMask) {
+        const fx: number[] = [];
+        const fy: number[] = [];
+        const fz: number[] = [];
+        let nFilled = 0;
+        for (const row of filledMask) for (const f of row) if (f) nFilled++;
+        const stride = Math.max(1, Math.ceil(Math.sqrt(nFilled / 20000)));
+        for (let r = 0; r < filledMask.length; r += stride)
+          for (let c = 0; c < filledMask[r].length; c += stride) {
+            const v = surfaceZ[r]?.[c];
+            if (!filledMask[r][c] || v == null) continue;
+            fx.push(surfXCoords[c]);
+            fy.push(surfYCoords[r]);
+            fz.push(v);
+          }
+        surfData.push({
+          type: "scatter3d",
+          mode: "markers",
+          x: fx,
+          y: fy,
+          z: fz,
+          marker: { size: 1, color: FILLED_COLOR, opacity: 0.6 },
+          hoverinfo: "skip",
+          showlegend: false,
+        });
+      }
 
       // 描画種別の切替(points⇄surface)ではカメラ規約が異なる（surfaceはz方向・points
       // はx方向から見る）ため、保存カメラを破棄してこのビューの既定カメラから始める
@@ -775,6 +825,19 @@ export function usePlotly(args: {
             showlegend: false,
             hoverinfo: "skip",
           });
+          if (sliceBandUm > 0) {
+            const o = bandOutline(sliceLineStart, sliceLineEnd, sliceBandUm);
+            surfData.push({
+              type: "scatter3d",
+              mode: "lines",
+              x: o.y,
+              y: o.z,
+              z: o.y.map(() => frontZ),
+              line: { color: "#ff4444", width: 2, dash: "dash" },
+              showlegend: false,
+              hoverinfo: "skip",
+            });
+          }
         } else if (sliceLineStart) {
           surfData.push({
             type: "scatter3d",
@@ -1209,6 +1272,7 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
+    sliceBandUm,
     dataSource,
     scale,
     flipRef,
@@ -1216,6 +1280,7 @@ export function usePlotly(args: {
     colorRangeMax,
     plotType,
     zData,
+    filledMask,
     pointGeom,
     measureMode,
     measurePt1,

@@ -45,6 +45,8 @@ export type DataOrigin =
   | { kind: "csv"; grid: (number | null)[][] }
   | { kind: "csvPoints"; points: PointCloud }
   | { kind: "folder"; src: FolderSource; layers: PointCloud | null }
+  // 保存した履歴から戻したフォルダ由来のデータ。元の結果画像は後の計測で上書きされうるので取り直さない
+  | { kind: "snapshot"; layers: PointCloud | null }
   | null;
 export type { FolderSource };
 

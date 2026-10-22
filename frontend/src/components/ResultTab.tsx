@@ -1,14 +1,30 @@
+import { useMemo } from "react";
 import { colors, fontFamily, monoFont } from "../utils/constants";
 import { panelSectionStyle, sectionTitleStyle } from "../utils/styles";
-import type { CloudHistoryEntry, HistorySource, ProcessingInfo, ViewMode } from "../types";
+import type { HistorySource, ProcessingInfo } from "../types";
+import { MAX_HISTORY, type HistoryItem } from "../hooks/useCloudHistory";
 import type { PointCloud } from "../utils/pointCloud";
+import type { PostResult } from "../utils/postprocess";
+import { gridScale, physicalGrid, type DataSource, type ScaleInputs } from "../utils/units";
+import {
+  heightStats,
+  ROUGHNESS_NOISE_FLOOR_UM,
+  ROUGHNESS_WARN_SA_UM,
+  validRates,
+} from "../utils/surfaceStats";
 
 // サイドパネル「測定結果」タブ：現在の点群情報と測定履歴（リネーム/復元/削除）
 export function ResultTab({
   cloud,
+  zData,
+  postResult,
+  dataSource,
+  scale,
+  flipX,
+  flipRef,
   processing,
-  viewMode,
   history,
+  currentHistoryId,
   editingNameIdx,
   setEditingNameIdx,
   editingNameValue,
@@ -18,17 +34,25 @@ export function ResultTab({
   onRestore,
 }: {
   cloud: PointCloud | null;
+  // 統計を出す高さマップと、その換算条件（表示と同じ µm 換算・反転で数える）
+  zData: (number | null)[][] | null;
+  // 後処理（外れ値除去・補間）の結果。掛けていなければ null
+  postResult: PostResult | null;
+  dataSource: DataSource;
+  scale: ScaleInputs;
+  flipX: boolean;
+  flipRef: number;
   // 表示中データの処理条件と深さの求め方（計測・推論・マスク読込のとき。CSV では null）
   processing: ProcessingInfo;
-  viewMode: ViewMode;
-  history: CloudHistoryEntry[];
+  history: HistoryItem[];
+  currentHistoryId: string | null;
   editingNameIdx: number | null;
   setEditingNameIdx: (v: number | null) => void;
   editingNameValue: string;
   setEditingNameValue: (v: string) => void;
   renameEntry: (index: number, name: string) => void;
   setDeleteConfirmIdx: (v: number | null) => void;
-  onRestore: (entry: CloudHistoryEntry) => void;
+  onRestore: (entry: HistoryItem) => void;
 }) {
   return (
     <>
@@ -40,20 +64,14 @@ export function ResultTab({
               <span style={{ color: colors.textMuted }}>点数</span>
               <span style={{ fontFamily: monoFont }}>{cloud.x.length.toLocaleString()} pts</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-              <span style={{ color: colors.textMuted }}>閾値</span>
-              <span style={{ fontFamily: monoFont }}>{">"} 128</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-              <span style={{ color: colors.textMuted }}>表示モード</span>
-              <span style={{ fontFamily: monoFont }}>{viewMode === "3D" ? "3D" : "2D"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-              <span style={{ color: colors.textMuted }}>カラー軸</span>
-              <span style={{ fontFamily: monoFont }}>
-                {viewMode === "2D-camera" ? "X (depth)" : "Z (flipped)"}
-              </span>
-            </div>
+            {zData && zData.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+                <span style={{ color: colors.textMuted }}>高さマップ</span>
+                <span style={{ fontFamily: monoFont }}>
+                  {zData.length} × {zData[0].length}
+                </span>
+              </div>
+            )}
           </div>
         </section>
       ) : (
@@ -69,13 +87,28 @@ export function ResultTab({
         </div>
       )}
 
+      {/* 統計（有効率・高さ・平面除去後の凹凸） */}
+      {cloud && zData && zData.length > 0 && (
+        <StatsSection
+          zData={zData}
+          postResult={postResult}
+          dataSource={dataSource}
+          scale={scale}
+          flipX={flipX}
+          flipRef={flipRef}
+        />
+      )}
+
       {/* 処理条件（バックエンドの depth_meta.json） */}
       {cloud && processing && <ProcessingSection processing={processing} />}
 
       {/* 測定履歴 */}
       {history.length > 0 && (
         <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
-          <h3 style={sectionTitleStyle}>測定履歴（最新5件）</h3>
+          <h3 style={sectionTitleStyle}>測定履歴（最新{MAX_HISTORY}件）</h3>
+          <div style={{ margin: "-4px 0 10px", fontSize: "11px", color: colors.textDim }}>
+            このブラウザに保存され、再読み込みしても残ります。
+          </div>
           {(
             [
               "coin",
@@ -124,10 +157,10 @@ export function ResultTab({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {entries.map(({ entry, idx: i }) => {
-                    const isCurrent = cloud === entry.cloud;
+                    const isCurrent = entry.id === currentHistoryId;
                     return (
                       <div
-                        key={entry.measuredAt + i}
+                        key={entry.id}
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -369,6 +402,91 @@ function ProcessingSection({ processing }: { processing: NonNullable<ProcessingI
           style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
         >
           処理条件の記録（depth_meta.json）が無いフォルダです。
+        </div>
+      )}
+    </section>
+  );
+}
+
+const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+
+// 表示中の高さマップの統計。有効率は領域ごと（取り方で値が大きく違うため、領域名を必ず添える）
+function StatsSection({
+  zData,
+  postResult,
+  dataSource,
+  scale,
+  flipX,
+  flipRef,
+}: {
+  zData: (number | null)[][];
+  postResult: PostResult | null;
+  dataSource: DataSource;
+  scale: ScaleInputs;
+  flipX: boolean;
+  flipRef: number;
+}) {
+  const nFilled = postResult ? postResult.filledLinear + postResult.filledSpline : 0;
+  const stats = useMemo(() => {
+    const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+    return { rates: validRates(zData), h: heightStats(pg.z, pg.x, pg.y) };
+  }, [zData, dataSource, scale, flipX, flipRef]);
+  const unit = gridScale(dataSource, scale).valueUnit;
+  const f = (v: number) => `${v.toFixed(unit === "µm" ? 2 : 3)} ${unit}`;
+  const { rates, h } = stats;
+  // 粗さとして読めない大きさの注意は、デバイスの干渉縞データ（深さ分解能 1.8µm/px）のときだけ
+  const nearFloor = dataSource === "device" && h != null && h.sa < ROUGHNESS_WARN_SA_UM;
+  return (
+    <section style={panelSectionStyle}>
+      <h3 style={sectionTitleStyle}>統計</h3>
+      {postResult && (
+        <div
+          style={{
+            marginBottom: "10px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            backgroundColor: colors.primarySoft,
+            color: colors.primary,
+            fontSize: "11.5px",
+            lineHeight: 1.6,
+          }}
+        >
+          後処理後の値です
+          {nFilled > 0 && `（補間 ${nFilled.toLocaleString()} 画素を含む）`}
+          。精度評価には後処理前のデータを使ってください。
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <InfoRow label="有効率（全体）" value={pct(rates.full)} />
+        <InfoRow label="有効率（中央50%×50%）" value={pct(rates.center50)} />
+        <InfoRow label="有効率（中央面積50%）" value={pct(rates.centerArea50)} />
+        {h && (
+          <>
+            <InfoRow label="平均 ± 標準偏差" value={`${f(h.mean)} ± ${h.std.toFixed(2)}`} />
+            <InfoRow label="最小 〜 最大" value={`${h.min.toFixed(2)} 〜 ${f(h.max)}`} />
+            <InfoRow label="P1 〜 P99" value={`${h.p1.toFixed(2)} 〜 ${f(h.p99)}`} />
+            <InfoRow label="平面除去後 Sq / Sa" value={`${h.sq.toFixed(2)} / ${f(h.sa)}`} />
+          </>
+        )}
+      </div>
+      <div style={{ marginTop: "8px", fontSize: "11px", color: colors.textDim, lineHeight: 1.6 }}>
+        中央50%×50% は縦横それぞれ中央の半分、中央面積50% は面積で半分（各辺 約70.7%）。 Sq / Sa
+        は最小二乗平面を引いた残りの二乗平均平方根 / 平均絶対値。
+      </div>
+      {nearFloor && (
+        <div
+          style={{
+            marginTop: "10px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            backgroundColor: colors.primarySoft,
+            color: colors.primary,
+            fontSize: "11.5px",
+            lineHeight: 1.6,
+          }}
+        >
+          Sa が {ROUGHNESS_WARN_SA_UM} µm 未満です。縞位置の抽出ノイズ（約{ROUGHNESS_NOISE_FLOOR_UM}{" "}
+          µm）に近く、 粗さの値としては読めません（面形状・うねりの確認向け）。
         </div>
       )}
     </section>

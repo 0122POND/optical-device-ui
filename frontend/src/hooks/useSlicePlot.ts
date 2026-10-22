@@ -11,6 +11,7 @@ import {
   type DataSource,
   type ScaleInputs,
 } from "../utils/units";
+import { bandSection, type BandSection } from "../utils/bandSection";
 
 // 2D 断層グラフ（クリックで引いた線に沿った断面：距離×深さ）を sliceRef へ描画する。
 // グリッド(zData)がある場合はグリッド交点での線形補間、なければ点群ベースで抽出する。
@@ -27,6 +28,8 @@ export function useSlicePlot(args: {
   flipX: boolean;
   flipRef: number;
   plotType: PlotType;
+  // 帯の幅[µm]。0 なら線の上だけ、正なら線から ±幅/2 の画素を集めて横から見る（高さマップがあるとき）
+  bandWidthUm: number;
   // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
   sliceMeasureMode: boolean;
   sliceMeasureStart: { t: number; d: number } | null;
@@ -46,6 +49,7 @@ export function useSlicePlot(args: {
     flipX,
     flipRef,
     plotType,
+    bandWidthUm,
     sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
@@ -86,8 +90,15 @@ export function useSlicePlot(args: {
 
     const tData: number[] = [];
     const xData: number[] = [];
+    let band: BandSection | null = null;
 
-    if (zData && zData.length > 0) {
+    if (zData && zData.length > 0 && bandWidthUm > 0) {
+      // --- 帯の断面: 線から ±幅/2 の画素を集め、距離ごとの中央値を断面とする ---
+      const grid = physicalGrid(zData, dataSource, scale, flipX, flipRef).z;
+      band = bandSection(grid, sc.col, sc.row, sliceLineStart, sliceLineEnd, bandWidthUm);
+      tData.push(...band.profT);
+      xData.push(...band.profMed);
+    } else if (zData && zData.length > 0) {
       // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
       // 3D表示と同じ換算・反転を施した µm グリッドから取る（表示と断面で値が一致する）
       const grid = physicalGrid(zData, dataSource, scale, flipX, flipRef).z;
@@ -247,22 +258,60 @@ export function useSlicePlot(args: {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any[] = [
-      {
-        x: tData,
-        y: xData,
-        type: "scatter",
-        mode: "lines",
-        line: {
-          color: colors.primary,
-          width: 1.5,
+    const data: any[] = [];
+    if (band) {
+      // 帯の中の画素（横から見た散らばり）→ P10〜P90 の幅 → 中央値の線 の順に重ねる
+      data.push(
+        {
+          x: band.t,
+          y: band.v,
+          type: "scattergl",
+          mode: "markers",
+          marker: { size: 2, color: colors.textMuted, opacity: 0.35 },
+          hoverinfo: "skip",
+          showlegend: false,
         },
+        {
+          x: band.profT,
+          y: band.profLo,
+          type: "scatter",
+          mode: "lines",
+          line: { width: 0 },
+          hoverinfo: "skip",
+          showlegend: false,
+        },
+        {
+          x: band.profT,
+          y: band.profHi,
+          type: "scatter",
+          mode: "lines",
+          line: { width: 0 },
+          fill: "tonexty",
+          fillcolor: `${colors.primary}33`,
+          hoverinfo: "skip",
+          showlegend: false,
+        }
+      );
+    }
+    data.push({
+      x: tData,
+      y: xData,
+      type: "scatter",
+      mode: "lines",
+      line: {
+        color: colors.primary,
+        width: 1.5,
       },
-    ];
+      showlegend: false,
+      ...(band ? { hovertemplate: "距離 %{x:.0f} µm<br>中央値 %{y:.2f}<extra></extra>" } : {}),
+    });
 
     const titleText =
       `断層 (${y0.toFixed(0)},${z0.toFixed(0)})→` +
-      `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ${tData.length} pts`;
+      `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ` +
+      (band
+        ? `帯 ${bandWidthUm} µm・${band.count.toLocaleString()} 画素の中央値（帯 P10〜P90）`
+        : `${tData.length} pts`);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
@@ -423,6 +472,7 @@ export function useSlicePlot(args: {
     flipX,
     flipRef,
     plotType,
+    bandWidthUm,
     sliceMeasureMode,
     sliceMeasureStart,
     sliceMeasureEnd,
