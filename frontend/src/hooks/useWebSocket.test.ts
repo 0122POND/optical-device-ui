@@ -21,6 +21,7 @@ class FakeWebSocket {
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: ((ev: unknown) => void) | null = null;
   onclose: (() => void) | null = null;
+  send = vi.fn();
   close = vi.fn(() => {
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
@@ -51,6 +52,7 @@ function makeArgs(overrides: Partial<UseWebSocketArgs> = {}): UseWebSocketArgs {
     onProgress: vi.fn(),
     onStatus: vi.fn(),
     onError: vi.fn(),
+    onCancelled: vi.fn(),
     ...overrides,
   };
 }
@@ -120,6 +122,23 @@ describe("useWebSocket", () => {
     renderHook(() => useWebSocket(args));
     latest().receive({ type: "error", message: "boom" });
     expect(args.onError).toHaveBeenCalledWith("generic", "boom");
+  });
+
+  it("cancel() は開いている接続にだけ cancel コマンドを送る", () => {
+    const { result } = renderHook(() => useWebSocket(makeArgs()));
+    result.current.cancel();
+    expect(latest().send).not.toHaveBeenCalled();
+    latest().open();
+    result.current.cancel();
+    expect(latest().send).toHaveBeenCalledWith(JSON.stringify({ cmd: "cancel" }));
+  });
+
+  it("cancelled メッセージは onCancelled に渡す", () => {
+    const args = makeArgs();
+    renderHook(() => useWebSocket(args));
+    latest().receive({ type: "cancelled", job: "preprocess" });
+    expect(args.onCancelled).toHaveBeenCalledTimes(1);
+    expect(args.onError).not.toHaveBeenCalled();
   });
 
   it("JSON でないメッセージや未知の type は例外にならず、コールバックも呼ばない", () => {

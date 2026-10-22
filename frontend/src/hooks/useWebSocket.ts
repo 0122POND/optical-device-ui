@@ -36,6 +36,8 @@ export type UseWebSocketArgs = {
   onProgress: (p: WsProgress) => void;
   onStatus: (value: "READY" | "RUNNING" | "COMPLETE") => void;
   onError: (kind: "ai" | "acquire" | "generic", message: string) => void;
+  // 中止ボタンで計測が止まったとき
+  onCancelled: () => void;
 };
 
 /**
@@ -45,7 +47,10 @@ export type UseWebSocketArgs = {
  *   argsRef 経由で読む（connect を [] 依存に保ち、再接続チャーンを避けるため）。
  * - connect() は handleConfirmOk から呼ばれ、開いている接続を再利用しつつ送信用に返す。
  */
-export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket } {
+export function useWebSocket(args: UseWebSocketArgs): {
+  connect: () => WebSocket;
+  cancel: () => void;
+} {
   const wsRef = useRef<WebSocket | null>(null);
   // stale closure 回避: 最新の引数を ref に同期する（render中のref書き込みは
   // react-hooks/refs で禁止のため effect で行う。onmessage は非同期発火なので間に合う）
@@ -153,6 +158,8 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
           } else if (data.value === "READY") {
             a.onStatus("READY");
           }
+        } else if (data.type === "cancelled") {
+          a.onCancelled();
         } else if (data.type === "error") {
           console.error("Server error:", data.message);
           a.onError("generic", data.message);
@@ -185,5 +192,11 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
     };
   }, [connect]);
 
-  return { connect };
+  // 実行中の計測を止める（バックエンドは次の区切りで止めて cancelled を返す）
+  const cancel = useCallback(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ cmd: "cancel" }));
+  }, []);
+
+  return { connect, cancel };
 }

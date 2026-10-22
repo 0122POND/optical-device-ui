@@ -466,7 +466,7 @@ function App() {
   };
   // WebSocket 接続・onmessage ルーティングは useWebSocket フックへ集約。
   // 完了時の点群反映は applyCloudResult、進捗・状態・エラーはコールバックで App 側へ委譲。
-  const { connect } = useWebSocket({
+  const { connect, cancel } = useWebSocket({
     algorithm,
     applyCloudResult,
     onProgress: (p) => {
@@ -476,7 +476,15 @@ function App() {
       setProgressPercent(p.percent);
     },
     onStatus: (value) => setStatus(value),
+    onCancelled: () => {
+      setIsLoadingAI(false);
+      setIsAcquiring(false);
+      setCancelling(false);
+      setStatus("READY");
+      setProgressMessage("中止しました");
+    },
     onError: (kind, msg) => {
+      setCancelling(false);
       // generic（サーバーの error 型）は AI 推論中にも届くので、どちらのフラグも下ろす
       // （以前は AI 推論中のサーバーエラーで「AI推論中...」の表示が消えなかった）
       if (kind === "ai" || kind === "generic") setIsLoadingAI(false);
@@ -504,6 +512,8 @@ function App() {
 
   // 取得中フラグ
   const [isAcquiring, setIsAcquiring] = useState(false);
+  // 中止ボタンを押してから止まるまで（バックエンドは次の区切りで止まる）
+  const [cancelling, setCancelling] = useState(false);
 
   // AI結果読み込み中フラグ
   const [isLoadingAI, setIsLoadingAI] = useState(false);
@@ -782,6 +792,7 @@ function App() {
 
       setStatus("RUNNING");
       setIsAcquiring(true);
+      setCancelling(false);
 
       console.log("画像処理開始...");
 
@@ -806,6 +817,7 @@ function App() {
       setShowPlot(true);
       setCloud(null);
       setIsLoadingAI(true);
+      setCancelling(false);
 
       // 進捗初期化
       setProgressStep(0);
@@ -1388,6 +1400,27 @@ function App() {
                     <div style={{ fontSize: "13px", opacity: 0.8 }}>
                       経過時間: {formatElapsed(elapsedMs)}
                     </div>
+                    <button
+                      className="tt-hover"
+                      disabled={cancelling}
+                      title={
+                        isLoadingAI
+                          ? "1枚の推論が終わったところで止めます（途中までのマスクは残しません）"
+                          : "今の工程が終わったところで止めます"
+                      }
+                      style={{
+                        ...modalButtonStyle("neutral"),
+                        pointerEvents: "auto",
+                        opacity: cancelling ? 0.6 : 1,
+                        cursor: cancelling ? "default" : "pointer",
+                      }}
+                      onClick={() => {
+                        setCancelling(true);
+                        cancel();
+                      }}
+                    >
+                      {cancelling ? "中止しています…" : "中止"}
+                    </button>
                   </div>
                 )}
               </div>

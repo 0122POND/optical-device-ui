@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -78,8 +79,8 @@ executor = ThreadPoolExecutor(max_workers=2)
 
 
 class WorkerCancelled(Exception):
-    """WebSocket切断時に、進捗コールバック経由でワーカースレッドの重い処理を
-    協調的に中断するための内部例外（スレッドは外部から強制終了できないため）。"""
+    """中止ボタン（cancel コマンド）や WebSocket 切断時に、進捗コールバック経由でワーカースレッドの
+    重い処理を協調的に中断するための内部例外（スレッドは外部から強制終了できないため）。"""
 
 # ピーク結果のインメモリキャッシュ（PNG encoded bytes）
 _result_cache: Dict[str, bytes] = {}
@@ -154,7 +155,9 @@ async def ws_endpoint(ws: WebSocket):
     print("WebSocket connected")
 
     is_running = False
-    # 切断時にワーカースレッド（AI推論・前処理）を協調的に中断するためのフラグ。
+    # 実行中の計測（前処理・AI推論）。受信ループを止めずに走らせ、実行中も cancel を受け付ける
+    job_task: Optional[asyncio.Task] = None
+    # 中止・切断時にワーカースレッドを協調的に中断するためのフラグ。計測を始めるたびに下ろす。
     # 進捗コールバック内で is_set() を確認し、立っていれば WorkerCancelled を送出する。
     cancel_event = threading.Event()
 
@@ -407,6 +410,35 @@ async def ws_endpoint(ws: WebSocket):
 
         loop.run_in_executor(executor, background_save)
 
+    async def send_quietly(payload: Dict[str, Any]) -> None:
+        # 切断後の送信失敗は無視する（計測タスクは受信ループと別に走っているため）
+        try:
+            await ws.send_text(json.dumps(payload))
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    async def run_job(cmd: str, params: Dict[str, Any]) -> None:
+        nonlocal is_running
+        try:
+            if cmd == "preprocess":
+                await run_preprocess_with_progress(params)
+            else:
+                await run_ai_inference_with_progress(params)
+            await send_quietly({"type": "status", "value": "COMPLETE"})
+        except WorkerCancelled:
+            if cmd == "ai_inference":
+                # 途中までのマスクは一部の枚数だけなので残さない（揃った結果と取り違えないため）
+                out = _data_subpath(params.get("output_dir"), DATA_DIR / "mask_result")
+                shutil.rmtree(out, ignore_errors=True)
+                os.makedirs(out, exist_ok=True)
+            await send_quietly({"type": "cancelled", "job": cmd})
+            await send_quietly({"type": "status", "value": "READY"})
+        except Exception as e:
+            await send_quietly({"type": "error", "message": str(e)})
+            await send_quietly({"type": "status", "value": "READY"})
+        finally:
+            is_running = False
+
     try:
         await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
 
@@ -424,50 +456,20 @@ async def ws_endpoint(ws: WebSocket):
             if cmd == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
 
-            elif cmd == "preprocess":
-                # 画像処理を実行
+            elif cmd in ("preprocess", "ai_inference"):
                 if is_running:
                     await ws.send_text(json.dumps({"type": "error", "message": "Already running"}))
                     continue
-
                 is_running = True
+                cancel_event.clear()
                 await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
+                # タスクへの参照を持っておく（参照が無いと途中で回収されうる）
+                job_task = asyncio.create_task(run_job(cmd, params))
 
-                try:
-                    await run_preprocess_with_progress(params)
-                    await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
-                except WebSocketDisconnect:
-                    raise
-                except Exception as e:
-                    try:
-                        await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
-                        await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
-                    except (WebSocketDisconnect, RuntimeError):
-                        raise WebSocketDisconnect(code=1006)
-                finally:
-                    is_running = False
-
-            elif cmd == "ai_inference":
+            elif cmd == "cancel":
+                # 次の区切り（AIは1枚ごと、前処理は工程ごと）で止まる
                 if is_running:
-                    await ws.send_text(json.dumps({"type": "error", "message": "Already running"}))
-                    continue
-
-                is_running = True
-                await ws.send_text(json.dumps({"type": "status", "value": "RUNNING"}))
-
-                try:
-                    await run_ai_inference_with_progress(params)
-                    await ws.send_text(json.dumps({"type": "status", "value": "COMPLETE"}))
-                except WebSocketDisconnect:
-                    raise
-                except Exception as e:
-                    try:
-                        await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
-                        await ws.send_text(json.dumps({"type": "status", "value": "READY"}))
-                    except (WebSocketDisconnect, RuntimeError):
-                        raise WebSocketDisconnect(code=1006)
-                finally:
-                    is_running = False
+                    cancel_event.set()
 
             else:
                 await ws.send_text(json.dumps({"type": "error", "message": f"Unknown cmd: {cmd}"}))
