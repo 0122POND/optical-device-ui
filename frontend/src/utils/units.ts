@@ -122,6 +122,26 @@ export function physicalPoints(
   };
 }
 
+// 点群を、点群形式CSVの単位（x=列の添字, y=行の添字, 高さ=µm）の内部規約 PointCloud
+// （x=高さ, y=列, z=行）に変換する。高さマップCSVと同じく、列・行のピッチはファイル名に残す。
+// 左右反転は表示と同じ意味（device=深さの反転 / csv=列の鏡映）を反映する
+export function pointsInCsvUnits(
+  cloud: PointCloud,
+  source: DataSource,
+  s: ScaleInputs,
+  flipX: boolean,
+  flipRef = 0
+): PointCloud {
+  const sc = gridScale(source, s);
+  let maxCol = 0;
+  if (source === "csv" && flipX) for (const v of cloud.y) if (v > maxCol) maxCol = v;
+  const x = cloud.x.map((v) =>
+    source === "device" ? (flipX ? flipRef - v : v) * sc.value : v * sc.value
+  );
+  const y = source === "csv" && flipX ? cloud.y.map((v) => maxCol - v) : cloud.y.slice();
+  return { x, y, z: cloud.z.slice(), c: x };
+}
+
 // 書き出しファイル名に埋め込んだピッチ（例: foo_pitch20x100um.csv）を読む。
 // 読込時に CSV のピッチ設定へ自動反映し、µm/ピッチの取り違えを防ぐ
 export function parsePitchFromFilename(name: string): { x: number; y: number } | null {

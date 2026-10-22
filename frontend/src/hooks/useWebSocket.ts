@@ -87,13 +87,13 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
               colorMode: "z",
               ...(a.algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             };
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
+            const { cloud: newCloud, grid: newGrid, layers } = await buildPointCloudFromFolder(src);
 
             a.applyCloudResult(newCloud, newGrid, {
               plotType: "scatter3d",
               source: "ai",
               dataSource: "device",
-              origin: { kind: "folder", src },
+              origin: { kind: "folder", src, layers },
               progress: { message: `AI推論完了 (${data.device})`, percent: 100 },
               clearLoading: "ai",
             });
@@ -114,13 +114,13 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
               colorMode: "z",
               ...(a.algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
             };
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
+            const { cloud: newCloud, grid: newGrid, layers } = await buildPointCloudFromFolder(src);
 
             a.applyCloudResult(newCloud, newGrid, {
               plotType: "scatter3d",
               source: a.algorithm as HistorySource,
               dataSource: "device",
-              origin: { kind: "folder", src },
+              origin: { kind: "folder", src, layers },
               progress: { message: "完了", percent: 100 },
               clearLoading: "acquire",
             });

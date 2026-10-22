@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { densePointsFromGrid, sampledPointsFromGrid } from "./pointCloud";
+import {
+  densePointsFromGrid,
+  extractRowLayers,
+  sampledPointsFromGrid,
+  samplePointCloud,
+} from "./pointCloud";
 
 describe("densePointsFromGrid", () => {
   it("x=高さ値, y=列, z=行, c=高さ値 にマッピングし null は飛ばす", () => {
@@ -96,5 +101,65 @@ describe("sampledPointsFromGrid", () => {
       expect(out.x[i]).toBe(out.z[i] * w + out.y[i]);
       if (i > 0) expect(out.x[i]).toBeGreaterThan(out.x[i - 1]);
     }
+  });
+});
+
+describe("samplePointCloud", () => {
+  const cloud = { x: [0, 1, 2, 3, 4], y: [5, 6, 7, 8, 9], z: [0, 0, 1, 1, 2], c: [0, 1, 2, 3, 4] };
+
+  it("上限以下ならそのまま返す", () => {
+    expect(samplePointCloud(cloud, 5)).toBe(cloud);
+  });
+
+  it("上限まで間引き、点の対応と元の並び順を保つ", () => {
+    const s = samplePointCloud(cloud, 3, () => 0.99);
+    expect(s.x).toHaveLength(3);
+    for (let k = 1; k < 3; k++) expect(s.x[k]).toBeGreaterThan(s.x[k - 1]);
+    s.x.forEach((v, k) => {
+      expect(s.y[k]).toBe(cloud.y[v]);
+      expect(s.z[k]).toBe(cloud.z[v]);
+      expect(s.c[k]).toBe(cloud.c[v]);
+    });
+  });
+});
+
+describe("extractRowLayers", () => {
+  // 1行=1文字列の簡易画像（'#'=255, '.'=0）を RGBA に展開
+  const image = (rows: string[]) => {
+    const width = rows[0].length;
+    const data = new Uint8ClampedArray(width * rows.length * 4);
+    rows.forEach((r, yy) =>
+      [...r].forEach((ch, xx) => {
+        data[(yy * width + xx) * 4] = ch === "#" ? 255 : 0;
+      })
+    );
+    return { data, width, height: rows.length };
+  };
+
+  it("1層だけなら行ごとの重心を高さにし、複数層の行は0", () => {
+    const { data, width, height } = image([".##.......", "..........", ".....###.."]);
+    const r = extractRowLayers(data, width, height, 128);
+    expect(r.row).toEqual([1.5, null, 6]);
+    expect(r.validRows).toBe(2);
+    expect(r.multiRows).toBe(0);
+    expect(r.layerYs).toEqual([0, 2]);
+    expect(r.layerXs).toEqual([1.5, 6]);
+  });
+
+  it("離れた区間が2つある行は欠損にし、層ごとの重心を返す", () => {
+    const { data, width, height } = image(["##......##", ".#........"]);
+    const r = extractRowLayers(data, width, height, 128);
+    expect(r.row).toEqual([null, 1]);
+    expect(r.validRows).toBe(2);
+    expect(r.multiRows).toBe(1);
+    expect(r.layerYs).toEqual([0, 0, 1]);
+    expect(r.layerXs).toEqual([0.5, 8.5, 1]);
+  });
+
+  it("3画素以下の隙間は同じ縞の途切れとして1層に結合する", () => {
+    const { data, width, height } = image(["#...#.....", "#....#...."]);
+    const r = extractRowLayers(data, width, height, 128);
+    expect(r.row).toEqual([2, null]);
+    expect(r.multiRows).toBe(1);
   });
 });

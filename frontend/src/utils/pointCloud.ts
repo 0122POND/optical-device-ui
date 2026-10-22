@@ -10,27 +10,68 @@ export type DepthGrid = (number | null)[][];
 
 type Manifest = { files: string[] };
 
-// 1枚のスライス画像から各y列の深度（輝度加重x重心）を算出
-function buildGridRowFromImageData(
+// 同じ行の中で、この画素数以下の隙間しか空いていない区間は1本の縞として結合する
+//（縞の途切れや細い抜けで1本が複数層に誤判定されるのを防ぐ）
+const LAYER_MERGE_GAP_PX = 3;
+
+// 複数層の行が有効行のこの割合以上あるときだけ「複数層データ」とみなし、点群形式で出力する。
+// AIマスクには本線から離れた線状ノイズで複数層になる行が0.03〜0.7%あり（硬貨データで実測）、
+// 1行でもあれば…という判定では1層のデータまで点群形式になるため。
+// 断層・内部構造なら広い範囲に層が出る前提の仮の値で、実データで要調整
+export const MULTI_LAYER_MIN_RATIO = 0.05;
+
+// 1枚のスライス画像の各y行を、threshold超え画素の連続区間（=縞1本=1層）に分け、
+// 区間ごとの輝度加重x重心を求める。
+// - row: 高さマップ1行分。区間が1つならその重心、0または2つ以上なら null
+//   （複数層を平均すると層の間の何もない位置になるため、欠損として扱う）
+// - layerYs/layerXs: 全区間の (y, 重心x)。複数層のときの点群出力に使う
+// - validRows/multiRows: 区間を1つ以上持つ行数 / 2つ以上持つ行数
+export function extractRowLayers(
   data: Uint8ClampedArray,
   width: number,
   height: number,
   threshold: number
-): (number | null)[] {
+): {
+  row: (number | null)[];
+  layerYs: number[];
+  layerXs: number[];
+  validRows: number;
+  multiRows: number;
+} {
   const row: (number | null)[] = new Array(height);
+  const layerYs: number[] = [];
+  const layerXs: number[] = [];
+  let validRows = 0;
+  let multiRows = 0;
   for (let yy = 0; yy < height; yy++) {
+    let runs = 0;
     let sumX = 0;
     let sumW = 0;
+    let lastX = -Infinity;
+    const flush = () => {
+      layerYs.push(yy);
+      layerXs.push(sumX / sumW);
+      runs++;
+    };
     for (let xx = 0; xx < width; xx++) {
       const i = (yy * width + xx) * 4;
       const v = data[i]; // R
       if (v <= threshold) continue;
+      if (sumW > 0 && xx - lastX - 1 > LAYER_MERGE_GAP_PX) {
+        flush();
+        sumX = 0;
+        sumW = 0;
+      }
       sumX += xx * v;
       sumW += v;
+      lastX = xx;
     }
-    row[yy] = sumW > 0 ? sumX / sumW : null;
+    if (sumW > 0) flush();
+    row[yy] = runs === 1 ? layerXs[layerXs.length - 1] : null;
+    if (runs > 0) validRows++;
+    if (runs > 1) multiRows++;
   }
-  return row;
+  return { row, layerYs, layerXs, validRows, multiRows };
 }
 
 // 1枚の画像から「threshold超え」の点を最大 samplePerSlice 個だけ取る（reservoir sampling）
@@ -176,7 +217,7 @@ async function loadImageAsImageData(url: string): Promise<ImageData> {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-export async function buildPointCloudFromFolder(options: {
+export type FolderSource = {
   folderUrl: string; // 例: "/data/result_coin_ruined"
   manifestName?: string; // 例: "manifest.json"
   threshold: number; // 例: 128
@@ -184,7 +225,21 @@ export async function buildPointCloudFromFolder(options: {
   maxTotalPoints?: number; // 総点数の上限（デフォルト: 100000）
   flipZ?: boolean; // 例: true
   colorMode?: "z" | "intensity";
-}): Promise<{ cloud: PointCloud; grid: DepthGrid; width: number; height: number; depth: number }> {
+};
+
+// buildPointCloudFromFolder の戻り値。layers は複数層の行が MULTI_LAYER_MIN_RATIO 以上あるときだけ、
+// 全スライス・全行の層ごとの重心点（PointCloud 規約: x=重心, y=行, z=スライス）。
+// 1層だけのデータでは null（高さマップで表せるため）
+export type FolderCloudResult = {
+  cloud: PointCloud;
+  grid: DepthGrid;
+  layers: PointCloud | null;
+  width: number;
+  height: number;
+  depth: number;
+};
+
+export async function buildPointCloudFromFolder(options: FolderSource): Promise<FolderCloudResult> {
   const {
     folderUrl,
     manifestName = "manifest.json",
@@ -221,6 +276,12 @@ export async function buildPointCloudFromFolder(options: {
 
   // グリッド: grid[z][y] = 輝度加重x重心（断面プロファイル用）
   const gridRows: (number | null)[][] = [];
+  // 層ごとの重心点（複数層のときの点群出力用）
+  const lx: number[] = [];
+  const ly: number[] = [];
+  const lz: number[] = [];
+  let validRows = 0;
+  let multiRows = 0;
 
   for (let zi = 0; zi < D; zi++) {
     const file = files[zi];
@@ -230,8 +291,17 @@ export async function buildPointCloudFromFolder(options: {
     width = imgData.width;
     height = imgData.height;
 
-    // グリッド行を構築（サンプリング前の全ピクセルから）
-    gridRows.push(buildGridRowFromImageData(imgData.data, width, height, threshold));
+    // グリッド行と層ごとの重心を構築（サンプリング前の全ピクセルから）
+    const rowLayers = extractRowLayers(imgData.data, width, height, threshold);
+    gridRows.push(rowLayers.row);
+    validRows += rowLayers.validRows;
+    multiRows += rowLayers.multiRows;
+    const layerZ = flipZ ? D - 1 - zi : zi;
+    for (let k = 0; k < rowLayers.layerXs.length; k++) {
+      lx.push(rowLayers.layerXs[k]);
+      ly.push(rowLayers.layerYs[k]);
+      lz.push(layerZ);
+    }
 
     const sampled = samplePointsFromImageData(
       imgData.data,
@@ -255,15 +325,17 @@ export async function buildPointCloudFromFolder(options: {
 
   // flipZ時はグリッド行も反転
   const grid: DepthGrid = flipZ ? gridRows.reverse() : gridRows;
+  const multiLayer = validRows > 0 && multiRows / validRows >= MULTI_LAYER_MIN_RATIO;
+  const layers: PointCloud | null = multiLayer ? { x: lx, y: ly, z: lz, c: lx } : null;
 
   // 総点数が上限を超えた場合、ボクセル(グリッド)間引きで均一に減らす。
   // ランダム間引きは密度ムラで面が「ノイズ」に見えるため廃止。
   if (x.length > maxTotalPoints) {
     const cloud = voxelDownsample(x, y, z, c, maxTotalPoints);
-    return { cloud, grid, width, height, depth: D };
+    return { cloud, grid, layers, width, height, depth: D };
   }
 
-  return { cloud: { x, y, z, c }, grid, width, height, depth: D };
+  return { cloud: { x, y, z, c }, grid, layers, width, height, depth: D };
 }
 
 // CSV由来の2Dグリッド(高さマップ)から高密度点群を作る。
@@ -338,4 +410,28 @@ export function sampledPointsFromGrid(
   const order = Array.from({ length: maxPoints }, (_, i) => i).sort((a, b) => sseq[a] - sseq[b]);
   const cx = order.map((i) => sx[i]);
   return { x: cx, y: order.map((i) => sy[i]), z: order.map((i) => sz[i]), c: cx };
+}
+
+// 任意の点群から最大 maxPoints 点をランダムに間引く（点群形式CSV用、reservoir sampling）。
+// 間引いた点は元の並び順のまま返す。点数が上限以下ならそのまま返す。
+// rng はテスト用に差し替え可能（既定 Math.random）。
+export function samplePointCloud(
+  cloud: PointCloud,
+  maxPoints: number,
+  rng: () => number = Math.random
+): PointCloud {
+  const n = cloud.x.length;
+  if (n <= maxPoints) return cloud;
+  const idx = Array.from({ length: maxPoints }, (_, i) => i);
+  for (let i = maxPoints; i < n; i++) {
+    const j = Math.floor(rng() * (i + 1));
+    if (j < maxPoints) idx[j] = i;
+  }
+  idx.sort((a, b) => a - b);
+  return {
+    x: idx.map((i) => cloud.x[i]),
+    y: idx.map((i) => cloud.y[i]),
+    z: idx.map((i) => cloud.z[i]),
+    c: idx.map((i) => cloud.c[i]),
+  };
 }
