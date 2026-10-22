@@ -1135,20 +1135,15 @@ export function usePlotly(args: {
             color: colors.textMuted,
             gridcolor: colors.grid,
           },
+          // 2D（奥行き方向から見る）は Surface の 2D と同じく、目盛りは水平・横軸は5本程度、縦軸の題は
+          // 目盛りに重なるので横軸の題にまとめる
           yaxis: {
             title: axisVisible
-              ? { text: "X [µm]", font: { size: 12, color: colors.textMuted } }
-              : "",
-            visible: axisVisible,
-            showgrid: axisVisible,
-            zeroline: axisVisible,
-            color: colors.textMuted,
-            gridcolor: colors.grid,
-          },
-          zaxis: {
-            title: axisVisible
               ? {
-                  text: hasSweep ? "Y [µm]" : "Y (仮定値)",
+                  text:
+                    viewMode === "2D-camera"
+                      ? `X・${hasSweep ? "Y [µm]" : "Y (仮定値) [µm]"}`
+                      : "X [µm]",
                   font: { size: 12, color: colors.textMuted },
                 }
               : "",
@@ -1157,6 +1152,22 @@ export function usePlotly(args: {
             zeroline: axisVisible,
             color: colors.textMuted,
             gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0, nticks: 5 } : {}),
+          },
+          zaxis: {
+            title:
+              axisVisible && viewMode !== "2D-camera"
+                ? {
+                    text: hasSweep ? "Y [µm]" : "Y (仮定値)",
+                    font: { size: 12, color: colors.textMuted },
+                  }
+                : { text: "" }, // "" だと Plotly が軸名「z」を出す
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: colors.textMuted,
+            gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0 } : {}),
           },
           aspectmode: "manual",
           aspectratio: (() => {
