@@ -38,6 +38,7 @@ python app.py        # FastAPIサーバー起動
 
 - **Surface**: `(number | null)[][]` - 2Dグリッド（null=データなし、number=高さ）
 - **Point Cloud**: `{ x: number[], y: number[], z: number[], c: number[] }` - c は深度/強度による色
+- **出どころと単位**: 表示データは `DataSource`（`device`=値が縞のx重心px / `csv`=値が高さµm）を読込経路で明示して持つ。µm への換算・左右反転は `frontend/src/utils/units.ts`（`physicalGrid` / `physicalPoints`）に集約し、各表示・計測・CSV書き出しはここだけを使う（「点群があればデバイス由来」のような推測で換算しないこと）。CSV書き出しは µm の高さで、ピッチをファイル名 `_pitch{X}x{Y}um.csv` に埋め込み、読込時に自動反映する
 
 ### WebSocketプロトコル
 

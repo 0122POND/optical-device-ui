@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
-import { generateCoinData, addNoise } from "./utils/surface";
 import { downloadCSV, parseCSV } from "./utils/csv";
 import {
   buildPointCloudFromFolder,
@@ -8,7 +7,17 @@ import {
   sampledPointsFromGrid,
   type PointCloud,
 } from "./utils/pointCloud";
-import { useWebSocket } from "./hooks/useWebSocket";
+import { useWebSocket, type ApplyCloudOpts } from "./hooks/useWebSocket";
+import { usePersistentState } from "./hooks/usePersistentState";
+import {
+  deviceFlipRef,
+  gridScale,
+  parsePitchFromFilename,
+  physicalGrid,
+  pitchFilename,
+  type DataSource,
+  type ScaleInputs,
+} from "./utils/units";
 import { useElapsedTimer } from "./hooks/useElapsedTimer";
 import { useCloudHistory } from "./hooks/useCloudHistory";
 import {
@@ -56,11 +65,12 @@ import type {
   ViewMode,
   MeasureState,
   DimLine,
+  CloudHistoryEntry,
+  FolderSource,
 } from "./types";
 import "./App.css";
 
 function App() {
-  const GRID_SIZE = 80;
   const plotRef = useRef<HTMLDivElement | null>(null);
   const sliceRef = useRef<HTMLDivElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -186,13 +196,23 @@ function App() {
   const [status, setStatus] = useState<MeasureStatus>("READY");
 
   // 掃引間隔の入力値（単位は µm 固定）
-  const [sweepInterval, setSweepInterval] = useState("100");
+  // 設定値はブラウザに保存し、リロードしても残す
+  const [sweepInterval, setSweepInterval] = usePersistentState("sweepInterval", "100");
   // ヒートマップのカラーレンジ手動指定（µm, 空文字=自動）。範囲外はグレー表示
-  const [colorRangeMin, setColorRangeMin] = useState("");
-  const [colorRangeMax, setColorRangeMax] = useState("");
+  const [colorRangeMin, setColorRangeMin] = usePersistentState("colorRangeMin", "");
+  const [colorRangeMax, setColorRangeMax] = usePersistentState("colorRangeMax", "");
   // X/Y軸 µm/pix 換算係数（可変設定）
-  const [umPerPixelXInput, setUmPerPixelXInput] = useState(String(DEFAULT_UM_PER_PIXEL_X));
-  const [umPerPixelYInput, setUmPerPixelYInput] = useState(String(DEFAULT_UM_PER_PIXEL_Y));
+  const [umPerPixelXInput, setUmPerPixelXInput] = usePersistentState(
+    "umPerPixelX",
+    String(DEFAULT_UM_PER_PIXEL_X)
+  );
+  const [umPerPixelYInput, setUmPerPixelYInput] = usePersistentState(
+    "umPerPixelY",
+    String(DEFAULT_UM_PER_PIXEL_Y)
+  );
+  // CSV（高さマップ）の列・行ピッチ µm/px。CSV は装置ごとにピッチが違うため個別に持つ
+  const [csvPitchXInput, setCsvPitchXInput] = usePersistentState("csvPitchX", "10");
+  const [csvPitchYInput, setCsvPitchYInput] = usePersistentState("csvPitchY", "10");
   const umPerPixelX = (() => {
     const v = parseFloat(umPerPixelXInput);
     return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_X;
@@ -202,10 +222,31 @@ function App() {
     return !isNaN(v) && v > 0 ? v : DEFAULT_UM_PER_PIXEL_Y;
   })();
 
+  const csvPitchX = (() => {
+    const v = parseFloat(csvPitchXInput);
+    return !isNaN(v) && v > 0 ? v : 10;
+  })();
+  const csvPitchY = (() => {
+    const v = parseFloat(csvPitchYInput);
+    return !isNaN(v) && v > 0 ? v : 10;
+  })();
+  // µm 換算の設定一式（描画 effect の依存に入るので参照を安定させる）
+  const scale = useMemo<ScaleInputs>(
+    () => ({ umPerPixelX, umPerPixelY, sweepInterval, csvPitchX, csvPitchY }),
+    [umPerPixelX, umPerPixelY, sweepInterval, csvPitchX, csvPitchY]
+  );
+
   const [zData, setZData] = useState<(number | null)[][] | null>(null);
+  // 表示中データの出どころ（device=重心px / csv=高さµm）。読込経路で明示し、換算はこれだけを根拠にする
+  const [dataSource, setDataSource] = useState<DataSource>("device");
   // 表示中データの名前（ヘッダーに出す。CSV読込=ファイル名、マスク読込=フォルダ名）
   const [dataName, setDataName] = useState<string | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
+  // デバイスデータの左右反転の基準値（全表示で共通。表示ごとに別の最大値を使うと深さがずれる）
+  const flipRef = useMemo(
+    () => (dataSource === "device" ? deviceFlipRef(zData, cloud) : 0),
+    [dataSource, zData, cloud]
+  );
 
   // 点群エンジン: "plotly"(既定/最大12万点) or "three"(高密度) の切替と three用高密度クラウド
   const [pointEngine, setPointEngine] = useState<"plotly" | "three">("plotly");
@@ -216,7 +257,7 @@ function App() {
   const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
   const [isBuildingThree, setIsBuildingThree] = useState(false);
   // three用に高密度クラウドを再生成するためのソースを保持（フォルダ or CSVグリッド）
-  const lastFolderSourceRef = useRef<Parameters<typeof buildPointCloudFromFolder>[0] | null>(null);
+  const lastFolderSourceRef = useRef<FolderSource | null>(null);
   const lastCsvGridRef = useRef<(number | null)[][] | null>(null);
 
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
@@ -301,17 +342,17 @@ function App() {
   const applyCloudResult = (
     newCloud: PointCloud,
     grid: (number | null)[][] | null,
-    opts: {
-      plotType: PlotType;
-      source: HistorySource;
-      name?: string;
-      progress?: { message: string; percent: number };
-      clearLoading?: "ai" | "acquire";
-    }
+    opts: ApplyCloudOpts
   ) => {
     setCloud(newCloud);
     setZData(grid);
+    setDataSource(opts.dataSource);
+    setDataName(opts.dataName ?? null);
     setPlotType(opts.plotType);
+    // three.js 高密度点群の再生成元を、表示データと必ず一緒に更新する
+    // （以前は WebSocket 経路で更新されず、計測後も前の CSV が three に出ていた）
+    lastCsvGridRef.current = opts.origin?.kind === "csv" ? opts.origin.grid : null;
+    lastFolderSourceRef.current = opts.origin?.kind === "folder" ? opts.origin.src : null;
     setStatus("COMPLETE");
     if (opts.progress) {
       setProgressMessage(opts.progress.message);
@@ -325,6 +366,11 @@ function App() {
     const thumb = generateThumbnail(newCloud);
     pushEntry({
       cloud: newCloud,
+      grid,
+      plotType: opts.plotType,
+      dataSource: opts.dataSource,
+      dataName: opts.dataName ?? null,
+      origin: opts.origin,
       measuredAt: now,
       points: newCloud.x.length,
       thumbnail: thumb,
@@ -465,9 +511,9 @@ function App() {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
+    flipRef,
     colorRangeMin,
     colorRangeMax,
     plotType,
@@ -506,10 +552,10 @@ function App() {
     cloud,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
     flipX,
+    flipRef,
     plotType,
     sliceMeasureMode,
     sliceMeasureStart,
@@ -517,6 +563,21 @@ function App() {
     setSliceMeasureStart,
     setSliceMeasureEnd,
   });
+
+  // 表示データ・単位・反転が変わったら、距離計測の点・寸法線・断面線を消す。
+  // これらは µm 座標で持っているため、前提が変わると古い数値を出し続けてしまう
+  useEffect(() => {
+    // 前提変更時の即時リセットのみ（外部同期ではないが、派生 state にすると計測操作と競合する）
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMeasurePt1(null);
+    setMeasurePt2(null);
+    measureStateRef.current = { ...measureStateRef.current, pt1: null, pt2: null };
+    dimLinesRef.current = [];
+    setDimReadouts([]);
+    setDimLineVersion((v) => v + 1);
+    setSliceLineStart(null);
+    setSliceLineEnd(null);
+  }, [zData, cloud, dataSource, scale, flipX]);
 
   // 断面線の選び直し・断層非表示・計測モードOFF時は、距離計測をクリアする
   useEffect(() => {
@@ -528,6 +589,36 @@ function App() {
   useEffect(() => {
     if (!showSlice) setSliceMeasureMode(false);
   }, [showSlice]);
+
+  // WebSocket が開くのを待ってから送信する。バックエンドが起動していないと永遠に待ち続けて
+  // スピナーが止まらなかったため、一定時間で諦めてエラーにする
+  const WS_CONNECT_TIMEOUT_MS = 5000;
+  const sendWhenOpen = (ws: WebSocket, payload: object, onTimeout: () => void) => {
+    const startedAt = Date.now();
+    const trySend = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+      } else if (
+        ws.readyState === WebSocket.CLOSED ||
+        Date.now() - startedAt > WS_CONNECT_TIMEOUT_MS
+      ) {
+        onTimeout();
+      } else {
+        setTimeout(trySend, 100);
+      }
+    };
+    trySend();
+  };
+  const backendUnreachable = (kind: "ai" | "acquire") => {
+    if (kind === "ai") setIsLoadingAI(false);
+    else setIsAcquiring(false);
+    setStatus("READY");
+    setShowPlot(false);
+    alert(
+      `バックエンドに接続できませんでした（ws://${window.location.hostname}:8000）。\n` +
+        "backend で uvicorn app:app が起動しているか確認してください。"
+    );
+  };
 
   const handleConfirmOk = async () => {
     if (confirmMode === "plot") {
@@ -555,24 +646,18 @@ function App() {
       // WebSocketでpreprocessコマンドを送信
       const ws = connect();
 
-      const sendCommand = () => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              cmd: "preprocess",
-              params: {
-                peak_threshold: 10,
-                use_gpu: useGpu,
-                algorithm: algorithm,
-              },
-            })
-          );
-        } else {
-          // 接続待ち
-          setTimeout(sendCommand, 100);
-        }
-      };
-      sendCommand();
+      sendWhenOpen(
+        ws,
+        {
+          cmd: "preprocess",
+          params: {
+            peak_threshold: 10,
+            use_gpu: useGpu,
+            algorithm: algorithm,
+          },
+        },
+        () => backendUnreachable("acquire")
+      );
     } else if (confirmMode === "ai") {
       // AI推論を実行
       setShowSlice(false);
@@ -592,25 +677,16 @@ function App() {
 
       const ws = connect();
 
-      const sendCommand = () => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              cmd: "ai_inference",
-              params: { model_type: aiModelType },
-            })
-          );
-        } else {
-          setTimeout(sendCommand, 100);
-        }
-      };
-      sendCommand();
+      sendWhenOpen(ws, { cmd: "ai_inference", params: { model_type: aiModelType } }, () =>
+        backendUnreachable("ai")
+      );
     } else if (confirmMode === "csv") {
-      if (zData) {
-        await downloadCSV(zData, "surface.csv");
-      } else {
-        const fallback = addNoise(generateCoinData(GRID_SIZE), 0.1);
-        await downloadCSV(fallback, "surface.csv");
+      // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
+      // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
+      if (zData && zData.length > 0) {
+        const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+        const sc = gridScale(dataSource, scale);
+        await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row));
       }
     }
 
@@ -625,7 +701,11 @@ function App() {
   };
 
   // CSVテキストを取り込み、3Dプロット表示まで行う共通処理
-  const loadCsvText = (text: string, source: HistorySource = "csv") => {
+  const loadCsvText = (
+    text: string,
+    source: HistorySource = "csv",
+    fileName: string | null = null
+  ) => {
     const grid = parseCSV(text);
     if (grid.length === 0) {
       alert("CSVデータが空です");
@@ -637,13 +717,21 @@ function App() {
       alert("有効なデータがありません");
       return;
     }
-    // three用: CSVグリッドを保持し、フォルダソースはクリア（three高密度はCSV経路を使う）。
-    // 有効データの確認より前に書くと、無効CSVでも直前のフォルダ由来ソースが消えてしまう。
-    lastCsvGridRef.current = grid;
-    lastFolderSourceRef.current = null;
+    // このアプリが書き出した CSV はファイル名にピッチが入っているので、自動で反映する
+    const pitch = fileName ? parsePitchFromFilename(fileName) : null;
+    if (pitch) {
+      setCsvPitchXInput(String(pitch.x));
+      setCsvPitchYInput(String(pitch.y));
+    }
     setShowSlice(false);
     setShowPlot(true);
-    applyCloudResult(newCloud, grid, { plotType: "surface", source });
+    applyCloudResult(newCloud, grid, {
+      plotType: "surface",
+      source,
+      dataSource: "csv",
+      origin: { kind: "csv", grid },
+      dataName: fileName,
+    });
   };
 
   // CSV読み込み処理
@@ -652,8 +740,7 @@ function App() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      setDataName(file.name);
-      loadCsvText(reader.result as string, "csv");
+      loadCsvText(reader.result as string, "csv", file.name);
     };
     reader.readAsText(file);
     // 同じファイルを再選択できるようにリセット
@@ -675,7 +762,7 @@ function App() {
     setStatus("RUNNING");
 
     try {
-      const src: Parameters<typeof buildPointCloudFromFolder>[0] = {
+      const src: FolderSource = {
         folderUrl: "/data/mask_result",
         threshold: 128,
         samplePerSlice: 4000,
@@ -683,14 +770,14 @@ function App() {
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       };
-      lastFolderSourceRef.current = src;
-      lastCsvGridRef.current = null;
       const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
 
-      setDataName("mask_result");
       applyCloudResult(newCloud, newGrid, {
         plotType: "surface",
         source: "coin",
+        dataSource: "device",
+        origin: { kind: "folder", src },
+        dataName: "mask_result",
         name: "mask_result",
       });
     } catch (e) {
@@ -747,26 +834,13 @@ function App() {
     };
   }, [pointEngine, plotType, cloud]);
 
-  // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]。usePlotly の surface と同じ換算
-  // （列=Y方向ピクセル×umPerPixelY, 行=スライス×掃引間隔, 値=X重心×umPerPixelX）
+  // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]（Plotly の surface と同じ utils/units の換算）
   const meshSurface = useMemo(() => {
     if (surfaceEngine !== "three" || !zData || zData.length === 0) return null;
-    const sweepVal = parseFloat(sweepInterval);
-    const pitchY = !isNaN(sweepVal) && sweepVal > 0 ? sweepVal : umPerPixelY;
-    const isOpticalDevice = cloud !== null && cloud.x.length > 0;
-    let grid: (number | null)[][];
-    if (isOpticalDevice) {
-      let maxRawX = -Infinity;
-      if (flipX)
-        for (const row of zData) for (const v of row) if (v != null && v > maxRawX) maxRawX = v;
-      grid = zData.map((row) =>
-        row.map((v) => (v == null ? null : (flipX ? maxRawX - v : v) * umPerPixelX))
-      );
-    } else {
-      grid = flipX ? zData.map((row) => [...row].reverse()) : zData;
-    }
-    return { grid, pitchX: umPerPixelY, pitchY };
-  }, [surfaceEngine, zData, cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
+    const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+    const sc = gridScale(dataSource, scale);
+    return { grid: pg.z, pitchX: sc.col, pitchY: sc.row };
+  }, [surfaceEngine, zData, dataSource, scale, flipX, flipRef]);
 
   // --- プロット操作（フローティングツールバーから呼ぶ） ---
   const handleZoom = (factor: number) => {
@@ -984,10 +1058,10 @@ function App() {
                 {pointEngine === "three" && plotType === "scatter3d" && showPlot && (
                   <ThreePointCloudView
                     cloud={threeCloud}
+                    dataSource={dataSource}
+                    scale={scale}
                     flipX={flipX}
-                    umPerPixelX={umPerPixelX}
-                    umPerPixelY={umPerPixelY}
-                    sweepInterval={sweepInterval}
+                    flipRef={flipRef}
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
@@ -1083,10 +1157,20 @@ function App() {
                       {chipValue(engineLabel)}
                     </>
                   )}
-                  {chip(<>掃引 {chipValue(sweepInterval ? `${sweepInterval} µm` : "—")}</>)}
-                  {chip(
+                  {/* 表示中データに実際に効いている換算を出す（CSV なら CSV のピッチ） */}
+                  {dataSource === "csv" ? (
                     <>
-                      X {chipValue(umPerPixelX)} · Y {chipValue(`${umPerPixelY} µm/px`)}
+                      {chip(<>CSV</>)}
+                      {chip(<>ピッチ {chipValue(`${csvPitchX} × ${csvPitchY} µm/px`)}</>)}
+                    </>
+                  ) : (
+                    <>
+                      {chip(<>掃引 {chipValue(sweepInterval ? `${sweepInterval} µm` : "—")}</>)}
+                      {chip(
+                        <>
+                          X {chipValue(umPerPixelX)} · Y {chipValue(`${umPerPixelY} µm/px`)}
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -1361,6 +1445,11 @@ function App() {
                     setUmPerPixelXInput={setUmPerPixelXInput}
                     umPerPixelYInput={umPerPixelYInput}
                     setUmPerPixelYInput={setUmPerPixelYInput}
+                    csvPitchXInput={csvPitchXInput}
+                    setCsvPitchXInput={setCsvPitchXInput}
+                    csvPitchYInput={csvPitchYInput}
+                    setCsvPitchYInput={setCsvPitchYInput}
+                    dataSource={zData && zData.length > 0 ? dataSource : null}
                     colorRangeMin={colorRangeMin}
                     setColorRangeMin={setColorRangeMin}
                     colorRangeMax={colorRangeMax}
@@ -1528,7 +1617,16 @@ function App() {
                         </button>
                         <button
                           className="tt-hover"
-                          style={buttonFileStyle}
+                          disabled={!zData || zData.length === 0}
+                          title={
+                            !zData || zData.length === 0
+                              ? "書き出せる高さマップがありません"
+                              : "表示中の高さマップを µm で書き出す（ピッチはファイル名に記録）"
+                          }
+                          style={{
+                            ...buttonFileStyle,
+                            ...enabledStateStyle(!!zData && zData.length > 0),
+                          }}
                           onClick={() => {
                             setConfirmMode("csv");
                             setShowConfirm(true);
@@ -1971,9 +2069,19 @@ function App() {
                     setEditingNameValue={setEditingNameValue}
                     renameEntry={renameEntry}
                     setDeleteConfirmIdx={setDeleteConfirmIdx}
-                    onRestore={(c) => {
+                    onRestore={(entry: CloudHistoryEntry) => {
+                      // 高さマップ・表示タイプ・出どころまで丸ごと戻す（点群だけ戻すと、
+                      // Surface や断面に別の計測の高さマップが出ていた）
                       setShowSlice(false);
-                      setCloud(c);
+                      setCloud(entry.cloud);
+                      setZData(entry.grid);
+                      setPlotType(entry.plotType);
+                      setDataSource(entry.dataSource);
+                      setDataName(entry.dataName);
+                      lastCsvGridRef.current =
+                        entry.origin?.kind === "csv" ? entry.origin.grid : null;
+                      lastFolderSourceRef.current =
+                        entry.origin?.kind === "folder" ? entry.origin.src : null;
                       setShowPlot(true);
                     }}
                   />

@@ -4,6 +4,13 @@ import Plotly from "plotly.js-dist-min";
 import { DIM_COLORS, colors, fontFamily, monoFont } from "../utils/constants";
 import { buildClippedColorscale, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
+import {
+  gridScale,
+  physicalGrid,
+  physicalPoints,
+  type DataSource,
+  type ScaleInputs,
+} from "../utils/units";
 import type {
   DimLine,
   DimRange,
@@ -36,9 +43,12 @@ export function usePlotly(args: {
   showSlice: boolean;
   sliceLineStart: { y: number; z: number } | null;
   sliceLineEnd: { y: number; z: number } | null;
-  sweepInterval: string;
-  umPerPixelX: number;
-  umPerPixelY: number;
+  // 表示中データの出どころと換算設定（µm への換算は utils/units に集約）。
+  // scale は App 側で useMemo して参照を安定させること（描画 effect の依存に入るため）
+  dataSource: DataSource;
+  scale: ScaleInputs;
+  // デバイスデータの左右反転の基準値（全表示で共通の値を使う）
+  flipRef: number;
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
   colorRangeMin: string;
   colorRangeMax: string;
@@ -72,9 +82,9 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
+    flipRef,
     colorRangeMin,
     colorRangeMax,
     plotType,
@@ -160,21 +170,12 @@ export function usePlotly(args: {
   // 「変化なし」と判定して WebGL バッファの再アップロードを省略できる。
   const pointGeom = useMemo(() => {
     if (!cloud || cloud.x.length === 0) return null;
-    // 左右反転時はX座標を反転
-    const xData = flipX
-      ? (() => {
-          const maxX = cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]);
-          return cloud.x.map((v) => maxX - v);
-        })()
-      : cloud.x;
-    // Z軸の換算係数: 掃引間隔[µm/スライス] (未入力時は umPerPixelY を仮定)
-    const sweepVal = parseFloat(sweepInterval);
-    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
-    // 物理単位（µm）に変換
-    const xDataUm = xData.map((v) => v * umPerPixelX);
-    const yDataUm = cloud.y.map((v) => v * umPerPixelY);
-    const zDataUm = cloud.z.map((v) => v * zUmPerSlice);
+    // 物理単位（µm）に変換（出どころ別の換算・反転は utils/units に集約）
+    const {
+      xs: xDataUm,
+      ys: yDataUm,
+      zs: zDataUm,
+    } = physicalPoints(cloud, dataSource, scale, flipX, flipRef);
     // µm範囲を算出（aspectratio・カラーバー・断面ライン等で使用）
     let xUmMin = xDataUm[0],
       xUmMax = xDataUm[0];
@@ -191,7 +192,7 @@ export function usePlotly(args: {
       if (zDataUm[i] > zUmMax) zUmMax = zDataUm[i];
     }
     return { xDataUm, yDataUm, zDataUm, xUmMin, xUmMax, yUmMin, yUmMax, zUmMin, zUmMax };
-  }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
+  }, [cloud, dataSource, scale, flipX, flipRef]);
 
   useEffect(() => {
     const plotEl = plotRef.current;
@@ -255,54 +256,15 @@ export function usePlotly(args: {
     // ---- 寸法測定モード（2D 本物のヒートマップ + ドラッグ可能な両矢印）----
     // 3Dシーンには編集可能図形が無いため、寸法測定中だけ真の2Dヒートマップで描画する。
     if (viewMode === "2D-camera" && dimensionMode && zData && zData.length > 0) {
-      const numRows = zData.length;
-      const numCols = zData[0].length;
-
-      const sweepVal = parseFloat(sweepInterval);
-      const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-      const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
-
-      const isOpticalDevice = cloud !== null && cloud.x.length > 0;
-
-      let surfXCoords: number[];
-      let surfYCoords: number[];
-      let surfaceZ: (number | null)[][];
-      let xLabel: string;
-      let yLabel: string;
-      let zLabel: string;
-      let planeUnit: string;
-
-      if (isOpticalDevice) {
-        surfXCoords = Array.from({ length: numCols }, (_, i) => i * umPerPixelY);
-        surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
-        if (flipX) {
-          let maxRawX = -Infinity;
-          for (const row of zData) {
-            for (const v of row) {
-              if (v != null && v > maxRawX) maxRawX = v;
-            }
-          }
-          surfaceZ = zData.map((row) =>
-            row.map((v) => (v == null ? null : (maxRawX - v) * umPerPixelX))
-          );
-        } else {
-          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
-        }
-        xLabel = "X [µm]";
-        yLabel = "Y [µm]";
-        zLabel = "Z (Depth) [µm]";
-        planeUnit = "µm";
-      } else {
-        surfXCoords = flipX
-          ? Array.from({ length: numCols }, (_, i) => numCols - 1 - i)
-          : Array.from({ length: numCols }, (_, i) => i);
-        surfYCoords = Array.from({ length: numRows }, (_, i) => i);
-        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v)));
-        xLabel = "X [pixel]";
-        yLabel = "Y [pixel]";
-        zLabel = "Height [µm]";
-        planeUnit = "px";
-      }
+      // 物理単位（µm）のグリッド。出どころ（デバイス/CSV）別の換算は utils/units に集約
+      const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+      const surfXCoords = pg.x;
+      const surfYCoords = pg.y;
+      const surfaceZ = pg.z;
+      const xLabel = pg.xLabel;
+      const yLabel = pg.yLabel;
+      const zLabel = pg.zLabel;
+      const planeUnit = "µm";
 
       // カラーレンジ（手動指定 or 自動ロバスト、レンジ外はグレー）
       const dimVals: number[] = [];
@@ -651,59 +613,16 @@ export function usePlotly(args: {
     //   → Keyence風に座標変換: X軸=Y方向[µm], Y軸=Z走査方向[µm], Z軸(高さ)=X深度[µm]
     // CSV読み込み（Keyence等）: grid[row][col] = height → そのまま表示
     if (plotType === "surface" && zData && zData.length > 0) {
-      const numRows = zData.length;
-      const numCols = zData[0].length;
-
-      // 掃引間隔（µm/スライス）
-      const sweepVal = parseFloat(sweepInterval);
-      const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-      const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
-
-      // データソース判定: 値がピクセル座標っぽい（小さい値）なら光学デバイス、大きい値ならCSV（Keyence等）
-      // 光学デバイスのgrid値はX重心(0〜画像幅≒1000px)、KeyenceのCSV値は高さ(µm、数百〜)
-      // cloud が存在する場合は光学デバイス由来と判断
-      const isOpticalDevice = cloud !== null && cloud.x.length > 0;
-
-      // 座標配列とsurface Z値を生成（µm単位に変換）
-      let surfXCoords: number[];
-      let surfYCoords: number[];
-      let surfaceZ: (number | null)[][];
-      let xLabel: string;
-      let yLabel: string;
-      let zLabel: string;
-
-      if (isOpticalDevice) {
-        // 光学デバイス: 列=Y方向ピクセル→µm, 行=Zスライス→µm, 値=X重心→µm
-        surfXCoords = Array.from({ length: numCols }, (_, i) => i * umPerPixelY);
-        surfYCoords = Array.from({ length: numRows }, (_, i) => i * zUmPerSlice);
-        if (flipX) {
-          // 左右反転: X重心を反転してからµm変換
-          let maxRawX = -Infinity;
-          for (const row of zData) {
-            for (const v of row) {
-              if (v != null && v > maxRawX) maxRawX = v;
-            }
-          }
-          surfaceZ = zData.map((row) =>
-            row.map((v) => (v == null ? null : (maxRawX - v) * umPerPixelX))
-          );
-        } else {
-          surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v * umPerPixelX)));
-        }
-        xLabel = "X [µm]";
-        yLabel = "Y [µm]";
-        zLabel = "Z (Depth) [µm]";
-      } else {
-        // CSV読み込み（Keyence等）: 左右反転時はX座標を逆順に
-        surfXCoords = flipX
-          ? Array.from({ length: numCols }, (_, i) => numCols - 1 - i)
-          : Array.from({ length: numCols }, (_, i) => i);
-        surfYCoords = Array.from({ length: numRows }, (_, i) => i);
-        surfaceZ = zData.map((row) => row.map((v) => (v == null ? null : v)));
-        xLabel = "X [pixel]";
-        yLabel = "Y [pixel]";
-        zLabel = "Height [µm]";
-      }
+      // 物理単位（µm）のグリッド。出どころ（デバイス/CSV）は読込経路で明示されたものを使う
+      // （以前は「点群があればデバイス由来」と推測しており、CSVでも点群を作るため
+      //  CSVの高さに X軸 µm/pix が掛かっていた）
+      const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+      const surfXCoords = pg.x;
+      const surfYCoords = pg.y;
+      const surfaceZ = pg.z;
+      const xLabel = pg.xLabel;
+      const yLabel = pg.yLabel;
+      const zLabel = pg.zLabel;
 
       // 高さ範囲を計算（変換後の値から。hMin/hMax はアスペクト比等のジオメトリ用）
       let hMin = Infinity,
@@ -961,9 +880,8 @@ export function usePlotly(args: {
     }
     const { xDataUm, yDataUm, zDataUm, xUmMin, xUmMax, yUmMin, yUmMax, zUmMin, zUmMax } = pointGeom;
 
-    // 掃引間隔が指定されているか（Z軸ラベルの表示分岐に使用）
-    const sweepVal = parseFloat(sweepInterval);
-    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
+    // 行方向のピッチが指定されているか（軸ラベルの表示分岐に使用）
+    const hasSweep = !gridScale(dataSource, scale).rowAssumed;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any[];
@@ -1266,9 +1184,9 @@ export function usePlotly(args: {
     showSlice,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
+    flipRef,
     colorRangeMin,
     colorRangeMax,
     plotType,

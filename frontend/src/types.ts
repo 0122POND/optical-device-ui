@@ -1,5 +1,6 @@
 // アプリ全体で共有する型定義
 import type { PointCloud } from "./utils/pointCloud";
+import type { DataSource } from "./utils/units";
 
 // 3D表示のプロット種別
 export type PlotType = "scatter3d" | "surface";
@@ -35,9 +36,29 @@ export type DimRange = { xMin: number; xMax: number; yMin: number; yMax: number 
 // 断層ライン端点（2D平面 µm 座標）
 export type SlicePoint = { y: number; z: number };
 
-// 測定履歴の1エントリ（点群＋メタ情報）
+// 表示中データの元（three.js 高密度点群の再生成に使う）
+//   csv   : 読み込んだ高さマップ
+//   folder: マスク/結果画像フォルダ（buildPointCloudFromFolder の引数）
+export type DataOrigin =
+  { kind: "csv"; grid: (number | null)[][] } | { kind: "folder"; src: FolderSource } | null;
+export type FolderSource = {
+  folderUrl: string;
+  threshold: number;
+  samplePerSlice: number;
+  flipZ: boolean;
+  colorMode: "z" | "intensity";
+  maxTotalPoints?: number;
+};
+
+// 測定履歴の1エントリ。復元時に表示を丸ごと戻せるよう、高さマップ・表示タイプ・
+// 出どころ（単位の解釈に必須）・元データも保持する
 export type CloudHistoryEntry = {
   cloud: PointCloud;
+  grid: (number | null)[][] | null;
+  plotType: PlotType;
+  dataSource: DataSource;
+  dataName: string | null;
+  origin: DataOrigin;
   measuredAt: string;
   points: number;
   thumbnail: string;

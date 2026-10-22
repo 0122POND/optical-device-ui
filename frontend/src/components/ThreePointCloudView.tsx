@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { colorForValue, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
+import { physicalPoints, type DataSource, type ScaleInputs } from "../utils/units";
 
 // 自動回転の速さ（OrbitControls.autoRotateSpeed 単位。2.0 ≒ 60fpsで1周30秒）
 const AUTO_ROTATE_SPEED = 2.5;
@@ -23,10 +24,11 @@ function fillColors(depthUm: Float64Array, arr: Float32Array, min: string, max: 
 // 一度だけアップロードして描くため、Plotly の scatter3d より遥かに軽い。
 export function ThreePointCloudView(props: {
   cloud: PointCloud | null;
+  // 出どころと換算設定（µm への換算は utils/units に集約）
+  dataSource: DataSource;
+  scale: ScaleInputs;
   flipX: boolean;
-  umPerPixelX: number;
-  umPerPixelY: number;
-  sweepInterval: string;
+  flipRef: number;
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
   colorRangeMin: string;
   colorRangeMax: string;
@@ -36,10 +38,10 @@ export function ThreePointCloudView(props: {
 }) {
   const {
     cloud,
+    dataSource,
+    scale,
     flipX,
-    umPerPixelX,
-    umPerPixelY,
-    sweepInterval,
+    flipRef,
     colorRangeMin,
     colorRangeMax,
     isBuilding,
@@ -142,11 +144,8 @@ export function ThreePointCloudView(props: {
 
     const n = cloud.x.length;
 
-    // 座標変換（usePlotly の pointGeom と同一ロジック）
-    let maxX = cloud.x[0];
-    if (flipX) for (let i = 1; i < n; i++) if (cloud.x[i] > maxX) maxX = cloud.x[i];
-    const sweepVal = parseFloat(sweepInterval);
-    const zUmPerSlice = !isNaN(sweepVal) && sweepVal > 0 ? sweepVal : umPerPixelY;
+    // 座標変換（usePlotly の pointGeom と同じ utils/units の換算）
+    const pts = physicalPoints(cloud, dataSource, scale, flipX, flipRef);
 
     const pos = new Float32Array(n * 3);
     const col = new Float32Array(n * 3);
@@ -160,9 +159,9 @@ export function ThreePointCloudView(props: {
       maxYu = -Infinity,
       maxZu = -Infinity;
     for (let i = 0; i < n; i++) {
-      const xu = (flipX ? maxX - cloud.x[i] : cloud.x[i]) * umPerPixelX;
-      const yu = cloud.y[i] * umPerPixelY;
-      const zu = cloud.z[i] * zUmPerSlice;
+      const xu = pts.xs[i];
+      const yu = pts.ys[i];
+      const zu = pts.zs[i];
       pos[i * 3] = xu;
       pos[i * 3 + 1] = yu;
       pos[i * 3 + 2] = zu;
@@ -204,7 +203,7 @@ export function ThreePointCloudView(props: {
     st.camera.far = radius * 20;
     st.camera.updateProjectionMatrix();
     st.controls.update();
-  }, [cloud, flipX, umPerPixelX, umPerPixelY, sweepInterval]);
+  }, [cloud, dataSource, scale, flipX, flipRef]);
 
   // カラーレンジ変更時は色バッファのみ更新（ジオメトリ・カメラは維持）
   useEffect(() => {

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { colors, monoFont } from "../utils/constants";
 import { DEFAULT_UM_PER_PIXEL_X, DEFAULT_UM_PER_PIXEL_Y } from "../utils/constants";
 import { inputStyle, panelSectionStyle, sectionTitleStyle } from "../utils/styles";
+import type { DataSource } from "../utils/units";
 
 // 入力欄1行（ラベル → 入力＋単位）
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -19,6 +20,25 @@ const unit = (text: string) => (
 
 const fieldInput = (width: number) => ({ ...inputStyle, width: `${width}px`, height: "34px" });
 
+// 表示中データにどちらの設定が効いているかを示す小さな印
+function ActiveBadge() {
+  return (
+    <span
+      style={{
+        marginLeft: "8px",
+        padding: "1px 6px",
+        borderRadius: "4px",
+        backgroundColor: colors.primarySoft,
+        color: colors.primary,
+        letterSpacing: 0,
+        textTransform: "none",
+      }}
+    >
+      表示中
+    </span>
+  );
+}
+
 // サイドパネル「設定」タブ：掃引間隔・X/Y軸の µm/pix 換算係数・カラーレンジの入力
 export function SettingsTab({
   sweepInterval,
@@ -27,6 +47,11 @@ export function SettingsTab({
   setUmPerPixelXInput,
   umPerPixelYInput,
   setUmPerPixelYInput,
+  csvPitchXInput,
+  setCsvPitchXInput,
+  csvPitchYInput,
+  setCsvPitchYInput,
+  dataSource,
   colorRangeMin,
   setColorRangeMin,
   colorRangeMax,
@@ -38,6 +63,12 @@ export function SettingsTab({
   setUmPerPixelXInput: (v: string) => void;
   umPerPixelYInput: string;
   setUmPerPixelYInput: (v: string) => void;
+  csvPitchXInput: string;
+  setCsvPitchXInput: (v: string) => void;
+  csvPitchYInput: string;
+  setCsvPitchYInput: (v: string) => void;
+  // 表示中データの出どころ（null=データなし）。どちらの設定が効いているかを示す
+  dataSource: DataSource | null;
   colorRangeMin: string;
   setColorRangeMin: (v: string) => void;
   colorRangeMax: string;
@@ -46,7 +77,9 @@ export function SettingsTab({
   return (
     <>
       <section style={panelSectionStyle}>
-        <h3 style={sectionTitleStyle}>スケール</h3>
+        <h3 style={sectionTitleStyle}>
+          デバイス（干渉画像）{dataSource === "device" && <ActiveBadge />}
+        </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <Field label="掃引間隔">
             <input
@@ -80,6 +113,36 @@ export function SettingsTab({
             />
             {unit("µm/pix")}
           </Field>
+        </div>
+      </section>
+
+      <section style={panelSectionStyle}>
+        <h3 style={sectionTitleStyle}>
+          CSV（高さマップ）{dataSource === "csv" && <ActiveBadge />}
+        </h3>
+        <Field label="ピッチ X / Y（列 / 行）">
+          <input
+            type="text"
+            placeholder="10"
+            value={csvPitchXInput}
+            onChange={(e) => setCsvPitchXInput(e.target.value)}
+            style={fieldInput(84)}
+          />
+          <span style={{ color: colors.textDim }}>/</span>
+          <input
+            type="text"
+            placeholder="10"
+            value={csvPitchYInput}
+            onChange={(e) => setCsvPitchYInput(e.target.value)}
+            style={fieldInput(84)}
+          />
+          {unit("µm/px")}
+        </Field>
+        <div
+          style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
+        >
+          CSV の値は高さ[µm]として扱います。目安: 自社デバイス 10 / WI5000 約37.4 / Keyence
+          約32.9。このアプリで書き出した CSV はファイル名のピッチを自動で読み込みます。
         </div>
       </section>
 

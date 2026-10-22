@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { buildPointCloudFromFolder, type PointCloud } from "../utils/pointCloud";
-import type { HistorySource, PlotType } from "../types";
+import type { DataOrigin, FolderSource, HistorySource, PlotType } from "../types";
+import type { DataSource } from "../utils/units";
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`;
 
@@ -10,6 +11,12 @@ export type WsProgress = { step: number; total: number; message: string; percent
 export type ApplyCloudOpts = {
   plotType: PlotType;
   source: HistorySource;
+  // 値の単位の解釈（device=重心px / csv=高さµm）。換算はこれだけを根拠にする
+  dataSource: DataSource;
+  // three.js 高密度点群の再生成元
+  origin: DataOrigin;
+  // ヘッダーに出すデータ名（CSV=ファイル名など）。省略時は名前なし
+  dataName?: string | null;
   name?: string;
   progress?: { message: string; percent: number };
   clearLoading?: "ai" | "acquire";
@@ -72,18 +79,21 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
         } else if (data.type === "ai_inference_complete") {
           console.log("AI推論完了:", data.count, "files", "device:", data.device);
           try {
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
+            const src: FolderSource = {
               folderUrl: "/data/mask_result",
               threshold: 128,
               samplePerSlice: 4000,
               flipZ: false,
               colorMode: "z",
               ...(a.algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-            });
+            };
+            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
 
             a.applyCloudResult(newCloud, newGrid, {
               plotType: "scatter3d",
               source: "ai",
+              dataSource: "device",
+              origin: { kind: "folder", src },
               progress: { message: `AI推論完了 (${data.device})`, percent: 100 },
               clearLoading: "ai",
             });
@@ -96,18 +106,21 @@ export function useWebSocket(args: UseWebSocketArgs): { connect: () => WebSocket
           console.log("画像処理完了:", data.count, "files");
           // 処理完了後、点群を読み込み
           try {
-            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder({
+            const src: FolderSource = {
               folderUrl: "/data/result",
               threshold: 128,
               samplePerSlice: 4000,
               flipZ: false,
               colorMode: "z",
               ...(a.algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
-            });
+            };
+            const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
 
             a.applyCloudResult(newCloud, newGrid, {
               plotType: "scatter3d",
               source: a.algorithm as HistorySource,
+              dataSource: "device",
+              origin: { kind: "folder", src },
               progress: { message: "完了", percent: 100 },
               clearLoading: "acquire",
             });

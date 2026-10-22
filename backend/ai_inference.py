@@ -353,8 +353,15 @@ def run_ai_inference(
             output = model(image_tensor)
             pred_prob = torch.sigmoid(output).squeeze(0).squeeze(0).cpu().numpy()
 
-            # 元画像サイズにクロップ
-            pred_prob_crop = pred_prob[:orig_h, :orig_w]
+            # 元画像サイズに戻す。推論前に (H, W)=target_size へ引き伸ばしているので、
+            # 切り出しではなくリサイズで戻さないとマスクが元画像と位置ずれする
+            # （例: 1008×1246 の画像では下端で約16px、2448×2048 では半分の解像度になっていた）
+            if pred_prob.shape != (orig_h, orig_w):
+                pred_prob_crop = cv2.resize(
+                    pred_prob, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR
+                )
+            else:
+                pred_prob_crop = pred_prob
 
             # 二値マスク生成
             binary_mask = (pred_prob_crop > threshold).astype(np.uint8) * 255
