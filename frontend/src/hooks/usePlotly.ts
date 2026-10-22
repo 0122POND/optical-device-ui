@@ -768,27 +768,43 @@ export function usePlotly(args: {
         paper_bgcolor: "rgba(0,0,0,0)",
         scene: {
           bgcolor: "rgba(0,0,0,0)",
+          // 2D（真上から）は横・縦の2軸だけ出し、高さ軸は色バーで読む（高さ軸を出すと、潰れた箱の
+          // 目盛りと題が図の下に重なって崩れていた）。目盛りの文字は斜めにしない
+          // 2D の縦軸の題は目盛りに重なる（3Dシーンの題は位置をずらせない）ので、横軸の題にまとめる
           xaxis: {
-            title: axisVisible ? { text: xLabel, font: { size: 12, color: colors.textMuted } } : "",
-            visible: viewMode === "3D" && axisVisible,
-            showgrid: viewMode === "3D" && axisVisible,
-            zeroline: viewMode === "3D" && axisVisible,
-            color: colors.textMuted,
-            gridcolor: colors.grid,
-          },
-          yaxis: {
-            title: axisVisible ? { text: yLabel, font: { size: 12, color: colors.textMuted } } : "",
+            title: axisVisible
+              ? {
+                  text:
+                    viewMode === "2D-camera"
+                      ? `${xLabel.replace(/ \[.*\]$/, "")}・${yLabel}`
+                      : xLabel,
+                  font: { size: 12, color: colors.textMuted },
+                }
+              : "",
             visible: axisVisible,
             showgrid: axisVisible,
             zeroline: axisVisible,
             color: colors.textMuted,
             gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0, nticks: 5 } : {}),
+          },
+          yaxis: {
+            title:
+              axisVisible && viewMode !== "2D-camera"
+                ? { text: yLabel, font: { size: 12, color: colors.textMuted } }
+                : { text: "" }, // "" だと Plotly が軸名「y」を出す
+            visible: axisVisible,
+            showgrid: axisVisible,
+            zeroline: axisVisible,
+            color: colors.textMuted,
+            gridcolor: colors.grid,
+            ...(viewMode === "2D-camera" ? { tickangle: 0 } : {}),
           },
           zaxis: {
             title: axisVisible ? { text: zLabel, font: { size: 12, color: colors.textMuted } } : "",
-            visible: axisVisible,
-            showgrid: axisVisible,
-            zeroline: axisVisible,
+            visible: viewMode === "3D" && axisVisible,
+            showgrid: viewMode === "3D" && axisVisible,
+            zeroline: viewMode === "3D" && axisVisible,
             color: colors.textMuted,
             gridcolor: colors.grid,
           },
