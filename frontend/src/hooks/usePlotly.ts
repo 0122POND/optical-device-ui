@@ -126,6 +126,11 @@ export function usePlotly(args: {
   // 断面線・帯の外形の重ね描き（トレース番号と、断面座標→シーン座標の変換）。メインの描画が作り、
   // 線や帯の変更は restyle でこの2本だけ書き換える（以前は1点クリックするたびに面や点群を
   // 丸ごと作り直しており、10円の 1772×1008 で 0.5〜0.7 秒固まっていた）
+  // 断層の点を打つためのホバー中の座標（断面の y・z [µm]）と、押した位置（パンのドラッグと区別する）。
+  // Plotly は欠損（NaN）のセルでは plotly_click を出さないが hover は出すので、ホバー中の座標と
+  // ネイティブの click で点を打つ（以前は欠損の所をクリックしても点が打てなかった）
+  const lastHoverRef = useRef<{ y: number; z: number } | null>(null);
+  const downPosRef = useRef<{ x: number; y: number } | null>(null);
   const sliceOverlayRef = useRef<{
     idx: [number, number];
     map: (ys: number[], zs: number[]) => { x: number[]; y: number[]; z: number[] };
@@ -182,11 +187,33 @@ export function usePlotly(args: {
   // plotRef は安定参照のため実質マウント時1回のみ実行される。
   useEffect(() => {
     const el = plotRef.current;
+    // 2D・断層表示中のクリックで断面の始点・終点を打つ（ホバー中の座標を使う。最新値は ref から読む）
+    const onDown = (e: PointerEvent) => {
+      downPosRef.current = { x: e.clientX, y: e.clientY };
+    };
+    const onClick = (e: MouseEvent) => {
+      if (viewModeRef.current !== "2D-camera" || !showSliceRef.current) return;
+      if (measureStateRef.current.mode) return; // 距離計測のクリックは plotly_click 側で扱う
+      const d = downPosRef.current;
+      if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return; // パンのドラッグ
+      const pt = lastHoverRef.current;
+      if (!pt) return;
+      if (!sliceLineStartRef.current || (sliceLineStartRef.current && sliceLineEndRef.current)) {
+        setSliceLineStart(pt);
+        setSliceLineEnd(null);
+      } else {
+        setSliceLineEnd(pt);
+      }
+    };
+    el?.addEventListener("pointerdown", onDown);
+    el?.addEventListener("click", onClick);
     return () => {
+      el?.removeEventListener("pointerdown", onDown);
+      el?.removeEventListener("click", onClick);
       if (dimRafRef.current != null) cancelAnimationFrame(dimRafRef.current);
       if (el) Plotly.purge(el);
     };
-  }, [plotRef]);
+  }, [plotRef, measureStateRef, setSliceLineStart, setSliceLineEnd]);
 
   // 点群(scatter3d)の物理座標(µm)変換と範囲。最大12万点×3配列の生成は重いので memo 化し、
   // 入力(cloud/反転/換算係数)が変わらない限り同じ配列参照を返す。これにより描画 effect が
@@ -222,6 +249,7 @@ export function usePlotly(args: {
     const plotEl = plotRef.current;
     // 断面線・帯の重ね描きは、この描画で作ったときだけ有効（作らない表示では restyle しない）
     sliceOverlayRef.current = null;
+    lastHoverRef.current = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pushSliceOverlay = (traces: any[], map: (ys: number[], zs: number[]) => any) => {
       const [line, outline] = sliceOverlayData(
@@ -917,6 +945,8 @@ export function usePlotly(args: {
           if (measureStateRef.current.mode) {
             const s = measureStateRef.current;
             if (s.pt1 && s.pt2) return;
+            // 高さの無い点（欠損のセル）は距離にできないので無視する（以前は表示で落ちていた）
+            if (![p.x, p.y, p.z].every((v) => typeof v === "number" && isFinite(v))) return;
             if (measureLockRef.current) return;
             measureLockRef.current = true;
             const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
@@ -933,19 +963,18 @@ export function usePlotly(args: {
             return;
           }
 
-          // 2Dモード + 断層表示時、クリックで始点・終点を設定（最新値は ref から読む）
-          if (viewModeRef.current === "2D-camera" && showSliceRef.current) {
-            const pt = { y: p.x as number, z: p.y as number };
-            if (
-              !sliceLineStartRef.current ||
-              (sliceLineStartRef.current && sliceLineEndRef.current)
-            ) {
-              setSliceLineStart(pt);
-              setSliceLineEnd(null);
-            } else {
-              setSliceLineEnd(pt);
-            }
-          }
+          // 断層の点はここでは打たない（欠損のセルでは plotly_click が起きないため、下の hover＋
+          // ネイティブの click で打つ）
+        });
+        // 断層の点の候補: ホバー中のセルの座標（欠損のセルでも hover は起きる）
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_hover", (e: any) => {
+          const p = e?.points?.[0];
+          if (p) lastHoverRef.current = { y: p.x as number, z: p.y as number };
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (plotEl as any).on("plotly_unhover", () => {
+          lastHoverRef.current = null;
         });
         // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する。
         // シーン再構築中に Plotly 自身が発火させる relayout は保存しない
@@ -1215,6 +1244,8 @@ export function usePlotly(args: {
           if (s.pt1 && s.pt2) return;
           // ハンドラ多重化(HMR等)やクリック二重発火でも1クリック=1点になるよう、
           // surface側と同じく短時間ロックで二重登録を防ぐ。
+          // 高さの無い点（欠損のセル）は距離にできないので無視する（以前は表示で落ちていた）
+          if (![p.x, p.y, p.z].every((v) => typeof v === "number" && isFinite(v))) return;
           if (measureLockRef.current) return;
           measureLockRef.current = true;
           const pt3 = { x: p.x as number, y: p.y as number, z: p.z as number };
@@ -1231,19 +1262,16 @@ export function usePlotly(args: {
           return;
         }
 
-        // 2Dモード + 断層表示時、クリックで始点・終点を設定（最新値は ref から読む）
-        if (viewModeRef.current === "2D-camera" && showSliceRef.current) {
-          const pt = { y: p.y as number, z: p.z as number };
-          if (
-            !sliceLineStartRef.current ||
-            (sliceLineStartRef.current && sliceLineEndRef.current)
-          ) {
-            setSliceLineStart(pt);
-            setSliceLineEnd(null);
-          } else {
-            setSliceLineEnd(pt);
-          }
-        }
+        // 断層の点はここでは打たない（下の hover＋ネイティブの click で打つ）
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_hover", (e: any) => {
+        const p = e?.points?.[0];
+        if (p) lastHoverRef.current = { y: p.y as number, z: p.z as number };
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plotEl as any).on("plotly_unhover", () => {
+        lastHoverRef.current = null;
       });
       // ユーザーのズーム/パン(カメラ操作)を保存し、後続の再描画で維持する。
       // シーン再構築中に Plotly 自身が発火させる relayout は保存しない

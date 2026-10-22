@@ -195,7 +195,10 @@ export function SettingsTab({
 
       <section style={{ ...panelSectionStyle, borderBottom: "none" }}>
         <h3 style={sectionTitleStyle}>カラーレンジ</h3>
-        <Field label="深さ（空欄=自動）">
+        {/* 色を付ける値: デバイスは深さ、CSV は高さ（未校正の画素なら px） */}
+        <Field
+          label={`${dataSource === "csv" ? "高さ" : dataSource === "device" ? "深さ" : "深さ・高さ"}（空欄=自動）`}
+        >
           <input
             type="text"
             placeholder="min"
@@ -211,7 +214,11 @@ export function SettingsTab({
             onChange={(e) => setColorRangeMax(e.target.value)}
             style={fieldInput(84)}
           />
-          {unit("µm")}
+          {unit(
+            dataSource === "csv" && csvHeightUnit === "px" && !csvUmPerHeightPxInput.trim()
+              ? "px"
+              : "µm"
+          )}
         </Field>
         <div
           style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
