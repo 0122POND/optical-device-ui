@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
-import { downloadCSV, parseCSV } from "./utils/csv";
+import { downloadCSV, downloadPointCSV, isPointCSV, parseCSV, parsePointCSV } from "./utils/csv";
 import {
   buildPointCloudFromFolder,
   densePointsFromGrid,
   sampledPointsFromGrid,
+  samplePointCloud,
   type PointCloud,
 } from "./utils/pointCloud";
 import { useWebSocket, type ApplyCloudOpts } from "./hooks/useWebSocket";
@@ -15,6 +16,7 @@ import {
   parsePitchFromFilename,
   physicalGrid,
   pitchFilename,
+  pointsInCsvUnits,
   type DataSource,
   type ScaleInputs,
 } from "./utils/units";
@@ -66,6 +68,7 @@ import type {
   MeasureState,
   DimLine,
   CloudHistoryEntry,
+  DataOrigin,
   FolderSource,
 } from "./types";
 import "./App.css";
@@ -257,8 +260,8 @@ function App() {
   const [threeCloud, setThreeCloud] = useState<PointCloud | null>(null);
   const [isBuildingThree, setIsBuildingThree] = useState(false);
   // three用に高密度クラウドを再生成するためのソースを保持（フォルダ or CSVグリッド）
-  const lastFolderSourceRef = useRef<FolderSource | null>(null);
-  const lastCsvGridRef = useRef<(number | null)[][] | null>(null);
+  // 表示中データの元（three.js 高密度点群の再生成と、CSV 書き出しの形式の判定に使う）
+  const [dataOrigin, setDataOrigin] = useState<DataOrigin>(null);
 
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
@@ -351,8 +354,7 @@ function App() {
     setPlotType(opts.plotType);
     // three.js 高密度点群の再生成元を、表示データと必ず一緒に更新する
     // （以前は WebSocket 経路で更新されず、計測後も前の CSV が three に出ていた）
-    lastCsvGridRef.current = opts.origin?.kind === "csv" ? opts.origin.grid : null;
-    lastFolderSourceRef.current = opts.origin?.kind === "folder" ? opts.origin.src : null;
+    setDataOrigin(opts.origin);
     setStatus("COMPLETE");
     if (opts.progress) {
       setProgressMessage(opts.progress.message);
@@ -590,6 +592,15 @@ function App() {
     if (!showSlice) setSliceMeasureMode(false);
   }, [showSlice]);
 
+  // 点群形式で書き出すべき点（点群形式CSV由来 / 複数層のマスク）。高さマップで書けるなら null
+  const exportPoints = (): PointCloud | null =>
+    dataOrigin?.kind === "csvPoints"
+      ? dataOrigin.points
+      : dataOrigin?.kind === "folder" && dataOrigin.layers
+        ? dataOrigin.layers
+        : null;
+  const canExport = exportPoints() !== null || (!!zData && zData.length > 0);
+
   // WebSocket が開くのを待ってから送信する。バックエンドが起動していないと永遠に待ち続けて
   // スピナーが止まらなかったため、一定時間で諦めてエラーにする
   const WS_CONNECT_TIMEOUT_MS = 5000;
@@ -682,10 +693,17 @@ function App() {
       );
     } else if (confirmMode === "csv") {
       // 表示と同じ µm の高さ（左右反転も反映）を書き出し、ピッチはファイル名に残す。
+      // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
       // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
-      if (zData && zData.length > 0) {
+      const sc = gridScale(dataSource, scale);
+      const pointSrc = exportPoints();
+      if (pointSrc) {
+        await downloadPointCSV(
+          pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
+          pitchFilename(`${(dataName ?? "points").replace(/\.csv$/i, "")}_points`, sc.col, sc.row)
+        );
+      } else if (zData && zData.length > 0) {
         const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-        const sc = gridScale(dataSource, scale);
         await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row));
       }
     }
@@ -706,6 +724,31 @@ function App() {
     source: HistorySource = "csv",
     fileName: string | null = null
   ) => {
+    // このアプリが書き出した CSV はファイル名にピッチが入っているので、自動で反映する
+    const pitch = fileName ? parsePitchFromFilename(fileName) : null;
+    if (pitch) {
+      setCsvPitchXInput(String(pitch.x));
+      setCsvPitchYInput(String(pitch.y));
+    }
+    // 点群形式（x,y,z ヘッダ＋1行1点）。同じ位置に複数の高さを持てるので高さマップは作らず、
+    // Surface・2D寸法測定などグリッド前提の機能は zData 無しとして自動的に無効になる
+    if (isPointCSV(text)) {
+      const points = parsePointCSV(text);
+      if (points.x.length === 0) {
+        alert("有効なデータがありません");
+        return;
+      }
+      setShowSlice(false);
+      setShowPlot(true);
+      applyCloudResult(samplePointCloud(points, CSV_MAX_TOTAL_POINTS), null, {
+        plotType: "scatter3d",
+        source,
+        dataSource: "csv",
+        origin: { kind: "csvPoints", points },
+        dataName: fileName,
+      });
+      return;
+    }
     const grid = parseCSV(text);
     if (grid.length === 0) {
       alert("CSVデータが空です");
@@ -716,12 +759,6 @@ function App() {
     if (newCloud.x.length === 0) {
       alert("有効なデータがありません");
       return;
-    }
-    // このアプリが書き出した CSV はファイル名にピッチが入っているので、自動で反映する
-    const pitch = fileName ? parsePitchFromFilename(fileName) : null;
-    if (pitch) {
-      setCsvPitchXInput(String(pitch.x));
-      setCsvPitchYInput(String(pitch.y));
     }
     setShowSlice(false);
     setShowPlot(true);
@@ -770,13 +807,13 @@ function App() {
         colorMode: "z",
         ...(algorithm === "tgv" ? { maxTotalPoints: 250_000 } : {}),
       };
-      const { cloud: newCloud, grid: newGrid } = await buildPointCloudFromFolder(src);
+      const { cloud: newCloud, grid: newGrid, layers } = await buildPointCloudFromFolder(src);
 
       applyCloudResult(newCloud, newGrid, {
         plotType: "surface",
         source: "coin",
         dataSource: "device",
-        origin: { kind: "folder", src },
+        origin: { kind: "folder", src, layers },
         dataName: "mask_result",
         name: "mask_result",
       });
@@ -803,19 +840,26 @@ function App() {
     if (pointEngine !== "three" || plotType !== "scatter3d") return;
 
     // CSV由来: グリッドから高密度点群を同期生成
-    const csvGrid = lastCsvGridRef.current;
-    if (csvGrid) {
-      setThreeCloud(densePointsFromGrid(csvGrid));
+    if (dataOrigin?.kind === "csv") {
+      // 元データの切替に合わせた即時差し替え（フォルダ由来の非同期取得と同じ state に揃える）
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setThreeCloud(densePointsFromGrid(dataOrigin.grid));
+      return;
+    }
+
+    // 点群形式CSV由来: 全点から最大200万点で生成
+    if (dataOrigin?.kind === "csvPoints") {
+      setThreeCloud(samplePointCloud(dataOrigin.points, 2_000_000));
       return;
     }
 
     // フォルダ由来: 最大100万点で再取得
-    const src = lastFolderSourceRef.current;
-    if (!src) {
-      // それ以外(WebSocket等)は再生成できないので既存 cloud を流用
+    if (dataOrigin?.kind !== "folder") {
+      // それ以外は再生成できないので既存 cloud を流用
       setThreeCloud(cloud);
       return;
     }
+    const src = dataOrigin.src;
     let cancelled = false;
     setIsBuildingThree(true);
     buildPointCloudFromFolder({ ...src, maxTotalPoints: 1_000_000 })
@@ -832,7 +876,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [pointEngine, plotType, cloud]);
+  }, [pointEngine, plotType, cloud, dataOrigin]);
 
   // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]（Plotly の surface と同じ utils/units の換算）
   const meshSurface = useMemo(() => {
@@ -921,6 +965,10 @@ function App() {
 
   // ヘッダーに出す表示中データの概要（名前・グリッドサイズ・有効率）
   const dataSummary = (() => {
+    // 点群形式CSV（高さマップなし）は点数を出す
+    if ((!zData || zData.length === 0) && dataOrigin?.kind === "csvPoints") {
+      return { name: dataName, points: dataOrigin.points.x.length };
+    }
     if (!zData || zData.length === 0) return null;
     const h = zData.length;
     const w = zData[0].length;
@@ -1617,15 +1665,17 @@ function App() {
                         </button>
                         <button
                           className="tt-hover"
-                          disabled={!zData || zData.length === 0}
+                          disabled={!canExport}
                           title={
-                            !zData || zData.length === 0
-                              ? "書き出せる高さマップがありません"
-                              : "表示中の高さマップを µm で書き出す（ピッチはファイル名に記録）"
+                            !canExport
+                              ? "書き出せるデータがありません"
+                              : exportPoints()
+                                ? "点群形式（x,y,z・高さ µm）で書き出す（ピッチはファイル名に記録）"
+                                : "表示中の高さマップを µm で書き出す（ピッチはファイル名に記録）"
                           }
                           style={{
                             ...buttonFileStyle,
-                            ...enabledStateStyle(!!zData && zData.length > 0),
+                            ...enabledStateStyle(canExport),
                           }}
                           onClick={() => {
                             setConfirmMode("csv");
@@ -1724,7 +1774,8 @@ function App() {
                       </div>
 
                       {/* 表示タイプ・エンジン切替 */}
-                      {showPlot && zData && zData.length > 0 && (
+                      {/* 高さマップが無い点群形式CSVでは描画モードは選べず、エンジンだけ切り替える */}
+                      {showPlot && ((zData && zData.length > 0) || !!cloud) && (
                         <div
                           style={{
                             display: "flex",
@@ -1733,21 +1784,23 @@ function App() {
                             marginTop: "14px",
                           }}
                         >
-                          <div style={settingRowStyle}>
-                            <span style={rowLabelStyle}>描画モード</span>
-                            <div style={{ ...segmentGroupStyle, width: "190px" }}>
-                              {(["surface", "scatter3d"] as const).map((pt) => (
-                                <button
-                                  key={pt}
-                                  className="tt-hover"
-                                  onClick={() => setPlotType(pt)}
-                                  style={segmentButtonStyle(plotType === pt)}
-                                >
-                                  {pt === "surface" ? "Surface" : "Point Cloud"}
-                                </button>
-                              ))}
+                          {zData && zData.length > 0 && (
+                            <div style={settingRowStyle}>
+                              <span style={rowLabelStyle}>描画モード</span>
+                              <div style={{ ...segmentGroupStyle, width: "190px" }}>
+                                {(["surface", "scatter3d"] as const).map((pt) => (
+                                  <button
+                                    key={pt}
+                                    className="tt-hover"
+                                    onClick={() => setPlotType(pt)}
+                                    style={segmentButtonStyle(plotType === pt)}
+                                  >
+                                    {pt === "surface" ? "Surface" : "Point Cloud"}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
-                          </div>
+                          )}
 
                           {/* Surface エンジン切替（Surface のときのみ） */}
                           {plotType === "surface" && (
@@ -2078,10 +2131,7 @@ function App() {
                       setPlotType(entry.plotType);
                       setDataSource(entry.dataSource);
                       setDataName(entry.dataName);
-                      lastCsvGridRef.current =
-                        entry.origin?.kind === "csv" ? entry.origin.grid : null;
-                      lastFolderSourceRef.current =
-                        entry.origin?.kind === "folder" ? entry.origin.src : null;
+                      setDataOrigin(entry.origin);
                       setShowPlot(true);
                     }}
                   />
@@ -2259,7 +2309,18 @@ function App() {
               }}
             >
               {confirmMode === "csv" ? (
-                "csvファイルを出力しますか？"
+                exportPoints() ? (
+                  <>
+                    csvファイルを出力しますか？
+                    <div style={{ marginTop: "8px", fontSize: "12.5px", color: colors.textMuted }}>
+                      {dataOrigin?.kind === "csvPoints"
+                        ? "点群形式（x,y,z）で出力します。"
+                        : "同じ位置に縞が複数ある（複数層の）データのため、層ごとの点を点群形式（x,y,z）で出力します。"}
+                    </div>
+                  </>
+                ) : (
+                  "csvファイルを出力しますか？"
+                )
               ) : confirmMode === "ai" ? (
                 <>
                   AI推論を実行しますか？

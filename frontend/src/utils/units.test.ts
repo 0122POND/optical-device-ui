@@ -6,6 +6,7 @@ import {
   physicalGrid,
   physicalPoints,
   pitchFilename,
+  pointsInCsvUnits,
   type ScaleInputs,
 } from "./units";
 
@@ -122,5 +123,29 @@ describe("ピッチのファイル名埋め込み", () => {
 
   it("ピッチ表記が無ければ null", () => {
     expect(parsePitchFromFilename("surface.csv")).toBeNull();
+  });
+});
+
+describe("pointsInCsvUnits", () => {
+  const cloud = { x: [10, 20], y: [0, 3], z: [1, 2], c: [10, 20] };
+
+  it("device: 高さ=重心px×1.8µm、列・行は添字のまま（ピッチはファイル名へ）", () => {
+    const p = pointsInCsvUnits(cloud, "device", S, false);
+    expect(p.x[0]).toBeCloseTo(18);
+    expect(p.x[1]).toBeCloseTo(36);
+    expect(p.y).toEqual([0, 3]);
+    expect(p.z).toEqual([1, 2]);
+  });
+
+  it("device の左右反転は深さを基準値から反転", () => {
+    const p = pointsInCsvUnits(cloud, "device", S, true, 30);
+    expect(p.x[0]).toBeCloseTo(36);
+    expect(p.x[1]).toBeCloseTo(18);
+  });
+
+  it("csv: 高さはそのまま、左右反転は列の鏡映", () => {
+    const p = pointsInCsvUnits(cloud, "csv", S, true);
+    expect(p.x).toEqual([10, 20]);
+    expect(p.y).toEqual([3, 0]);
   });
 });

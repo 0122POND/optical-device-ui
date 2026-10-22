@@ -14,7 +14,10 @@ export function Header({
   measureCount: number;
   status: MeasureStatus;
   // 表示中データの概要（名前・グリッドサイズ・有効率）。未表示なら null
-  data: { name: string | null; w: number; h: number; validPct: number } | null;
+  data:
+    | { name: string | null; w: number; h: number; validPct: number }
+    | { name: string | null; points: number }
+    | null;
 }) {
   // About Usポップアップ表示フラグ
   const [showAbout, setShowAbout] = useState(false);
@@ -192,7 +195,9 @@ export function Header({
           )}
           <span style={{ fontFamily: monoFont }}>
             {data.name ? "· " : ""}
-            {data.w} × {data.h} · 有効 {data.validPct.toFixed(1)}%
+            {"points" in data
+              ? `点群 ${data.points.toLocaleString()} 点`
+              : `${data.w} × ${data.h} · 有効 ${data.validPct.toFixed(1)}%`}
           </span>
         </div>
       )}
