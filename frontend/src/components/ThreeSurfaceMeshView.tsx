@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { FILLED_COLOR } from "../utils/constants";
 import {
   MESH_COLORMAPS,
   buildTriangleIndex,
@@ -40,6 +41,8 @@ export function ThreeSurfaceMeshView(props: {
   grid: (number | null)[][] | null;
   pitchX: number;
   pitchY: number;
+  // 後処理の補間で埋めた画素（grid と同じ向き）。印の色で塗る。印を付けないときは null
+  filledMask?: boolean[][] | null;
   // 高さの単位（CSV の高さが未校正の px のときは "px"）。凡例の表示に使う
   heightUnit?: "µm" | "px";
   // カラーレンジの手動指定（µm, 空文字=自動）。前処理後の高さに対して適用する
@@ -51,8 +54,16 @@ export function ThreeSurfaceMeshView(props: {
   // 視点のプリセット（正面・側面・上面・既定）
   viewPreset?: ViewPresetRequest;
 }) {
-  const { grid, pitchX, pitchY, colorRangeMin, colorRangeMax, autoRotate, onAutoRotateChange } =
-    props;
+  const {
+    grid,
+    pitchX,
+    pitchY,
+    filledMask,
+    colorRangeMin,
+    colorRangeMax,
+    autoRotate,
+    onAutoRotateChange,
+  } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const colorbarRef = useRef<HTMLCanvasElement | null>(null);
   const [zEx, setZEx] = useState(5);
@@ -292,6 +303,7 @@ export function ThreeSurfaceMeshView(props: {
     const aH = new Float32Array(w * h);
     const cm = MESH_COLORMAPS[cmap];
     const color = new THREE.Color();
+    const filledColor = new THREE.Color(FILLED_COLOR);
     for (let r = 0; r < h; r++) {
       for (let c = 0; c < w; c++) {
         const k = r * w + c;
@@ -304,6 +316,7 @@ export function ThreeSurfaceMeshView(props: {
         const [cr, cg, cb] = cm(Math.min(1, Math.max(0, (v - lo) / (hi - lo))));
         // カラーマップは sRGB で定義 → three.js の線形作業空間へ
         color.setRGB(cr, cg, cb, THREE.SRGBColorSpace);
+        if (filledMask?.[r]?.[c]) color.copy(filledColor);
         col[k * 3] = color.r;
         col[k * 3 + 1] = color.g;
         col[k * 3 + 2] = color.b;
@@ -333,7 +346,7 @@ export function ThreeSurfaceMeshView(props: {
       st.auto = true;
     }
     setLegend({ lo, hi, tris: idx.length / 3 });
-  }, [grid, pitchX, pitchY, detrend, cmap, flipZ, colorRangeMin, colorRangeMax]);
+  }, [grid, pitchX, pitchY, filledMask, detrend, cmap, flipZ, colorRangeMin, colorRangeMax]);
 
   useEffect(() => {
     if (stateRef.current) stateRef.current.uniforms.uContour.value = contour ? 1 : 0;

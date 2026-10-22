@@ -4,6 +4,9 @@
 export const DEFAULT_UM_PER_PIXEL_X = 1.8; // 干渉画像の横方向（深さ方向）
 export const DEFAULT_UM_PER_PIXEL_Y = 20; // 干渉画像の縦方向
 
+// 後処理の補間で埋めた画素の印の色（カラーマップ turbo / viridis に無いマゼンタ）
+export const FILLED_COLOR = "#ff4fd8";
+
 // 寸法線の色パレット（線ごとに色を変えて区別しやすくする）
 export const DIM_COLORS = ["#ffffff", "#fde047", "#34d399", "#f472b6", "#60a5fa", "#fb923c"];
 

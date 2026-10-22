@@ -29,6 +29,7 @@ import {
   DEFAULT_UM_PER_PIXEL_Y,
   DIM_COLORS,
   CSV_MAX_TOTAL_POINTS,
+  FILLED_COLOR,
   colors,
   fontFamily,
   monoFont,
@@ -76,6 +77,13 @@ import type {
   FolderSource,
   ProcessingInfo,
 } from "./types";
+import {
+  applyPostprocess,
+  orientFilled,
+  postActive,
+  POST_OFF,
+  type PostSettings,
+} from "./utils/postprocess";
 import "./App.css";
 
 // AI推論のモデル（学習済みで使えるのはこの1つ。backend/ai_inference.py の MODEL_CONFIGS のキー）
@@ -289,6 +297,20 @@ function App() {
   // 表示中データの名前（ヘッダーに出す。CSV読込=ファイル名、マスク読込=フォルダ名）
   const [dataName, setDataName] = useState<string | null>(null);
   const [cloud, setCloud] = useState<PointCloud | null>(null);
+  // 高さマップの後処理（外れ値除去・走査方向の補間）。新しいデータを開くと切に戻す
+  const [post, setPost] = useState<PostSettings>(POST_OFF);
+  const [showFilled, setShowFilled] = useState(true);
+  const postResult = useMemo(
+    () => (zData && zData.length > 0 && postActive(post) ? applyPostprocess(zData, post) : null),
+    [zData, post]
+  );
+  // 表示・断面・統計・CSV出力に使う高さマップ（後処理が切なら元のまま）。履歴には元の zData を残す
+  const viewZ = postResult?.grid ?? zData;
+  // 補った画素の印（表示の向きに合わせる。印を消しているときは null）
+  const filledView = useMemo(
+    () => (showFilled ? orientFilled(postResult?.filled ?? null, dataSource, flipX) : null),
+    [showFilled, postResult, dataSource, flipX]
+  );
   // デバイスデータの左右反転の基準値（全表示で共通。表示ごとに別の最大値を使うと深さがずれる）
   const flipRef = useMemo(
     () => (dataSource === "device" ? deviceFlipRef(zData, cloud) : 0),
@@ -398,6 +420,7 @@ function App() {
   ) => {
     setCloud(newCloud);
     setZData(grid);
+    setPost(POST_OFF);
     setDataSource(opts.dataSource);
     setDataName(opts.dataName ?? null);
     setPlotType(opts.plotType);
@@ -615,7 +638,8 @@ function App() {
     colorRangeMin,
     colorRangeMax,
     plotType,
-    zData,
+    zData: viewZ,
+    filledMask: filledView,
     measureMode,
     measurePt1,
     measurePt2,
@@ -646,7 +670,7 @@ function App() {
   useSlicePlot({
     sliceRef,
     showSlice,
-    zData,
+    zData: viewZ,
     cloud,
     sliceLineStart,
     sliceLineEnd,
@@ -799,7 +823,8 @@ function App() {
     // 高さマップで表せないデータ（点群形式CSV・複数層のマスク）は点群形式（x,y,z）で書き出す。
     // データが無いときは書き出さない（以前はデモ用の偽データを黙って出力していた）
     const sc = gridScale(dataSource, scale);
-    const pointSrc = exportPoints();
+    // 後処理を掛けているときは、掛けた高さマップを書き出す（ファイル名に処理を残す）
+    const pointSrc = postActive(post) ? null : exportPoints();
     if (pointSrc) {
       await downloadPointCSV(
         pointsInCsvUnits(pointSrc, dataSource, scale, flipX, flipRef),
@@ -810,9 +835,12 @@ function App() {
           sc.valueUnit
         )
       );
-    } else if (zData && zData.length > 0) {
-      const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
-      await downloadCSV(pg.z, pitchFilename(dataName ?? "surface", sc.col, sc.row, sc.valueUnit));
+    } else if (viewZ && viewZ.length > 0) {
+      const pg = physicalGrid(viewZ, dataSource, scale, flipX, flipRef);
+      const base = (dataName ?? "surface").replace(/\.csv$/i, "");
+      const tag =
+        (post.removeOutliers ? `_mad${post.sigma}` : "") + (post.interpolate ? "_interp" : "");
+      await downloadCSV(pg.z, pitchFilename(base + tag, sc.col, sc.row, sc.valueUnit));
     }
   };
 
@@ -994,11 +1022,11 @@ function App() {
 
   // three.js メッシュ用の高さ[µm]グリッドと列/行ピッチ[µm]（Plotly の surface と同じ utils/units の換算）
   const meshSurface = useMemo(() => {
-    if (surfaceEngine !== "three" || !zData || zData.length === 0) return null;
-    const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
+    if (surfaceEngine !== "three" || !viewZ || viewZ.length === 0) return null;
+    const pg = physicalGrid(viewZ, dataSource, scale, flipX, flipRef);
     const sc = gridScale(dataSource, scale);
     return { grid: pg.z, pitchX: sc.col, pitchY: sc.row };
-  }, [surfaceEngine, zData, dataSource, scale, flipX, flipRef]);
+  }, [surfaceEngine, viewZ, dataSource, scale, flipX, flipRef]);
 
   // --- プロット操作（フローティングツールバーから呼ぶ） ---
   const handleZoom = (factor: number) => {
@@ -1130,11 +1158,11 @@ function App() {
     if ((!zData || zData.length === 0) && dataOrigin?.kind === "csvPoints") {
       return { name: dataName, points: dataOrigin.points.x.length };
     }
-    if (!zData || zData.length === 0) return null;
-    const h = zData.length;
-    const w = zData[0].length;
+    if (!viewZ || viewZ.length === 0) return null;
+    const h = viewZ.length;
+    const w = viewZ[0].length;
     let valid = 0;
-    for (const row of zData) for (const v of row) if (v != null) valid++;
+    for (const row of viewZ) for (const v of row) if (v != null) valid++;
     return { name: dataName, w, h, validPct: (valid / (w * h)) * 100 };
   })();
 
@@ -1291,6 +1319,7 @@ function App() {
                       grid={meshSurface.grid}
                       pitchX={meshSurface.pitchX}
                       pitchY={meshSurface.pitchY}
+                      filledMask={filledView}
                       heightUnit={gridScale(dataSource, scale).valueUnit}
                       colorRangeMin={colorRangeMin}
                       colorRangeMax={colorRangeMax}
@@ -1889,6 +1918,126 @@ function App() {
                       </div>
                     </section>
 
+                    {/* 後処理（高さマップ。tools/remove_outliers.py・interpolate_scan.py と同じ処理） */}
+                    {zData && zData.length > 0 && (
+                      <section style={panelSectionStyle}>
+                        <h3 style={sectionTitleStyle}>後処理</h3>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          <div style={settingRowStyle}>
+                            <span
+                              style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
+                              title="全体の中央値から MAD×1.4826×σ を超えて外れた点を欠損にする"
+                            >
+                              外れ値の除去
+                            </span>
+                            <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                              {([null, 3, 4] as const).map((sg) => {
+                                const on =
+                                  sg == null
+                                    ? !post.removeOutliers
+                                    : post.removeOutliers && post.sigma === sg;
+                                return (
+                                  <button
+                                    key={String(sg)}
+                                    className="tt-hover"
+                                    style={segmentButtonStyle(on)}
+                                    onClick={() =>
+                                      setPost((p) =>
+                                        sg == null
+                                          ? { ...p, removeOutliers: false }
+                                          : { ...p, removeOutliers: true, sigma: sg }
+                                      )
+                                    }
+                                  >
+                                    {sg == null ? "なし" : `${sg}σ`}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div style={settingRowStyle}>
+                            <span
+                              style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}
+                              title="走査方向（行の並び）の欠損を、3行以下は線形・4〜8行は局所スプラインで埋める（9行以上は埋めない）"
+                            >
+                              走査方向の補間
+                            </span>
+                            <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                              {([false, true] as const).map((on) => (
+                                <button
+                                  key={String(on)}
+                                  className="tt-hover"
+                                  style={segmentButtonStyle(post.interpolate === on)}
+                                  onClick={() => setPost((p) => ({ ...p, interpolate: on }))}
+                                >
+                                  {on ? "あり" : "なし"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {post.interpolate && (
+                            <div style={settingRowStyle}>
+                              <span style={{ ...rowLabelStyle, whiteSpace: "nowrap" }}>
+                                補った画素の印
+                              </span>
+                              <div style={{ ...segmentGroupStyle, width: "170px" }}>
+                                {([true, false] as const).map((on) => (
+                                  <button
+                                    key={String(on)}
+                                    className="tt-hover"
+                                    style={segmentButtonStyle(showFilled === on)}
+                                    onClick={() => setShowFilled(on)}
+                                  >
+                                    {on ? "表示" : "隠す"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {postResult && (
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              fontSize: "11.5px",
+                              color: colors.textMuted,
+                              lineHeight: 1.7,
+                            }}
+                          >
+                            {post.removeOutliers && (
+                              <div>
+                                外れ値 {postResult.removed.toLocaleString()} 点を欠損にしました
+                              </div>
+                            )}
+                            {post.interpolate && (
+                              <div>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    width: "8px",
+                                    height: "8px",
+                                    borderRadius: "2px",
+                                    backgroundColor: FILLED_COLOR,
+                                    marginRight: "6px",
+                                  }}
+                                />
+                                {(
+                                  postResult.filledLinear + postResult.filledSpline
+                                ).toLocaleString()}{" "}
+                                画素を補間（線形 {postResult.filledLinear.toLocaleString()}
+                                ・スプライン {postResult.filledSpline.toLocaleString()}、長い欠損{" "}
+                                {postResult.skipped.toLocaleString()} 画素は埋めず）
+                              </div>
+                            )}
+                            <div style={{ color: colors.textDim, marginTop: "4px" }}>
+                              Surface・2D・断面・統計・CSV出力に効きます（点群表示は元のまま）。
+                              補間値は実測ではないので、精度評価には後処理前のデータを使ってください。
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    )}
+
                     {/* 表示 */}
                     <section style={panelSectionStyle}>
                       <h3 style={sectionTitleStyle}>表示</h3>
@@ -2419,7 +2568,8 @@ function App() {
                 {sideTab === "result" && (
                   <ResultTab
                     cloud={cloud}
-                    zData={zData}
+                    zData={viewZ}
+                    postResult={postResult}
                     dataSource={dataSource}
                     scale={scale}
                     flipX={flipX}
@@ -2438,6 +2588,7 @@ function App() {
                       setShowSlice(false);
                       setCloud(entry.cloud);
                       setZData(entry.grid);
+                      setPost(POST_OFF);
                       setPlotType(entry.plotType);
                       setDataSource(entry.dataSource);
                       setDataName(entry.dataName);

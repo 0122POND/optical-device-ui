@@ -3,6 +3,7 @@ import { colors, fontFamily, monoFont } from "../utils/constants";
 import { panelSectionStyle, sectionTitleStyle } from "../utils/styles";
 import type { CloudHistoryEntry, HistorySource, ProcessingInfo } from "../types";
 import type { PointCloud } from "../utils/pointCloud";
+import type { PostResult } from "../utils/postprocess";
 import { gridScale, physicalGrid, type DataSource, type ScaleInputs } from "../utils/units";
 import {
   heightStats,
@@ -15,6 +16,7 @@ import {
 export function ResultTab({
   cloud,
   zData,
+  postResult,
   dataSource,
   scale,
   flipX,
@@ -32,6 +34,8 @@ export function ResultTab({
   cloud: PointCloud | null;
   // 統計を出す高さマップと、その換算条件（表示と同じ µm 換算・反転で数える）
   zData: (number | null)[][] | null;
+  // 後処理（外れ値除去・補間）の結果。掛けていなければ null
+  postResult: PostResult | null;
   dataSource: DataSource;
   scale: ScaleInputs;
   flipX: boolean;
@@ -84,6 +88,7 @@ export function ResultTab({
       {cloud && zData && zData.length > 0 && (
         <StatsSection
           zData={zData}
+          postResult={postResult}
           dataSource={dataSource}
           scale={scale}
           flipX={flipX}
@@ -402,17 +407,20 @@ const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 // 表示中の高さマップの統計。有効率は領域ごと（取り方で値が大きく違うため、領域名を必ず添える）
 function StatsSection({
   zData,
+  postResult,
   dataSource,
   scale,
   flipX,
   flipRef,
 }: {
   zData: (number | null)[][];
+  postResult: PostResult | null;
   dataSource: DataSource;
   scale: ScaleInputs;
   flipX: boolean;
   flipRef: number;
 }) {
+  const nFilled = postResult ? postResult.filledLinear + postResult.filledSpline : 0;
   const stats = useMemo(() => {
     const pg = physicalGrid(zData, dataSource, scale, flipX, flipRef);
     return { rates: validRates(zData), h: heightStats(pg.z, pg.x, pg.y) };
@@ -425,6 +433,23 @@ function StatsSection({
   return (
     <section style={panelSectionStyle}>
       <h3 style={sectionTitleStyle}>統計</h3>
+      {postResult && (
+        <div
+          style={{
+            marginBottom: "10px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            backgroundColor: colors.primarySoft,
+            color: colors.primary,
+            fontSize: "11.5px",
+            lineHeight: 1.6,
+          }}
+        >
+          後処理後の値です
+          {nFilled > 0 && `（補間 ${nFilled.toLocaleString()} 画素を含む）`}
+          。精度評価には後処理前のデータを使ってください。
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         <InfoRow label="有効率（全体）" value={pct(rates.full)} />
         <InfoRow label="有効率（中央50%×50%）" value={pct(rates.center50)} />
