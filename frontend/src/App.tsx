@@ -29,7 +29,13 @@ import { usePlotlyAutoRotate } from "./hooks/usePlotlyAutoRotate";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { ThreePointCloudView } from "./components/ThreePointCloudView";
 import { ThreeSurfaceMeshView } from "./components/ThreeSurfaceMeshView";
-import { buttonPrimaryStyle, buttonSecondaryStyle } from "./utils/styles";
+import {
+  buttonPrimaryStyle,
+  buttonRunStyle,
+  buttonFileStyle,
+  buttonToggleStyle,
+  enabledStateStyle,
+} from "./utils/styles";
 import type {
   PlotType,
   HistorySource,
@@ -767,7 +773,9 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: sidePanelVisible ? "1fr 320px" : "1fr",
+            // 左列は minmax(0, 1fr)。素の 1fr は中身の最小幅（Plotlyの描画幅など）より縮まず、
+            // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
+            gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
             height: "100%",
           }}
         >
@@ -777,6 +785,8 @@ function App() {
               alignItems: "center",
               gap: "8px",
               padding: "0 12px",
+              minWidth: 0,
+              overflowX: "auto",
               backgroundColor: "#aab2be",
               borderBottom: `1px solid ${colors.border}`,
             }}
@@ -1177,7 +1187,9 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: sidePanelVisible ? "1fr 320px" : "1fr",
+            // 左列は minmax(0, 1fr)。素の 1fr は中身の最小幅（Plotlyの描画幅など）より縮まず、
+            // 幅の狭い画面でサイドパネルが画面外へ押し出されて横スクロールが出るため
+            gridTemplateColumns: sidePanelVisible ? "minmax(0, 1fr) 320px" : "minmax(0, 1fr)",
             height: "100%",
             overflow: "hidden",
           }}
@@ -1187,6 +1199,7 @@ function App() {
             style={{
               width: "100%",
               height: "100%",
+              minWidth: 0,
               padding: "12px",
               boxSizing: "border-box",
               display: "flex",
@@ -1493,12 +1506,8 @@ function App() {
                     <button
                       disabled={status === "RUNNING" || isLoadingAI}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: "#0d9488",
-                        border: "none",
-                        cursor: status === "RUNNING" || isLoadingAI ? "not-allowed" : "pointer",
-                        opacity: status === "RUNNING" || isLoadingAI ? 0.7 : 1,
-                        fontSize: "12px",
+                        ...buttonRunStyle,
+                        ...enabledStateStyle(!(status === "RUNNING" || isLoadingAI)),
                       }}
                       onClick={handleShowAIResult}
                       title="AI推論でマスク画像から3次元形状を再構成して表示する"
@@ -1529,10 +1538,7 @@ function App() {
                     {/* CSV出力ボタン */}
                     <button
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: "#1e2d42",
-                        border: `1px solid #3a5068`,
-                        fontSize: "12px",
+                        ...buttonFileStyle,
                       }}
                       onClick={() => {
                         setConfirmMode("csv");
@@ -1564,12 +1570,7 @@ function App() {
                         setAxisVisible((v) => !v);
                       }}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: axisVisible ? "#4a6280" : "#1e2d42",
-                        border: `1px solid #3a5068`,
-                        cursor: showPlot ? "pointer" : "not-allowed",
-                        opacity: showPlot ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(axisVisible, showPlot),
                       }}
                     >
                       <svg
@@ -1600,12 +1601,7 @@ function App() {
                         setFlipX((v) => !v);
                       }}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: flipX ? "#4a6280" : "#1e2d42",
-                        border: `1px solid #3a5068`,
-                        cursor: showPlot ? "pointer" : "not-allowed",
-                        opacity: showPlot ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(flipX, showPlot),
                       }}
                     >
                       <svg
@@ -1641,12 +1637,7 @@ function App() {
                         }
                       }}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: measureMode ? "#b45309" : "#1e2d42",
-                        border: `1px solid ${measureMode ? "#d97706" : "#3a5068"}`,
-                        cursor: showPlot ? "pointer" : "not-allowed",
-                        opacity: showPlot ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(measureMode, showPlot),
                       }}
                     >
                       <svg
@@ -1685,15 +1676,10 @@ function App() {
                         }
                       }}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: dimensionMode ? "#0e7490" : "#1e2d42",
-                        border: `1px solid ${dimensionMode ? "#22d3ee" : "#3a5068"}`,
-                        cursor:
-                          viewMode === "2D-camera" && zData && zData.length > 0
-                            ? "pointer"
-                            : "not-allowed",
-                        opacity: viewMode === "2D-camera" && zData && zData.length > 0 ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(
+                          dimensionMode,
+                          viewMode === "2D-camera" && !!zData && zData.length > 0
+                        ),
                       }}
                       title="2D表示で両矢印をドラッグし、任意2点間の寸法を測る"
                     >
@@ -1721,11 +1707,8 @@ function App() {
                           <button
                             onClick={addDimLine}
                             style={{
-                              ...buttonSecondaryStyle,
+                              ...buttonFileStyle,
                               flex: 1,
-                              backgroundColor: "#0e7490",
-                              border: "1px solid #22d3ee",
-                              fontSize: "12px",
                             }}
                             title="寸法線をもう1本追加する"
                           >
@@ -1792,13 +1775,10 @@ function App() {
                     <button
                       disabled={(!cloud && !zData) || viewMode !== "2D-camera"}
                       style={{
-                        ...buttonSecondaryStyle,
-                        border: "none",
-                        backgroundColor: showSlice ? colors.danger : "#3d5a80",
-                        cursor:
-                          (cloud || zData) && viewMode === "2D-camera" ? "pointer" : "not-allowed",
-                        opacity: (cloud || zData) && viewMode === "2D-camera" ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(
+                          showSlice,
+                          !!(cloud || zData) && viewMode === "2D-camera"
+                        ),
                       }}
                       onClick={() => {
                         if ((!cloud && !zData) || viewMode !== "2D-camera") return;
@@ -1844,10 +1824,7 @@ function App() {
                     />
                     <button
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: "#1e2d42",
-                        border: `1px solid #3a5068`,
-                        fontSize: "12px",
+                        ...buttonFileStyle,
                       }}
                       onClick={() => csvInputRef.current?.click()}
                     >
@@ -1872,12 +1849,8 @@ function App() {
                     <button
                       disabled={status === "RUNNING" || isLoadingMask}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: "#7c3aed",
-                        border: "none",
-                        cursor: status === "RUNNING" || isLoadingMask ? "not-allowed" : "pointer",
-                        opacity: status === "RUNNING" || isLoadingMask ? 0.7 : 1,
-                        fontSize: "12px",
+                        ...buttonFileStyle,
+                        ...enabledStateStyle(!(status === "RUNNING" || isLoadingMask)),
                       }}
                       onClick={handleLoadMask}
                     >
@@ -1915,12 +1888,7 @@ function App() {
                         setAutoRotate(next);
                       }}
                       style={{
-                        ...buttonSecondaryStyle,
-                        backgroundColor: autoRotate ? "#4a6280" : "#1e2d42",
-                        border: `1px solid #3a5068`,
-                        cursor: cloud || zData ? "pointer" : "not-allowed",
-                        opacity: cloud || zData ? 1 : 0.5,
-                        fontSize: "12px",
+                        ...buttonToggleStyle(autoRotate, !!(cloud || zData)),
                       }}
                       title="表示中の3Dグラフ（Surface / 点群）をターンテーブルのように自動回転させる"
                     >
@@ -2178,7 +2146,7 @@ function App() {
                     flex: 1,
                     height: "56px",
                     fontSize: "16px",
-                    backgroundColor: status === "RUNNING" ? "#4a6280" : "#4a90e2",
+                    backgroundColor: status === "RUNNING" ? colors.secondary : colors.primary,
                     cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                     opacity: status === "RUNNING" ? 0.7 : 1,
                   }}
@@ -2203,7 +2171,7 @@ function App() {
                     flex: 1,
                     height: "56px",
                     fontSize: "16px",
-                    backgroundColor: status === "RUNNING" ? "#4a6280" : "#e2894a",
+                    backgroundColor: status === "RUNNING" ? colors.secondary : colors.primary,
                     cursor: status === "RUNNING" ? "not-allowed" : "pointer",
                     opacity: status === "RUNNING" ? 0.7 : 1,
                   }}
