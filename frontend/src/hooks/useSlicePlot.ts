@@ -4,6 +4,13 @@ import Plotly from "plotly.js-dist-min";
 import { colors, fontFamily } from "../utils/constants";
 import type { PlotType } from "../types";
 import type { PointCloud } from "../utils/pointCloud";
+import {
+  gridScale,
+  physicalGrid,
+  physicalPoints,
+  type DataSource,
+  type ScaleInputs,
+} from "../utils/units";
 
 // 2D 断層グラフ（クリックで引いた線に沿った断面：距離×深さ）を sliceRef へ描画する。
 // グリッド(zData)がある場合はグリッド交点での線形補間、なければ点群ベースで抽出する。
@@ -14,10 +21,11 @@ export function useSlicePlot(args: {
   cloud: PointCloud | null;
   sliceLineStart: { y: number; z: number } | null;
   sliceLineEnd: { y: number; z: number } | null;
-  sweepInterval: string;
-  umPerPixelX: number;
-  umPerPixelY: number;
+  // 表示中データの出どころと換算設定（µm への換算は utils/units に集約）
+  dataSource: DataSource;
+  scale: ScaleInputs;
   flipX: boolean;
+  flipRef: number;
   plotType: PlotType;
   // 断層グラフ上での2点間距離計測（t=距離[µm], d=深さ[µm]）
   sliceMeasureMode: boolean;
@@ -33,10 +41,10 @@ export function useSlicePlot(args: {
     cloud,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
     flipX,
+    flipRef,
     plotType,
     sliceMeasureMode,
     sliceMeasureStart,
@@ -57,17 +65,8 @@ export function useSlicePlot(args: {
       return;
     }
 
-    // Z軸の換算係数: 掃引間隔[µm/スライス] (未入力時は umPerPixelY を仮定)
-    const sweepVal = parseFloat(sweepInterval);
-    const hasSweep = !isNaN(sweepVal) && sweepVal > 0;
-    const zUmPerSlice = hasSweep ? sweepVal : umPerPixelY;
-
-    // flipX時の反転用: 3Dプロットと同じmaxRawXを使い深度値を反転
-    const maxRawX = flipX && cloud ? cloud.x.reduce((a, b) => (a > b ? a : b), cloud.x[0]) : 0;
-    // surfaceモードかつCSV由来: grid値がすでにµm（高さ）なので変換不要
-    const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
-    const depthToUm = (rawVal: number) =>
-      isSurfaceCSV ? rawVal : flipX ? (maxRawX - rawVal) * umPerPixelX : rawVal * umPerPixelX;
+    // 列・行の µm ピッチ（クリック座標[µm]→グリッド添字の逆変換に使う）
+    const sc = gridScale(dataSource, scale);
 
     // 始点・終点（plotly_clickからµm座標で取得済み）
     const y0 = sliceLineStart.y;
@@ -90,15 +89,16 @@ export function useSlicePlot(args: {
 
     if (zData && zData.length > 0) {
       // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
-      const numRows = zData.length;
-      const numCols = zData[0].length;
-      // surfaceモードかつCSV由来（cloudなし）: クリック座標がピクセル単位なので変換不要
-      const isSurfaceCSV = plotType === "surface" && (!cloud || cloud.x.length === 0);
-      // µm→生インデックスへ逆変換（グリッドアクセス用）
-      const y0Px = isSurfaceCSV ? y0 : y0 / umPerPixelY;
-      const z0Px = isSurfaceCSV ? z0 : z0 / zUmPerSlice;
-      const y1Px = isSurfaceCSV ? y1 : y1 / umPerPixelY;
-      const z1Px = isSurfaceCSV ? z1 : z1 / zUmPerSlice;
+      // 3D表示と同じ換算・反転を施した µm グリッドから取る（表示と断面で値が一致する）
+      const grid = physicalGrid(zData, dataSource, scale, flipX, flipRef).z;
+      const depthToUm = (v: number) => v;
+      const numRows = grid.length;
+      const numCols = grid[0].length;
+      // µm→グリッド添字へ逆変換
+      const y0Px = y0 / sc.col;
+      const z0Px = z0 / sc.row;
+      const y1Px = y1 / sc.col;
+      const z1Px = z1 / sc.row;
       const dyPx = y1Px - y0Px;
       const dzPx = z1Px - z0Px;
 
@@ -146,8 +146,8 @@ export function useSlicePlot(args: {
           const c1 = c0 + 1;
           const r = Math.min(Math.max(Math.round(pz), 0), numRows - 1);
           if (c0 >= 0 && c1 < numCols) {
-            const v0 = zData[r]?.[c0];
-            const v1 = zData[r]?.[c1];
+            const v0 = grid[r]?.[c0];
+            const v1 = grid[r]?.[c1];
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (py - c0);
               tData.push(lineLen * frac);
@@ -157,7 +157,7 @@ export function useSlicePlot(args: {
           }
           // 端点はそのまま
           if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
-            const v = zData[row]?.[col];
+            const v = grid[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
               xData.push(depthToUm(v));
@@ -169,8 +169,8 @@ export function useSlicePlot(args: {
           const r1 = r0 + 1;
           const c = Math.min(Math.max(Math.round(py), 0), numCols - 1);
           if (r0 >= 0 && r1 < numRows) {
-            const v0 = zData[r0]?.[c];
-            const v1 = zData[r1]?.[c];
+            const v0 = grid[r0]?.[c];
+            const v1 = grid[r1]?.[c];
             if (v0 != null && v1 != null) {
               const val = v0 + (v1 - v0) * (pz - r0);
               tData.push(lineLen * frac);
@@ -179,7 +179,7 @@ export function useSlicePlot(args: {
             }
           }
           if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
-            const v = zData[row]?.[col];
+            const v = grid[row]?.[col];
             if (v != null) {
               tData.push(lineLen * frac);
               xData.push(depthToUm(v));
@@ -188,20 +188,17 @@ export function useSlicePlot(args: {
         }
       }
     } else if (cloud) {
-      // --- フォールバック: 点群ベースの断面抽出 ---
-      let minY = cloud.y[0] * umPerPixelY;
+      // --- フォールバック: 点群ベースの断面抽出（3D表示と同じ換算の µm 座標で） ---
+      const pts = physicalPoints(cloud, dataSource, scale, flipX, flipRef);
+      let minY = pts.ys[0];
       let maxY = minY;
-      let minZ = cloud.z[0] * zUmPerSlice;
+      let minZ = pts.zs[0];
       let maxZ = minZ;
-      for (let i = 1; i < cloud.y.length; i++) {
-        const yum = cloud.y[i] * umPerPixelY;
-        if (yum < minY) minY = yum;
-        if (yum > maxY) maxY = yum;
-      }
-      for (let i = 1; i < cloud.z.length; i++) {
-        const zum = cloud.z[i] * zUmPerSlice;
-        if (zum < minZ) minZ = zum;
-        if (zum > maxZ) maxZ = zum;
+      for (let i = 1; i < pts.ys.length; i++) {
+        if (pts.ys[i] < minY) minY = pts.ys[i];
+        if (pts.ys[i] > maxY) maxY = pts.ys[i];
+        if (pts.zs[i] < minZ) minZ = pts.zs[i];
+        if (pts.zs[i] > maxZ) maxZ = pts.zs[i];
       }
       const tolerance = Math.max(maxY - minY, maxZ - minZ) * 0.02;
 
@@ -210,12 +207,12 @@ export function useSlicePlot(args: {
 
       const slicePoints: { t: number; x: number }[] = [];
       for (let i = 0; i < cloud.y.length; i++) {
-        const py = cloud.y[i] * umPerPixelY - y0;
-        const pz = cloud.z[i] * zUmPerSlice - z0;
+        const py = pts.ys[i] - y0;
+        const pz = pts.zs[i] - z0;
         const t = py * uy + pz * uz;
         const dist = Math.abs(py * uz - pz * uy);
         if (dist <= tolerance && t >= -tolerance && t <= lineLen + tolerance) {
-          slicePoints.push({ t, x: depthToUm(cloud.x[i]) });
+          slicePoints.push({ t, x: pts.xs[i] });
         }
       }
       slicePoints.sort((a, b) => a.t - b.t);
@@ -417,10 +414,10 @@ export function useSlicePlot(args: {
     cloud,
     sliceLineStart,
     sliceLineEnd,
-    sweepInterval,
-    umPerPixelX,
-    umPerPixelY,
+    dataSource,
+    scale,
     flipX,
+    flipRef,
     plotType,
     sliceMeasureMode,
     sliceMeasureStart,

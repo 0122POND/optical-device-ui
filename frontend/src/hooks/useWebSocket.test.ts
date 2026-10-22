@@ -154,6 +154,8 @@ describe("useWebSocket", () => {
     expect(args.applyCloudResult).toHaveBeenCalledWith(cloud, grid, {
       plotType: "scatter3d",
       source: "ai",
+      dataSource: "device",
+      origin: { kind: "folder", src: expect.objectContaining({ folderUrl: "/data/mask_result" }) },
       progress: { message: "AI推論完了 (cuda)", percent: 100 },
       clearLoading: "ai",
     });
@@ -176,6 +178,8 @@ describe("useWebSocket", () => {
     expect(args.applyCloudResult).toHaveBeenCalledWith(cloud, [], {
       plotType: "scatter3d",
       source: "tgv",
+      dataSource: "device",
+      origin: { kind: "folder", src: expect.objectContaining({ folderUrl: "/data/result" }) },
       progress: { message: "完了", percent: 100 },
       clearLoading: "acquire",
     });

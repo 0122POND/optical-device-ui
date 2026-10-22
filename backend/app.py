@@ -5,6 +5,7 @@ import asyncio
 import json
 import math
 import random
+import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,25 @@ app.add_middleware(
 
 # backendディレクトリから実行されることを想定し、親ディレクトリのdataを参照
 DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def _data_subpath(value: Any, default: Path) -> str:
+    """WebSocket で受け取ったフォルダ指定を data/ 配下に限定して絶対パスで返す。
+
+    出力先は処理の冒頭で中身ごと削除されるため（AI推論の shutil.rmtree など）、
+    クライアントから任意のパスを受け付けると data/ 外のフォルダを消しかねない。
+    """
+    raw = default if value in (None, "") else Path(str(value))
+    resolved = (raw if raw.is_absolute() else DATA_DIR / raw).resolve()
+    base = DATA_DIR.resolve()
+    if resolved != base and base not in resolved.parents:
+        raise ValueError(f"data/ 配下以外のフォルダは指定できません: {value}")
+    return str(resolved)
+
+
+def _natural_key(name: str):
+    """img_2 < img_10 < img_200 < img_1000 の順に並べるキー（数字部分を数値で比較）"""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
 # スレッドプール（画像処理用）
 executor = ThreadPoolExecutor(max_workers=2)
@@ -78,9 +98,10 @@ def _ensure_manifest(d: Path) -> None:
     manifest_path = d / "manifest.json"
     if manifest_path.exists():
         return
+    # 辞書順だと img_1000 が img_200 より前に来てスライス順が崩れるため自然順で並べる
     files = sorted(
-        f.name for f in d.iterdir()
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTS
+        (f.name for f in d.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS),
+        key=_natural_key,
     )
     if not files:
         return
@@ -207,8 +228,8 @@ async def ws_endpoint(ws: WebSocket):
                 {"step": step, "total": total, "message": message, "eta_sec": eta_sec, "percent": percent}
             )
 
-        input_dir = params.get("input_dir", str(DATA_DIR / "row_data"))
-        output_dir = params.get("output_dir", str(DATA_DIR / "mask_result"))
+        input_dir = _data_subpath(params.get("input_dir"), DATA_DIR / "row_data")
+        output_dir = _data_subpath(params.get("output_dir"), DATA_DIR / "mask_result")
         threshold = float(params.get("threshold", 0.5))
         model_type = params.get("model_type", "resnet34")
 
@@ -283,8 +304,9 @@ async def ws_endpoint(ws: WebSocket):
                 {"step": step, "total": total, "message": message}
             )
 
-        data_path = params.get("data_path", str(DATA_DIR / "row_data") + "/")
-        result_path = params.get("result_path", str(DATA_DIR / "result") + "/")
+        # 前処理モジュールは末尾スラッシュ付きのパスを前提にしている
+        data_path = _data_subpath(params.get("data_path"), DATA_DIR / "row_data") + "/"
+        result_path = _data_subpath(params.get("result_path"), DATA_DIR / "result") + "/"
         peak_threshold = int(params.get("peak_threshold", 10))
         use_gpu = params.get("use_gpu", True)
         algorithm = params.get("algorithm", "coin")

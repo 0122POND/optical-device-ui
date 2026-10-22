@@ -25,7 +25,7 @@ export function ResultTab({
   setEditingNameValue: (v: string) => void;
   renameEntry: (index: number, name: string) => void;
   setDeleteConfirmIdx: (v: number | null) => void;
-  onRestore: (cloud: PointCloud) => void;
+  onRestore: (entry: CloudHistoryEntry) => void;
 }) {
   return (
     <>
@@ -259,7 +259,7 @@ export function ResultTab({
                                 color: colors.text,
                                 cursor: "pointer",
                               }}
-                              onClick={() => onRestore(entry.cloud)}
+                              onClick={() => onRestore(entry)}
                             >
                               復元
                             </button>

@@ -146,3 +146,29 @@ describe("colorForValue", () => {
     for (const v of c) expect(Number.isFinite(v)).toBe(true);
   });
 });
+
+describe("自動レンジではレンジ外をグレーにしない", () => {
+  const withOutlier = [...Array.from({ length: 1000 }, (_, i) => i), 100000];
+
+  it("自動なら gray フラグは両側 false、手動で指定した側だけ true", () => {
+    expect(resolveColorRange(withOutlier, "", "")).toMatchObject({
+      grayBelow: false,
+      grayAbove: false,
+    });
+    expect(resolveColorRange(withOutlier, "", "500")).toMatchObject({
+      grayBelow: false,
+      grayAbove: true,
+    });
+  });
+
+  it("自動レンジのカラースケールにはグレー帯が付かず、上端は赤のまま", () => {
+    const out = buildClippedColorscale(resolveColorRange(withOutlier, "", ""));
+    expect(out.colorscale.some(([, c]) => c === OUT_OF_RANGE_COLOR)).toBe(false);
+    expect(out.colorscale.at(-1)![1]).toBe(COLOR_STOPS.at(-1)![1]);
+  });
+
+  it("colorForValue はグレーにしない側を端の色にクランプする", () => {
+    expect(colorForValue(11, 0, 10, { above: false })).toEqual([1, 0, 0]);
+    expect(colorForValue(-1, 0, 10, { below: false })).toEqual([0, 0, 1]);
+  });
+});
