@@ -11,7 +11,7 @@ import {
   type DataSource,
   type ScaleInputs,
 } from "../utils/units";
-import { bandSection, type BandSection } from "../utils/bandSection";
+import { bandSection, lineSection, type BandSection } from "../utils/bandSection";
 
 // 2D 断層グラフ（クリックで引いた線に沿った断面：距離×深さ）を sliceRef へ描画する。
 // グリッド(zData)がある場合はグリッド交点での線形補間、なければ点群ベースで抽出する。
@@ -89,7 +89,8 @@ export function useSlicePlot(args: {
     }
 
     const tData: number[] = [];
-    const xData: number[] = [];
+    // null は値なし（グラフの線はそこで切れる）
+    const xData: (number | null)[] = [];
     let band: BandSection | null = null;
 
     if (zData && zData.length > 0 && bandWidthUm > 0) {
@@ -99,105 +100,11 @@ export function useSlicePlot(args: {
       tData.push(...band.profT);
       xData.push(...band.profMed);
     } else if (zData && zData.length > 0) {
-      // --- グリッドベースの断面抽出（グリッド交点での線形補間） ---
-      // 3D表示と同じ換算・反転を施した µm グリッドから取る（表示と断面で値が一致する）
+      // --- 線の断面: 線に沿って一定間隔で双一次補間（3D表示と同じ換算・反転の µm グリッドから取る） ---
       const grid = physicalGrid(zData, dataSource, scale, flipX, flipRef).z;
-      const depthToUm = (v: number) => v;
-      const numRows = grid.length;
-      const numCols = grid[0].length;
-      // µm→グリッド添字へ逆変換
-      const y0Px = y0 / sc.col;
-      const z0Px = z0 / sc.row;
-      const y1Px = y1 / sc.col;
-      const z1Px = z1 / sc.row;
-      const dyPx = y1Px - y0Px;
-      const dzPx = z1Px - z0Px;
-
-      // 直線がグリッド線と交差する全ての点を収集
-      const crossings: { frac: number }[] = [];
-
-      // 始点・終点を追加
-      crossings.push({ frac: 0 });
-      crossings.push({ frac: 1 });
-
-      // 整数y（列境界）との交点
-      if (Math.abs(dyPx) > 1e-9) {
-        const yMin = Math.max(0, Math.min(Math.ceil(Math.min(y0Px, y1Px)), numCols - 1));
-        const yMax = Math.min(numCols - 1, Math.max(Math.floor(Math.max(y0Px, y1Px)), 0));
-        for (let yInt = yMin; yInt <= yMax; yInt++) {
-          const f = (yInt - y0Px) / dyPx;
-          if (f > 0 && f < 1) crossings.push({ frac: f });
-        }
-      }
-
-      // 整数z（行境界）との交点
-      if (Math.abs(dzPx) > 1e-9) {
-        const zMin = Math.max(0, Math.min(Math.ceil(Math.min(z0Px, z1Px)), numRows - 1));
-        const zMax = Math.min(numRows - 1, Math.max(Math.floor(Math.max(z0Px, z1Px)), 0));
-        for (let zInt = zMin; zInt <= zMax; zInt++) {
-          const f = (zInt - z0Px) / dzPx;
-          if (f > 0 && f < 1) crossings.push({ frac: f });
-        }
-      }
-
-      // frac順にソート
-      crossings.sort((a, b) => a.frac - b.frac);
-
-      // 各交点で線形補間して深度値を取得
-      for (const { frac } of crossings) {
-        const py = y0Px + dyPx * frac;
-        const pz = z0Px + dzPx * frac;
-        const col = Math.round(py);
-        const row = Math.round(pz);
-
-        // 直線の主方向に応じて補間方向を決定
-        if (Math.abs(dyPx) >= Math.abs(dzPx)) {
-          // y方向が主 → 同じrow内でcol間を線形補間
-          const c0 = Math.floor(py);
-          const c1 = c0 + 1;
-          const r = Math.min(Math.max(Math.round(pz), 0), numRows - 1);
-          if (c0 >= 0 && c1 < numCols) {
-            const v0 = grid[r]?.[c0];
-            const v1 = grid[r]?.[c1];
-            if (v0 != null && v1 != null) {
-              const val = v0 + (v1 - v0) * (py - c0);
-              tData.push(lineLen * frac);
-              xData.push(depthToUm(val));
-              continue;
-            }
-          }
-          // 端点はそのまま
-          if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
-            const v = grid[row]?.[col];
-            if (v != null) {
-              tData.push(lineLen * frac);
-              xData.push(depthToUm(v));
-            }
-          }
-        } else {
-          // z方向が主 → 同じcol内でrow間を線形補間
-          const r0 = Math.floor(pz);
-          const r1 = r0 + 1;
-          const c = Math.min(Math.max(Math.round(py), 0), numCols - 1);
-          if (r0 >= 0 && r1 < numRows) {
-            const v0 = grid[r0]?.[c];
-            const v1 = grid[r1]?.[c];
-            if (v0 != null && v1 != null) {
-              const val = v0 + (v1 - v0) * (pz - r0);
-              tData.push(lineLen * frac);
-              xData.push(depthToUm(val));
-              continue;
-            }
-          }
-          if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
-            const v = grid[row]?.[col];
-            if (v != null) {
-              tData.push(lineLen * frac);
-              xData.push(depthToUm(v));
-            }
-          }
-        }
-      }
+      const ls = lineSection(grid, sc.col, sc.row, sliceLineStart, sliceLineEnd);
+      tData.push(...ls.t);
+      xData.push(...ls.v);
     } else if (cloud) {
       // --- フォールバック: 点群ベースの断面抽出（3D表示と同じ換算の µm 座標で） ---
       const pts = physicalPoints(cloud, dataSource, scale, flipX, flipRef);
@@ -252,7 +159,7 @@ export function useSlicePlot(args: {
       }
     }
 
-    if (tData.length === 0) {
+    if (!xData.some((v) => v != null)) {
       Plotly.purge(sliceEl);
       return;
     }
@@ -311,15 +218,27 @@ export function useSlicePlot(args: {
       `(${y1.toFixed(0)},${z1.toFixed(0)}) µm  ` +
       (band
         ? `帯 ${bandWidthUm} µm・${band.count.toLocaleString()} 画素の中央値（帯 P10〜P90）`
-        : `${tData.length} pts`);
+        : `${xData.filter((v) => v != null).length} 点`);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const layout: any = {
-      title: titleText,
+      // Plotly 3 は文字列の title を受け付けない（以前は題が出ていなかった）
+      title: {
+        text: titleText,
+        font: { size: 12, color: colors.textMuted },
+        x: 0.01,
+        xanchor: "left",
+      },
       margin: { l: 50, r: 20, t: 40, b: 50 },
       xaxis: { title: { text: "距離 [µm]" }, color: colors.textMuted, gridcolor: colors.grid },
       yaxis: {
-        title: { text: sc.valueCalibrated ? "深さ [µm]" : "高さ [px・未校正]" },
+        title: {
+          text: !sc.valueCalibrated
+            ? "高さ [px・未校正]"
+            : dataSource === "device"
+              ? "深さ [µm]"
+              : "高さ [µm]",
+        },
         color: colors.textMuted,
         gridcolor: colors.grid,
       },
