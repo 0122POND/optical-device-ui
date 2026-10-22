@@ -341,13 +341,16 @@ function App() {
   // 測定履歴（最大5件）。データ管理は useCloudHistory に集約、UI状態(編集/削除)は App 保持
   const {
     history: cloudHistory,
+    usage: historyUsage,
     pushEntry,
     renameEntry,
     removeEntry,
+    clearHistory,
     loadEntry,
   } = useCloudHistory();
   // 表示中の履歴（一覧の「表示中」の印）
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  // 削除確認中の履歴の添字（-1 = すべて削除）
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
@@ -2684,6 +2687,7 @@ function App() {
                     flipRef={flipRef}
                     processing={processing}
                     history={cloudHistory}
+                    historyUsage={historyUsage}
                     currentHistoryId={currentHistoryId}
                     editingNameIdx={editingNameIdx}
                     setEditingNameIdx={setEditingNameIdx}
@@ -2938,7 +2942,9 @@ function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <p style={{ margin: "0 0 16px", fontSize: "14px", color: colors.text }}>
-              この測定履歴を削除しますか？
+              {deleteConfirmIdx === -1
+                ? "測定履歴をすべて削除しますか？（ブラウザに保存した分も消えます）"
+                : "この測定履歴を削除しますか？"}
             </p>
             <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
               <button
@@ -2952,7 +2958,8 @@ function App() {
                 className="tt-hover-strong"
                 style={modalButtonStyle("danger")}
                 onClick={() => {
-                  if (deleteConfirmIdx !== null) removeEntry(deleteConfirmIdx);
+                  if (deleteConfirmIdx === -1) clearHistory();
+                  else if (deleteConfirmIdx !== null) removeEntry(deleteConfirmIdx);
                   setDeleteConfirmIdx(null);
                 }}
               >

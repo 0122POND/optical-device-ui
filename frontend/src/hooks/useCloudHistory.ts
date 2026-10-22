@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloudHistoryEntry, DataOrigin } from "../types";
 import {
+  clearAll,
   decodeData,
   deleteEntry,
   encodeData,
   loadData,
   loadMetas,
   saveEntry,
+  storageUsage,
   updateMeta,
   type HistoryMeta,
 } from "../utils/historyStore";
@@ -16,8 +18,13 @@ export const MAX_HISTORY = 20;
 // 点群・高さマップをメモリに持っておく件数（それより古いものは復元時にブラウザの保存から読む）
 const KEEP_IN_MEMORY = 5;
 
-// 一覧の1件。full は復元に使う全データ（メモリにあるときだけ）。saved=ブラウザに保存済み
-export type HistoryItem = HistoryMeta & { full?: CloudHistoryEntry; saved?: boolean };
+// 一覧の1件。full は復元に使う全データ（メモリにあるときだけ）。saved=ブラウザに保存済み、
+// saveFailed=容量不足などで保存できなかった（この回だけの履歴。再読み込みで消える）
+export type HistoryItem = HistoryMeta & {
+  full?: CloudHistoryEntry;
+  saved?: boolean;
+  saveFailed?: boolean;
+};
 
 // 同じ結果フォルダを使う（後の計測・読込で画像が上書きされる）か
 function sharesFolder(a: DataOrigin, b: DataOrigin): boolean {
@@ -44,10 +51,19 @@ const metaFields = (e: MetaFields): MetaFields => ({
 const toSnapshot = (e: CloudHistoryEntry): CloudHistoryEntry =>
   e.origin?.kind === "folder" ? { ...e, origin: { kind: "snapshot", layers: e.origin.layers } } : e;
 
+// 履歴の id と保存時刻（並べ替え用）
+function newHistoryId(): { id: string; savedAt: number } {
+  const savedAt = Date.now();
+  return { id: `${savedAt}-${Math.random().toString(36).slice(2, 8)}`, savedAt };
+}
+
 // 測定履歴のデータ管理。追加・リネーム・削除・復元用の読み出しを提供する。
 // 編集中/削除確認などの UI 状態は呼び出し側（App）が保持する。
 export function useCloudHistory() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  // ブラウザに保存している量[バイト]（一覧に表示）
+  const [usage, setUsage] = useState<number | null>(null);
+  const refreshUsage = () => void storageUsage().then(setUsage);
   const historyRef = useRef<HistoryItem[]>([]);
   const commit = (next: HistoryItem[]) => {
     historyRef.current = next;
@@ -67,6 +83,7 @@ export function useCloudHistory() {
       merged.slice(MAX_HISTORY).forEach((h) => void deleteEntry(h.id));
       commit(merged.slice(0, MAX_HISTORY));
     });
+    refreshUsage();
     return () => {
       cancelled = true;
     };
@@ -74,8 +91,7 @@ export function useCloudHistory() {
 
   // 追加した履歴の id を返す（表示中の印に使う）
   const pushEntry = (entry: CloudHistoryEntry): string => {
-    const savedAt = Date.now();
-    const id = `${savedAt}-${Math.random().toString(36).slice(2, 8)}`;
+    const { id, savedAt } = newHistoryId();
     const meta: HistoryMeta = { ...metaFields(entry), id, savedAt };
     const prev = historyRef.current.map((h, i): HistoryItem => {
       // 同じ結果フォルダの古い履歴は、画像が上書きされるので「その時点の点」で戻すようにする
@@ -87,10 +103,29 @@ export function useCloudHistory() {
     const next = [{ ...meta, full: entry }, ...prev];
     next.slice(MAX_HISTORY).forEach((h) => void deleteEntry(h.id));
     commit(next.slice(0, MAX_HISTORY));
-    void saveEntry(meta, encodeData(entry)).then((ok) => {
-      if (ok) commit(historyRef.current.map((h) => (h.id === id ? { ...h, saved: true } : h)));
+    void saveWithEviction(meta, encodeData(entry)).then((ok) => {
+      commit(
+        historyRef.current.map((h) => (h.id === id ? { ...h, saved: ok, saveFailed: !ok } : h))
+      );
+      refreshUsage();
     });
     return id;
+  };
+
+  // 容量不足で保存できないときは、保存済みのいちばん古い履歴から消して入れ直す（最大3件まで）。
+  // 消した履歴は一覧からも外す（メモリに全データが無いと復元できなくなるため）
+  const saveWithEviction = async (
+    meta: HistoryMeta,
+    data: ReturnType<typeof encodeData>
+  ): Promise<boolean> => {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (await saveEntry(meta, data)) return true;
+      const oldest = [...historyRef.current].reverse().find((h) => h.saved && h.id !== meta.id);
+      if (!oldest) return false;
+      await deleteEntry(oldest.id);
+      commit(historyRef.current.filter((h) => h.id !== oldest.id));
+    }
+    return false;
   };
 
   const renameEntry = (index: number, name: string) => {
@@ -104,7 +139,13 @@ export function useCloudHistory() {
     const h = historyRef.current[index];
     if (!h) return;
     commit(historyRef.current.filter((_, i) => i !== index));
-    void deleteEntry(h.id);
+    void deleteEntry(h.id).then(refreshUsage);
+  };
+
+  // すべての履歴を消す（ブラウザの保存も）
+  const clearHistory = () => {
+    commit([]);
+    void clearAll().then(refreshUsage);
   };
 
   // 復元用の全データ（メモリに無ければブラウザの保存から読む）。読めなければ null
@@ -115,5 +156,5 @@ export function useCloudHistory() {
     return { ...metaFields(item), ...decodeData(d) };
   };
 
-  return { history, pushEntry, renameEntry, removeEntry, loadEntry };
+  return { history, usage, pushEntry, renameEntry, removeEntry, clearHistory, loadEntry };
 }
