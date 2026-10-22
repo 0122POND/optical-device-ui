@@ -16,6 +16,8 @@ import numpy as np
 from PIL import Image
 
 import torch
+
+import depth_export
 import segmentation_models_pytorch as smp
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -302,6 +304,8 @@ def run_ai_inference(
     total_images = len(image_paths)
     output_files = []
     mask_data = []
+    # 行ごとの縞位置（確率加重重心、サブピクセル）。結果フォルダに depth_grid.f32 として書く
+    depth_rows = []
     inference_start_time = None
 
     with torch.no_grad():
@@ -374,6 +378,7 @@ def run_ai_inference(
 
             output_files.append(out_name)
             mask_data.append(binary_mask)
+            depth_rows.append(depth_export.row_centroid_depth(binary_mask > 0, pred_prob_crop))
 
     # Step 6: manifest.json 生成
     progress_callback(5, 6, "manifest.json を生成中...", percent=92)
@@ -382,6 +387,24 @@ def run_ai_inference(
     manifest_path = os.path.join(output_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    # サブピクセルの深さと処理条件（画像サイズが揃っていないときは深さファイルを出さない）
+    same_size = len({len(r) for r in depth_rows}) == 1
+    depth_grid = np.stack(depth_rows) if depth_rows and same_size else None
+    depth_export.write(
+        output_dir,
+        depth_grid,
+        depth_export.build_meta(
+            depth_grid,
+            source="ai_inference",
+            model_type=model_type,
+            threshold=threshold,
+            device=str(device),
+            input_dir=input_dir,
+            files=output_files,
+            depth_method="prob_centroid" if depth_grid is not None else None,
+        ),
+    )
 
     # PNGエンコード（メモリキャッシュ用）
     progress_callback(6, 6, "結果を準備中...", percent=95)

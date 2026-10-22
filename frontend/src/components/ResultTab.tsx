@@ -1,11 +1,12 @@
 import { colors, fontFamily, monoFont } from "../utils/constants";
 import { panelSectionStyle, sectionTitleStyle } from "../utils/styles";
-import type { CloudHistoryEntry, HistorySource, ViewMode } from "../types";
+import type { CloudHistoryEntry, HistorySource, ProcessingInfo, ViewMode } from "../types";
 import type { PointCloud } from "../utils/pointCloud";
 
 // サイドパネル「測定結果」タブ：現在の点群情報と測定履歴（リネーム/復元/削除）
 export function ResultTab({
   cloud,
+  processing,
   viewMode,
   history,
   editingNameIdx,
@@ -17,6 +18,8 @@ export function ResultTab({
   onRestore,
 }: {
   cloud: PointCloud | null;
+  // 表示中データの処理条件と深さの求め方（計測・推論・マスク読込のとき。CSV では null）
+  processing: ProcessingInfo;
   viewMode: ViewMode;
   history: CloudHistoryEntry[];
   editingNameIdx: number | null;
@@ -65,6 +68,9 @@ export function ResultTab({
           計測データがありません
         </div>
       )}
+
+      {/* 処理条件（バックエンドの depth_meta.json） */}
+      {cloud && processing && <ProcessingSection processing={processing} />}
 
       {/* 測定履歴 */}
       {history.length > 0 && (
@@ -292,5 +298,75 @@ export function ResultTab({
         </section>
       )}
     </>
+  );
+}
+
+// 処理条件の1行
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "12.5px" }}
+    >
+      <span style={{ color: colors.textMuted, whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontFamily: monoFont, textAlign: "right", wordBreak: "break-all" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// 処理条件と深さの求め方。同じデータでも結果が変わる条件（CPU/GPU 等）の注意書きもここに出す
+function ProcessingSection({ processing }: { processing: NonNullable<ProcessingInfo> }) {
+  const m = processing.meta;
+  const depth =
+    processing.depthSource === "subpixel"
+      ? m?.depth_method === "prob_centroid"
+        ? "サブピクセル（確率加重重心）"
+        : "サブピクセル（3点放物線）"
+      : "画素の重心（従来）";
+  const rows: [string, string][] = [["深さの求め方", depth]];
+  if (m?.source === "preprocess") {
+    if (m.algorithm) rows.push(["アルゴリズム", m.algorithm]);
+    if (m.use_gpu != null) rows.push(["処理", m.use_gpu ? "GPU" : "CPU"]);
+    if (m.blur?.sweep_sigma != null)
+      rows.push(["ブラー σ（掃引 / 面内）", `${m.blur.sweep_sigma} / ${m.blur.xy_sigma ?? "—"}`]);
+    if (m.peak_threshold != null) rows.push(["ピークしきい値", String(m.peak_threshold)]);
+  } else if (m?.source === "ai_inference") {
+    if (m.model_type) rows.push(["モデル", m.model_type]);
+    if (m.threshold != null) rows.push(["しきい値", String(m.threshold)]);
+    if (m.device) rows.push(["デバイス", m.device]);
+  }
+  if (m?.created_at) rows.push(["処理日時", m.created_at.replace("T", " ").slice(0, 19)]);
+  return (
+    <section style={panelSectionStyle}>
+      <h3 style={sectionTitleStyle}>処理条件</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        {rows.map(([k, v]) => (
+          <InfoRow key={k} label={k} value={v} />
+        ))}
+      </div>
+      {m?.note && (
+        <div
+          style={{
+            marginTop: "10px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            backgroundColor: colors.primarySoft,
+            color: colors.primary,
+            fontSize: "11.5px",
+            lineHeight: 1.6,
+          }}
+        >
+          {m.note}
+        </div>
+      )}
+      {!m && (
+        <div
+          style={{ marginTop: "8px", fontSize: "11.5px", color: colors.textDim, lineHeight: 1.6 }}
+        >
+          処理条件の記録（depth_meta.json）が無いフォルダです。
+        </div>
+      )}
+    </section>
   );
 }

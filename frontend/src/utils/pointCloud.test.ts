@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   densePointsFromGrid,
+  depthGridFromBuffer,
   extractRowLayers,
   sampledPointsFromGrid,
   samplePointCloud,
@@ -161,5 +162,19 @@ describe("extractRowLayers", () => {
     const r = extractRowLayers(data, width, height, 128);
     expect(r.row).toEqual([2, null]);
     expect(r.multiRows).toBe(1);
+  });
+});
+
+describe("depthGridFromBuffer", () => {
+  it("float32 リトルエンディアンの [フレーム, 行] を高さマップにし、NaN は null", () => {
+    const f = new Float32Array([1.25, NaN, 3.5, 4.75, 5, NaN]);
+    expect(depthGridFromBuffer(f.buffer, [2, 3])).toEqual([
+      [1.25, null, 3.5],
+      [4.75, 5, null],
+    ]);
+  });
+
+  it("大きさが合わなければエラー（呼び出し側は画像の重心にフォールバックする）", () => {
+    expect(() => depthGridFromBuffer(new Float32Array(3).buffer, [2, 3])).toThrow();
   });
 });
