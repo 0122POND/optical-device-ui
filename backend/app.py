@@ -48,13 +48,15 @@ def _data_subpath(value: Any, default: Path) -> str:
 
     出力先は処理の冒頭で中身ごと削除されるため（AI推論の shutil.rmtree など）、
     クライアントから任意のパスを受け付けると data/ 外のフォルダを消しかねない。
+    判定は ".." を畳んだ見かけのパスで行い、シンボリックリンクはたどらない
+    （data/row_data を外付けドライブへのリンクにしている場合などを拒否しないため）。
     """
     raw = default if value in (None, "") else Path(str(value))
-    resolved = (raw if raw.is_absolute() else DATA_DIR / raw).resolve()
-    base = DATA_DIR.resolve()
-    if resolved != base and base not in resolved.parents:
-        raise ValueError(f"data/ 配下以外のフォルダは指定できません: {value}")
-    return str(resolved)
+    base = Path(os.path.normpath(os.path.abspath(DATA_DIR)))
+    target = Path(os.path.normpath(os.path.abspath(raw if raw.is_absolute() else DATA_DIR / raw)))
+    if target != base and base not in target.parents:
+        raise ValueError(f"data/ 配下以外のフォルダは指定できません: {raw}")
+    return str(target)
 
 
 def _preprocess_note(algorithm: str, use_gpu: bool, has_depth: bool) -> Optional[str]:

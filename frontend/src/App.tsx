@@ -305,6 +305,9 @@ function App() {
   const [dataOrigin, setDataOrigin] = useState<DataOrigin>(null);
   // 表示中データの処理条件と深さの求め方（結果タブに表示）
   const [processing, setProcessing] = useState<ProcessingInfo>(null);
+  // AI の確率マップから抜き出し直すときのしきい値（null=推論時のマスクのまま）と、点群の色分け
+  const [aiThreshold, setAiThreshold] = useState<number | null>(null);
+  const [pointColorBy, setPointColorBy] = useState<"depth" | "confidence">("depth");
 
   // 表示タイプ（scatter3d: 点群 / surface: サーフェス）
   const [plotType, setPlotType] = useState<PlotType>("scatter3d");
@@ -399,6 +402,8 @@ function App() {
     // （以前は WebSocket 経路で更新されず、計測後も前の CSV が three に出ていた）
     setDataOrigin(opts.origin);
     setProcessing(opts.processing ?? null);
+    setAiThreshold(null);
+    setPointColorBy("depth");
     setStatus("COMPLETE");
     if (opts.progress) {
       setProgressMessage(opts.progress.message);
@@ -438,8 +443,10 @@ function App() {
     },
     onStatus: (value) => setStatus(value),
     onError: (kind, msg) => {
-      if (kind === "ai") setIsLoadingAI(false);
-      else setIsAcquiring(false); // acquire / generic とも取得中フラグを下ろす
+      // generic（サーバーの error 型）は AI 推論中にも届くので、どちらのフラグも下ろす
+      // （以前は AI 推論中のサーバーエラーで「AI推論中...」の表示が消えなかった）
+      if (kind === "ai" || kind === "generic") setIsLoadingAI(false);
+      if (kind === "acquire" || kind === "generic") setIsAcquiring(false);
       setStatus("READY");
       if (kind !== "generic") setShowPlot(false); // generic(error型)は従来どおり非表示にしない
       alert(
@@ -540,6 +547,57 @@ function App() {
     return () => clearTimeout(timer);
   }, [showPlot, showSlice, sidePanelVisible]);
 
+  // --- AI の確率マップ（推論をやり直さずにしきい値を変える・信頼度で色分けする） ---
+  const aiMeta =
+    processing?.meta?.source === "ai_inference" && processing.meta.prob_dir
+      ? processing.meta
+      : null;
+  const probDir = aiMeta?.prob_dir ?? null;
+  const fromProb =
+    !!probDir && dataOrigin?.kind === "folder" && dataOrigin.src.folderUrl.endsWith(`/${probDir}`);
+  // 信頼度は確率マップから作った点群（c=確率）のときだけ意味を持つ
+  const effectivePointColorBy = pointColorBy === "confidence" && fromProb ? "confidence" : "depth";
+  // 再抽出 effect から最新の元データを読むための ref（依存に入れると再抽出のたびに再実行されてしまう）
+  const aiCtxRef = useRef<{ meta: typeof aiMeta; origin: DataOrigin }>({
+    meta: null,
+    origin: null,
+  });
+  useEffect(() => {
+    aiCtxRef.current = { meta: aiMeta, origin: dataOrigin };
+  });
+  useEffect(() => {
+    if (aiThreshold == null) return;
+    const { meta, origin } = aiCtxRef.current;
+    if (!meta?.prob_dir || origin?.kind !== "folder") return;
+    let cancelled = false;
+    // スライダーを動かしている間は待ち、止まってから抜き出す
+    const timer = window.setTimeout(async () => {
+      const base = origin.src.folderUrl.replace(new RegExp(`/${meta.prob_dir}$`), "");
+      const src: FolderSource = {
+        ...origin.src,
+        folderUrl: `${base}/${meta.prob_dir}`,
+        threshold: Math.round(aiThreshold * 255),
+        colorMode: "intensity",
+      };
+      try {
+        // 確率マップは画素値=確率なので、しきい値超えの区間の「輝度加重重心」がそのまま確率加重重心になる
+        const r = await buildPointCloudFromFolder(src);
+        if (cancelled) return;
+        setCloud(r.cloud);
+        setZData(r.grid);
+        setDataOrigin({ kind: "folder", src, layers: r.layers });
+        setProcessing({ meta, depthSource: "prob", threshold: aiThreshold });
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) alert(`確率マップの読み込みに失敗しました: ${(e as Error).message}`);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [aiThreshold]);
+
   // --- メイン3D/2D描画（plotRef へ。pointGeom・クリック・寸法ドラッグ・カメラ保持を内包） ---
   usePlotly({
     plotRef,
@@ -553,6 +611,7 @@ function App() {
     renderPointsWithThree: pointEngine === "three",
     renderSurfaceWithThree: surfaceEngine === "three",
     depthExaggeration,
+    pointColorBy: effectivePointColorBy,
     cloud,
     flipX,
     viewMode,
@@ -1219,6 +1278,7 @@ function App() {
                     flipX={flipX}
                     flipRef={flipRef}
                     depthExaggeration={depthExaggeration}
+                    colorBy={effectivePointColorBy}
                     viewPreset={viewPreset}
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
@@ -1987,6 +2047,74 @@ function App() {
                             </div>
                           )}
 
+                          {/* AI の確率マップがあるとき: しきい値の変更と信頼度での色分け */}
+                          {aiMeta && (
+                            <div style={settingRowStyle}>
+                              <span
+                                style={rowLabelStyle}
+                                title="推論をやり直さずに、確率マップから縞を抜き出し直す"
+                              >
+                                しきい値（AI）
+                              </span>
+                              <div
+                                style={{
+                                  width: "190px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <input
+                                  type="range"
+                                  min={Math.max(0.05, aiMeta.prob_min ?? 0.05)}
+                                  max={0.95}
+                                  step={0.05}
+                                  value={aiThreshold ?? aiMeta.threshold ?? 0.5}
+                                  onChange={(e) => setAiThreshold(parseFloat(e.target.value))}
+                                  style={{ flex: 1, minWidth: 0, accentColor: colors.primary }}
+                                />
+                                <span
+                                  style={{
+                                    width: "40px",
+                                    textAlign: "right",
+                                    fontFamily: monoFont,
+                                    fontSize: "12px",
+                                    color: colors.text,
+                                  }}
+                                >
+                                  {(aiThreshold ?? aiMeta.threshold ?? 0.5).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                          {aiMeta && plotType === "scatter3d" && (
+                            <div style={settingRowStyle}>
+                              <span style={rowLabelStyle}>色分け</span>
+                              <div style={{ ...segmentGroupStyle, width: "190px" }}>
+                                {(["depth", "confidence"] as const).map((mode) => (
+                                  <button
+                                    key={mode}
+                                    className="tt-hover"
+                                    onClick={() => {
+                                      setPointColorBy(mode);
+                                      // 信頼度は確率マップの点群で塗るので、まだなら推論時のしきい値で作る
+                                      if (mode === "confidence" && !fromProb)
+                                        setAiThreshold(aiMeta.threshold ?? 0.5);
+                                    }}
+                                    style={segmentButtonStyle(effectivePointColorBy === mode)}
+                                    title={
+                                      mode === "confidence"
+                                        ? "AI の確率（0〜1）で色分けする。低い（青い）ところは検出が怪しい"
+                                        : "高さ（奥行き）で色分けする"
+                                    }
+                                  >
+                                    {mode === "depth" ? "高さ" : "信頼度"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* 奥行きの強調（点群表示のとき）。層が重なった構造を引き離して見るため */}
                           {plotType === "scatter3d" && viewMode === "3D" && (
                             <div style={settingRowStyle}>
@@ -2318,6 +2446,7 @@ function App() {
                       setDataName(entry.dataName);
                       setDataOrigin(entry.origin);
                       setProcessing(entry.processing);
+                      setAiThreshold(entry.processing?.threshold ?? null);
                       setShowPlot(true);
                     }}
                   />

@@ -51,7 +51,11 @@ export type { FolderSource };
 // 計測・推論の処理条件と、高さマップの深さの求め方（結果タブに表示する）
 export type ProcessingInfo = {
   meta: DepthMeta | null;
-  depthSource: "subpixel" | "centroid";
+  // subpixel=バックエンドのサブピクセル値 / centroid=結果画像の重心 /
+  // prob=AI の確率マップからアプリでしきい値を変えて抜き出し直したもの（確率加重重心）
+  depthSource: "subpixel" | "centroid" | "prob";
+  // depthSource=prob のときに使ったしきい値（0〜1）
+  threshold?: number;
 } | null;
 
 // 測定履歴の1エントリ。復元時に表示を丸ごと戻せるよう、高さマップ・表示タイプ・

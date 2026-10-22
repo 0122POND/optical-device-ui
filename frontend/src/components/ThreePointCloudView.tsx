@@ -11,6 +11,16 @@ const AUTO_ROTATE_SPEED = 2.5;
 
 // 深さ配列に対しカラーレンジ（手動 or 自動ロバスト）を解決し、色バッファへ
 // 書き込む（手動で指定した側のレンジ外だけグレー）
+// 信頼度（AI の確率 0〜255 を 0〜1 に）で色バッファを塗る
+function fillConfidence(c: number[], arr: Float32Array) {
+  for (let i = 0; i < c.length; i++) {
+    const [r, g, b] = colorForValue(c[i] / 255, 0, 1);
+    arr[i * 3] = r;
+    arr[i * 3 + 1] = g;
+    arr[i * 3 + 2] = b;
+  }
+}
+
 function fillColors(depthUm: Float64Array, arr: Float32Array, min: string, max: string) {
   const range = resolveColorRange(depthUm, min, max);
   for (let i = 0; i < depthUm.length; i++) {
@@ -37,6 +47,8 @@ export function ThreePointCloudView(props: {
   depthExaggeration?: number;
   // 視点のプリセット（正面・側面・上面・既定）
   viewPreset?: ViewPresetRequest;
+  // 色分け（confidence は cloud.c = AI の確率で塗る）
+  colorBy?: "depth" | "confidence";
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
   colorRangeMin: string;
   colorRangeMax: string;
@@ -52,6 +64,7 @@ export function ThreePointCloudView(props: {
     flipRef,
     depthExaggeration = 1,
     viewPreset = null,
+    colorBy = "depth",
     colorRangeMin,
     colorRangeMax,
     isBuilding,
@@ -78,6 +91,9 @@ export function ThreePointCloudView(props: {
   const rangeRef = useRef({ min: colorRangeMin, max: colorRangeMax });
   // 奥行き強調の最新値（ジオメトリ再構築 effect の依存に入れずに読むため）
   const depthExRef = useRef(depthExaggeration);
+  // 色分けの最新値（ジオメトリ再構築 effect の依存に入れずに読むため）
+  const colorByRef = useRef(colorBy);
+  colorByRef.current = colorBy;
   depthExRef.current = depthExaggeration;
   rangeRef.current = { min: colorRangeMin, max: colorRangeMax };
 
@@ -193,7 +209,8 @@ export function ThreePointCloudView(props: {
       if (zu > maxZu) maxZu = zu;
     }
 
-    fillColors(depthUm, col, rangeRef.current.min, rangeRef.current.max);
+    if (colorByRef.current === "confidence") fillConfidence(cloud.c, col);
+    else fillColors(depthUm, col, rangeRef.current.min, rangeRef.current.max);
 
     // 原点中心化（大きな µm 座標での精度・カメラ設定を安定させる）
     const cx = (minX + maxXu) / 2;
@@ -281,14 +298,15 @@ export function ThreePointCloudView(props: {
     st.points.scale.x = st.depthBase * depthExaggeration;
   }, [depthExaggeration]);
 
-  // カラーレンジ変更時は色バッファのみ更新（ジオメトリ・カメラは維持）
+  // カラーレンジ・色分けの変更時は色バッファのみ更新（ジオメトリ・カメラは維持）
   useEffect(() => {
     const st = stateRef.current;
     if (!st?.points || !st.depthUm) return;
     const attr = st.points.geometry.getAttribute("color") as THREE.BufferAttribute;
-    fillColors(st.depthUm, attr.array as Float32Array, colorRangeMin, colorRangeMax);
+    if (colorBy === "confidence" && cloud) fillConfidence(cloud.c, attr.array as Float32Array);
+    else fillColors(st.depthUm, attr.array as Float32Array, colorRangeMin, colorRangeMax);
     attr.needsUpdate = true;
-  }, [colorRangeMin, colorRangeMax]);
+  }, [colorRangeMin, colorRangeMax, colorBy, cloud]);
 
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 5 }}>

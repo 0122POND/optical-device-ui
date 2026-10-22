@@ -245,6 +245,9 @@ export type DepthMeta = {
   device?: string;
   input_dir?: string;
   note?: string;
+  // AI の確率マップ（0〜255 の PNG）を置いたサブフォルダ名と、0 として捨てた下限
+  prob_dir?: string;
+  prob_min?: number;
 };
 
 // depth_grid.f32（float32 リトルエンディアン、[フレーム数, 行数]、欠損は NaN）を高さマップの行に変換する
