@@ -917,6 +917,7 @@ function App() {
   // --- プロット操作（フローティングツールバーから呼ぶ） ---
   const {
     dragMode,
+    zoomRequest,
     handleZoom,
     handleDragMode,
     viewPreset,
@@ -1075,6 +1076,8 @@ function App() {
                     depthExaggeration={depthExaggeration}
                     colorBy={effectivePointColorBy}
                     viewPreset={viewPreset}
+                    dragMode={dragMode}
+                    zoomRequest={zoomRequest}
                     colorRangeMin={colorRangeMin}
                     colorRangeMax={colorRangeMax}
                     isBuilding={isBuildingThree}
@@ -1099,6 +1102,8 @@ function App() {
                       autoRotate={autoRotate}
                       onAutoRotateChange={setAutoRotate}
                       viewPreset={viewPreset}
+                      dragMode={dragMode}
+                      zoomRequest={zoomRequest}
                     />
                   )}
 

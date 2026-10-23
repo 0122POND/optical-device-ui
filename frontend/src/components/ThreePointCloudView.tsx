@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { colorForValue, resolveColorRange } from "../utils/colorRange";
 import type { PointCloud } from "../utils/pointCloud";
-import type { ViewPresetRequest } from "../types";
+import type { ViewPresetRequest, DragMode, ZoomRequest } from "../types";
 import { physicalPoints, type DataSource, type ScaleInputs } from "../utils/units";
 
 // 自動回転の速さ（OrbitControls.autoRotateSpeed 単位。2.0 ≒ 60fpsで1周30秒）
@@ -47,6 +47,9 @@ export function ThreePointCloudView(props: {
   depthExaggeration?: number;
   // 視点のプリセット（正面・側面・上面・既定）
   viewPreset?: ViewPresetRequest;
+  // 左ドラッグの操作（pan=平行移動、それ以外=回転。右ドラッグは常に平行移動）とズーム要求
+  dragMode?: DragMode;
+  zoomRequest?: ZoomRequest;
   // 色分け（confidence は cloud.c = AI の確率で塗る）
   colorBy?: "depth" | "confidence";
   // カラーレンジの手動指定（µm, 空文字=自動）。レンジ外はグレー表示
@@ -64,6 +67,8 @@ export function ThreePointCloudView(props: {
     flipRef,
     depthExaggeration = 1,
     viewPreset = null,
+    dragMode = "turntable",
+    zoomRequest = null,
     colorBy = "depth",
     colorRangeMin,
     colorRangeMax,
@@ -86,6 +91,9 @@ export function ThreePointCloudView(props: {
   // 自動回転の最新状態。描画ループ（マウント時に1回だけ生成）から参照するため ref に持つ
   const rotateRef = useRef(false);
   rotateRef.current = !!autoRotate;
+  // 左ドラッグの操作。視点プリセットで controls を作り直しても効くよう、描画ループで毎回反映する
+  const panRef = useRef(false);
+  panRef.current = dragMode === "pan";
   // カラーレンジの最新値。ジオメトリ再構築effectの依存に入れずに読むための ref
   // （依存に入れるとレンジ入力のたびに再構築＋カメラリセットが起きる）
   const rangeRef = useRef({ min: colorRangeMin, max: colorRangeMax });
@@ -128,6 +136,7 @@ export function ThreePointCloudView(props: {
       // 視点プリセットで OrbitControls を作り直すことがあるので、常に最新の controls を使う
       const ctl = stateRef.current?.controls ?? controls;
       ctl.autoRotate = rotateRef.current;
+      ctl.mouseButtons.LEFT = panRef.current ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
       ctl.autoRotateSpeed = AUTO_ROTATE_SPEED;
       ctl.update();
       renderer.render(scene, camera);
@@ -290,6 +299,18 @@ export function ThreePointCloudView(props: {
     controls.update();
     st.controls = controls;
   }, [viewPreset]);
+
+  // ツールバーのズーム: 注視点までの距離を factor 倍にする（表示する前に押された分は適用しない）
+  const zoomSeenRef = useRef(zoomRequest?.n ?? 0);
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st || !zoomRequest || zoomRequest.n <= zoomSeenRef.current) return;
+    zoomSeenRef.current = zoomRequest.n;
+    const { camera, controls } = st;
+    const off = camera.position.clone().sub(controls.target).multiplyScalar(zoomRequest.factor);
+    camera.position.copy(controls.target).add(off);
+    controls.update();
+  }, [zoomRequest]);
 
   // 奥行き強調だけが変わったときはスケールのみ更新（ジオメトリ・カメラは維持）
   useEffect(() => {

@@ -84,3 +84,6 @@ export type ViewPresetRequest = { kind: ViewPresetKind; n: number } | null;
 
 // Plotly 3D のドラッグ操作（パン／ターンテーブル回転／自由回転）
 export type DragMode = "pan" | "turntable" | "orbit";
+
+// ツールバーのズーム要求（three.js 表示へ渡す。同じ倍率の連打でも反映されるよう通し番号付き）
+export type ZoomRequest = { factor: number; n: number } | null;
