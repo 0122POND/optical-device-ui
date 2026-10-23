@@ -1,7 +1,14 @@
 import { useState } from "react";
 import type { RefObject } from "react";
 import Plotly from "plotly.js-dist-min";
-import type { DragMode, PlotType, ViewMode, ViewPresetKind, ViewPresetRequest } from "../types";
+import type {
+  DragMode,
+  PlotType,
+  ViewMode,
+  ViewPresetKind,
+  ViewPresetRequest,
+  ZoomRequest,
+} from "../types";
 
 // プロット操作（フローティングツールバーから呼ぶ）: ズーム・ドラッグモード・視点のプリセット・視点リセット・画像保存
 export function usePlotControls(args: {
@@ -13,8 +20,13 @@ export function usePlotControls(args: {
   const { plotRef, plotType, viewMode, setAutoRotate } = args;
   // ドラッグモード（pan / turntable / orbit）
   const [dragMode, setDragMode] = useState<DragMode>("turntable");
+  // パンを解除したときに戻す回転モード
+  const [lastRotate, setLastRotate] = useState<Exclude<DragMode, "pan">>("turntable");
+  // three.js 表示へのズーム要求（Plotly のシーンが無いときはこちらで拡大・縮小する）
+  const [zoomRequest, setZoomRequest] = useState<ZoomRequest>(null);
 
   const handleZoom = (factor: number) => {
+    setZoomRequest((p) => ({ factor, n: (p?.n ?? 0) + 1 }));
     const el = plotRef.current;
     if (!el) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,11 +44,15 @@ export function usePlotControls(args: {
     }
   };
 
+  // パンは押すたびに入／切（切ると直前の回転モードに戻る）。回転の2つは選んだほうになる
   const handleDragMode = (mode: DragMode) => {
+    const next: DragMode = mode === "pan" && dragMode === "pan" ? lastRotate : mode;
+    if (next !== "pan") setLastRotate(next);
+    setDragMode(next);
     const el = plotRef.current;
-    if (!el) return;
-    setDragMode(mode);
-    Plotly.relayout(el, { "scene.dragmode": mode });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!el || !(el as any)._fullLayout?.scene) return; // three.js 表示中は props で渡す
+    Plotly.relayout(el, { "scene.dragmode": next });
   };
 
   // 視点のプリセット要求（three.js 表示へ渡す。同じ向きの連打でも反映されるよう通し番号付き）
@@ -139,6 +155,7 @@ export function usePlotControls(args: {
 
   return {
     dragMode,
+    zoomRequest,
     handleZoom,
     handleDragMode,
     viewPreset,

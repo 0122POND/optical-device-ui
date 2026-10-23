@@ -12,7 +12,7 @@ import {
   type Detrend,
   type MeshColormap,
 } from "../utils/surfaceMesh";
-import type { ViewPresetRequest } from "../types";
+import type { DragMode, ViewPresetRequest, ZoomRequest } from "../types";
 
 // 自動回転の角速度[°/s]（15°/s ≒ 24秒で1周。Plotly側の usePlotlyAutoRotate と揃える）
 const SPIN_DEG_PER_SEC = 15;
@@ -53,6 +53,9 @@ export function ThreeSurfaceMeshView(props: {
   onAutoRotateChange?: (on: boolean) => void;
   // 視点のプリセット（正面・側面・上面・既定）
   viewPreset?: ViewPresetRequest;
+  // 左ドラッグの操作（pan=平行移動、それ以外=回転。右ドラッグは常に平行移動）とズーム要求
+  dragMode?: DragMode;
+  zoomRequest?: ZoomRequest;
 }) {
   const {
     grid,
@@ -106,6 +109,8 @@ export function ThreeSurfaceMeshView(props: {
   // 描画ループ（マウント時に1回だけ生成）から最新値を読むための ref
   const rotateRef = useRef(false);
   rotateRef.current = !!autoRotate;
+  const panRef = useRef(false);
+  panRef.current = props.dragMode === "pan";
   const zExRef = useRef(zEx);
   zExRef.current = zEx;
 
@@ -228,6 +233,7 @@ export function ThreeSurfaceMeshView(props: {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       if (st.mesh) st.mesh.scale.set(1, 1, zExRef.current);
+      controls.mouseButtons.LEFT = panRef.current ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
       if (!st.auto) {
         idle += dt;
         controls.update();
@@ -387,6 +393,23 @@ export function ThreeSurfaceMeshView(props: {
     st.cam = { az: v.az, el: v.el, dist: st.homeDist, target: new THREE.Vector3() };
     st.auto = true;
   }, [viewPreset]);
+
+  // ツールバーのズーム: 注視点までの距離を factor 倍にする（表示する前に押された分は適用しない）
+  const zoomRequest = props.zoomRequest;
+  const zoomSeenRef = useRef(zoomRequest?.n ?? 0);
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st || !zoomRequest || zoomRequest.n <= zoomSeenRef.current) return;
+    zoomSeenRef.current = zoomRequest.n;
+    // 自動回転中は球座標の距離を、手動操作中はカメラ位置を縮める（どちらも次のフレームで反映）
+    st.cam.dist *= zoomRequest.factor;
+    const { camera, controls } = st;
+    const off = camera.position.clone().sub(controls.target).multiplyScalar(zoomRequest.factor);
+    camera.position.copy(controls.target).add(off);
+    camera.near = off.length() / 200;
+    camera.far = off.length() * 20;
+    camera.updateProjectionMatrix();
+  }, [zoomRequest]);
 
   const panel: React.CSSProperties = {
     position: "absolute",
