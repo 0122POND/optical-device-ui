@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tori-Ton UI ユーザーマニュアル</title>
+<style>
+  :root{
+    --ink:#1a1a1a; --sub:#6b7280; --line:#d9dce1; --line-soft:#ebedf0;
+    --head:#0f2236; --accent:#34506e; --fig:#9aa3ad; --fig-bg:#fafbfc;
+    --note:#f4f6f8; --pin:#d9822b;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  body{
+    margin:0; background:#fff; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+    font-size:15px; line-height:1.85; font-feature-settings:"palt";
+  }
+  .page{max-width:860px; margin:0 auto; padding:64px 28px 120px;}
+
+  /* 文書ヘッダー */
+  .cover{border-bottom:3px solid var(--head); padding-bottom:20px; margin-bottom:8px;}
+  .cover .kicker{font-size:12px; letter-spacing:.18em; color:var(--sub); margin:0 0 8px;}
+  .cover h1{font-size:25px; font-weight:700; color:var(--head); margin:0; letter-spacing:.01em;}
+  .cover .sub{color:var(--sub); font-size:14px; margin:8px 0 0;}
+  .meta{display:grid; grid-template-columns:76px 1fr; gap:2px 16px; margin:18px 0 0; font-size:12.5px; color:var(--sub);}
+  .meta b{color:var(--ink); font-weight:600;}
+  .meta a{color:var(--accent);}
+
+  /* 目次 */
+  .toc{border:1px solid var(--line); border-radius:6px; padding:18px 24px; margin:28px 0;}
+  .toc .t{font-size:12px; letter-spacing:.14em; color:var(--sub); margin:0 0 10px;}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:36px;}
+  .toc li{margin:3px 0; font-size:13.5px;}
+  .toc a{color:var(--accent); text-decoration:none;}
+  .toc a:hover{text-decoration:underline;}
+
+  h2{font-size:18px; color:var(--head); margin:52px 0 12px; padding-bottom:7px;
+    border-bottom:1px solid var(--line); font-weight:700;}
+  h2 .n{color:var(--accent); font-weight:700; margin-right:.5em;}
+  h3{font-size:14.5px; color:var(--ink); margin:26px 0 6px; font-weight:700;}
+  h3 .n{color:var(--sub); font-weight:600; margin-right:.4em;}
+  h4{font-size:13.5px; color:var(--ink); margin:18px 0 4px; font-weight:700;}
+  p{margin:8px 0;}
+  ul,ol{margin:8px 0; padding-left:22px;} li{margin:3px 0;}
+  a{color:var(--accent);}
+
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:13.5px;}
+  caption{caption-side:top; text-align:left; color:var(--sub); font-size:12.5px; margin-bottom:6px;}
+  th,td{border:1px solid var(--line); padding:7px 11px; text-align:left; vertical-align:top;}
+  th{background:#f3f5f7; font-weight:600; color:var(--head);}
+  td code, p code, li code{background:#f3f5f7; border-radius:3px; padding:1px 5px; font-size:12.5px;}
+  td.c{text-align:center; white-space:nowrap;}
+
+  /* ボタン名の表記 */
+  .btn{display:inline-block; border:1px solid var(--line); background:#f8f9fa; border-radius:4px;
+    padding:0 7px; font-size:12.5px; line-height:1.7; color:var(--head); white-space:nowrap;}
+
+  /* 図（スクショ）枠 */
+  figure{margin:18px 0;}
+  figure img{width:100%; border:1px solid var(--line); border-radius:6px; display:block;}
+  figcaption{font-size:12.5px; color:var(--sub); margin-top:7px;}
+  figure.narrow img{max-width:420px; margin-left:auto; margin-right:auto;}
+  figure.narrow figcaption{text-align:center;}
+  figure.mid img{max-width:660px; margin-left:auto; margin-right:auto;}
+  figure.mid figcaption{text-align:center;}
+  figure.native img{width:auto; max-width:100%; margin-left:auto; margin-right:auto;}
+  figure.native figcaption{text-align:center;}
+  figcaption b{color:var(--ink); font-weight:600;}
+
+  /* 図の上の番号（画面のどこかを指す） */
+  .pinned{position:relative;}
+  .pin{position:absolute; transform:translate(-50%,-50%); width:22px; height:22px; border-radius:50%;
+    background:var(--pin); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center;
+    justify-content:center; box-shadow:0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,.35);}
+  .pinned.below{padding-bottom:30px;}
+  .pinned.below .pin{top:auto; bottom:0; transform:translate(-50%,0);}
+  .num{display:inline-flex; width:19px; height:19px; border-radius:50%; background:var(--pin); color:#fff;
+    font-size:11px; font-weight:700; align-items:center; justify-content:center; vertical-align:1px;}
+
+  /* フロー図 */
+  .flow{display:flex; gap:8px; align-items:stretch; margin:16px 0; flex-wrap:wrap;}
+  .flow .step{flex:1 1 0; min-width:120px; border:1px solid var(--line); border-radius:6px;
+    padding:10px 12px; background:var(--fig-bg);}
+  .flow .step .label{font-size:10.5px; letter-spacing:.1em; color:var(--sub); margin-bottom:3px;}
+  .flow .step .name{font-size:13px; font-weight:700; color:var(--head); line-height:1.5;}
+  .flow .step .desc{font-size:11.5px; color:var(--sub); line-height:1.6; margin-top:3px;}
+
+  .note{background:var(--note); border:1px solid var(--line-soft); border-radius:6px;
+    padding:10px 14px; margin:12px 0; font-size:13px; color:#374151;}
+  .note::before{content:"メモ"; display:block; font-weight:700; font-size:11px;
+    letter-spacing:.08em; color:var(--sub); margin-bottom:3px;}
+  .warn{background:#fffaf2; border:1px solid #f0dcc0; border-radius:6px;
+    padding:10px 14px; margin:12px 0; font-size:13px; color:#5c4318;}
+  .warn::before{content:"ご注意"; display:block; font-weight:700; font-size:11px;
+    letter-spacing:.08em; color:#8a6d3b; margin-bottom:3px;}
+  .key{background:#fffbeb; border-left:3px solid #b45309; border-radius:0 6px 6px 0;
+    padding:10px 14px; margin:14px 0; font-size:13.5px;}
+  .key::before{content:"重要"; display:block; font-weight:700; font-size:11px;
+    letter-spacing:.08em; color:#92400e; margin-bottom:3px;}
+  .note p,.warn p,.key p{margin:4px 0;}
+
+  .steps{counter-reset:s; list-style:none; padding-left:0;}
+  .steps>li{counter-increment:s; position:relative; padding-left:34px; margin:10px 0;}
+  .steps>li::before{content:counter(s); position:absolute; left:0; top:1px; width:22px; height:22px;
+    background:var(--head); color:#fff; border-radius:50%; font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;}
+
+  /* ターミナル */
+  pre.term{background:#111827; color:#e5e7eb; border-radius:6px; padding:12px 16px; font-size:12.5px;
+    line-height:1.6; overflow-x:auto; margin:12px 0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  pre.term .p{color:#9ca3af;} pre.term .ok{color:#86efac;} pre.term .dim{color:#6b7280;}
+
+  footer{margin-top:72px; padding-top:16px; border-top:1px solid var(--line);
+    color:var(--sub); font-size:12px;}
+
+  @media (max-width:640px){
+    .page{padding:36px 16px 80px;}
+    .toc ol{columns:1;}
+    .pin{width:18px; height:18px; font-size:10px;}
+  }
+  @media print{
+    .page{padding:0;}
+    h2,h3,h4{break-after:avoid; page-break-after:avoid;}
+    figure,.flow,.note,.warn,.key,tr,caption,pre{break-inside:avoid; page-break-inside:avoid;}
+    thead{display:table-header-group;}
+    .toc{break-after:page; page-break-after:page;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="cover">
+  <p class="kicker">USER MANUAL</p>
+  <h1>Tori-Ton UI ユーザーマニュアル</h1>
+  <p class="sub">光学デバイス（干渉計測）で求めた面形状を、表示・測定・保存するための操作ガイド</p>
+  <div class="meta">
+    <span>対象</span><span><b>装置で計測する方・結果を見る方</b>（開発者向けの詳細は <a href="../UI仕様書.md">UI仕様書</a>）</span>
+    <span>版</span><span>第1版 / 2026-10-24（main の PR #148 時点の画面）</span>
+    <span>関連資料</span><span><a href="../デプロイ手順.md">デプロイ手順</a>（初回のセットアップ） ／ <a href="../UI仕様書.md">UI仕様書</a>（画面の仕様・既知の制約）</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <p class="t">目次</p>
+  <ol>
+    <li><a href="#s1">このアプリでできること</a></li>
+    <li><a href="#s2">起動と終了</a></li>
+    <li><a href="#s3">操作手順</a></li>
+    <li><a href="#s4">ボタンの早見表</a></li>
+    <li><a href="#s5">設定タブ</a></li>
+    <li><a href="#s6">結果を読むときの注意</a></li>
+    <li><a href="#s7">困ったとき</a></li>
+    <li><a href="#s8">付録</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="s1"><span class="n">1</span>このアプリでできること</h2>
+
+<h3><span class="n">1.1</span>一言でいうと</h3>
+<p>
+  装置で撮った干渉画像から <b>物の表面の凹凸（高さマップ）</b> を求め、ブラウザで立体的に見ながら、
+  <b>長さ・断面・高さのばらつき</b> を測って保存するアプリです。
+  他の測定器（Keyence・WI5000 など）の高さマップ CSV を読み込んで、同じように見ることもできます。
+</p>
+
+<h3><span class="n">1.2</span>入力と出力</h3>
+<div class="flow">
+  <div class="step">
+    <div class="label">INPUT</div>
+    <div class="name">干渉画像 または CSV</div>
+    <div class="desc">装置の撮影画像（<code>data/row_data/</code>）／高さマップ CSV／点群形式 CSV</div>
+  </div>
+  <div class="step">
+    <div class="label">PROCESS</div>
+    <div class="name">計測（画像処理 or AI）</div>
+    <div class="desc">各画像の各行で縞の位置を求め、高さマップにする。CSV はそのまま表示</div>
+  </div>
+  <div class="step">
+    <div class="label">OUTPUT</div>
+    <div class="name">表示・測定値・ファイル</div>
+    <div class="desc">3D/2D 表示、距離・寸法・断面、統計、CSV・PNG 画像、測定履歴</div>
+  </div>
+</div>
+
+<h3><span class="n">1.3</span>作業の全体像（5 ステップ）</h3>
+<div class="flow">
+  <div class="step"><div class="label">STEP 1</div><div class="name">起動する</div><div class="desc"><code>start_mac.sh</code> を実行（2章）</div></div>
+  <div class="step"><div class="label">STEP 2</div><div class="name">データを出す</div><div class="desc">計測する／CSV を読み込む（3.1）</div></div>
+  <div class="step"><div class="label">STEP 3</div><div class="name">見る</div><div class="desc">回す・寄る・真上から見る（3.2）</div></div>
+  <div class="step"><div class="label">STEP 4</div><div class="name">測る・整える</div><div class="desc">距離・寸法・断面・統計、外れ値の除去（3.3〜3.4）</div></div>
+  <div class="step"><div class="label">STEP 5</div><div class="name">保存する</div><div class="desc">CSV・画像・測定履歴（3.5）</div></div>
+</div>
+
+<h3><span class="n">1.4</span>画面の見方</h3>
+<figure>
+  <div class="pinned">
+    <img src="images/fig02_overview.jpg" alt="画面全体（10円玉の高さマップを3D表示）">
+    <span class="pin" style="left:27.8%;top:3.5%">1</span>
+    <span class="pin" style="left:95.5%;top:3.5%">2</span>
+    <span class="pin" style="left:13.9%;top:17%">3</span>
+    <span class="pin" style="left:32.6%;top:17%">4</span>
+    <span class="pin" style="left:75.6%;top:17%">5</span>
+    <span class="pin" style="left:88.9%;top:17%">6</span>
+    <span class="pin" style="left:40%;top:40%">7</span>
+    <span class="pin" style="left:74.4%;top:72%">8</span>
+    <span class="pin" style="left:26.5%;top:96.4%">9</span>
+  </div>
+  <figcaption>図 1　画面全体（10円玉の高さマップ CSV を読み込んで 3D で表示したところ）</figcaption>
+</figure>
+<table>
+  <tr><th style="width:56px">番号</th><th style="width:170px">場所</th><th>中身</th></tr>
+  <tr><td class="c"><span class="num">1</span></td><td>表示中のデータ</td><td>ファイル名（計測ならフォルダ名）、高さマップの大きさ（行 × 列）、<b>有効率</b>（値がある画素の割合）。右側に最新撮影の日時と測定回数</td></tr>
+  <tr><td class="c"><span class="num">2</span></td><td>状態</td><td><code>READY</code>（待機中）／<code>RUNNING</code>（計測中）／<code>COMPLETE</code>（表示中）</td></tr>
+  <tr><td class="c"><span class="num">3</span></td><td>ツールバー</td><td>3D/2D の切り替え、画像保存、ズーム、パン、回転、視点リセット（3.2・4章）</td></tr>
+  <tr><td class="c"><span class="num">4</span></td><td>視点のプリセット</td><td>正面・側面・上面へ一発で向きを変える（3D のときだけ）</td></tr>
+  <tr><td class="c"><span class="num">5</span></td><td>パネルを隠す</td><td>右のサイドパネルを隠してプロットを全幅にする。もう一度押すと戻る</td></tr>
+  <tr><td class="c"><span class="num">6</span></td><td>サイドパネル</td><td>「設定」「操作」「測定結果」の 3 つのタブ。ふだん使うのは <b>操作</b> タブ</td></tr>
+  <tr><td class="c"><span class="num">7</span></td><td>プロット</td><td>面（Surface）または点群（Point Cloud）の表示。ドラッグで回転、ホイールでズーム</td></tr>
+  <tr><td class="c"><span class="num">8</span></td><td>色バー</td><td>色と高さの対応。ドラッグで好きな位置に動かせる。範囲は設定タブで変えられる（5章）</td></tr>
+  <tr><td class="c"><span class="num">9</span></td><td>情報チップ</td><td>描画モード・エンジン、データの出どころ（CSV／デバイス）、ピッチ（1画素あたりの長さ）</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="s2"><span class="n">2</span>起動と終了</h2>
+
+<h3><span class="n">2.1</span>動作環境</h3>
+<table>
+  <tr><th style="width:150px">項目</th><th>内容</th></tr>
+  <tr><td>PC</td><td>Mac（セットアップ済みのもの）。初めて使う PC は <a href="../デプロイ手順.md">デプロイ手順</a> の「初回セットアップ」を先に済ませてください</td></tr>
+  <tr><td>ブラウザ</td><td>Chrome を推奨（起動すると既定のブラウザが自動で開きます）</td></tr>
+  <tr><td>画面サイズ</td><td>横 1440 × 縦 900 以上を推奨。狭い画面ではサイドパネルを隠すとプロットが広くなります</td></tr>
+  <tr><td>計測するとき</td><td>装置の撮影画像を <code>data/row_data/</code> に置いておきます（CSV を見るだけなら不要）</td></tr>
+</table>
+
+<h3><span class="n">2.2</span>起動する</h3>
+<ol class="steps">
+  <li>「ターミナル」を開き、アプリのフォルダへ移動します。
+    <pre class="term"><span class="p">%</span> cd ~/Documents/optical-device-ui</pre>
+  </li>
+  <li><code>start_mac.sh</code> を実行します。
+    <pre class="term"><span class="p">%</span> ./start_mac.sh
+========================================
+  3D Surface Measurement UI
+========================================
+[1/2] バックエンドを起動しています...
+<span class="ok">INFO:     Uvicorn running on http://0.0.0.0:8000</span>
+[2/2] フロントエンドを起動しています...
+<span class="ok">  VITE v7.x  ready</span>
+<span class="dim">  ➜  Local:   http://localhost:5173/</span>
+<span class="ok">WebSocket connected</span></pre>
+  </li>
+  <li>数秒でブラウザが開き、次の画面が出れば起動完了です。右上の状態が <code>READY</code> になっていることを確かめてください。
+    <figure>
+      <img src="images/fig01_start.jpg" alt="起動直後の画面">
+      <figcaption>図 2　起動直後の画面（データはまだ無い）</figcaption>
+    </figure>
+  </li>
+</ol>
+<div class="note">
+  <p>ターミナルに <code>GET /json/version ... 404 Not Found</code> や <code>GET / ... 404 Not Found</code> と出ることがありますが、ブラウザの開発ツールなどが問い合わせているだけで、<b>動作には関係ありません</b>。</p>
+  <p>ブラウザが開かないときは、自分で <code>http://localhost:5173</code> を開いてください。</p>
+</div>
+
+<h3><span class="n">2.3</span>終了する</h3>
+<p>起動したターミナルで <span class="btn">Ctrl</span> + <span class="btn">C</span> を押します。ターミナルを閉じてしまったときは、別のターミナルで <code>./stop_mac.sh</code> を実行すると止まります。</p>
+<div class="note">
+  <p>測定履歴（3.5）はブラウザに保存されているので、終了しても消えません。</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s3"><span class="n">3</span>操作手順</h2>
+
+<h3><span class="n">3.1</span>STEP 2：データを出す</h3>
+<p>データの出し方は 4 通りです。どれも右の <b>操作</b> タブから行います。</p>
+<table>
+  <tr><th style="width:150px">やりたいこと</th><th style="width:140px">ボタン</th><th>説明</th></tr>
+  <tr><td>装置で計測する</td><td><span class="btn">▶ 計測開始</span></td><td><code>data/row_data/</code> の画像を画像処理で解析します。ふだんはこちら</td></tr>
+  <tr><td>AI で計測する</td><td><span class="btn">AI計測</span></td><td>同じ画像を AI（学習済みモデル）で解析します。縞が見えにくい画像に強い</td></tr>
+  <tr><td>CSV を見る</td><td><span class="btn">CSV読込</span></td><td>高さマップ CSV（Keyence・WI5000・このアプリで書き出したもの）や点群形式 CSV を開きます</td></tr>
+  <tr><td>前回の AI 結果を見る</td><td><span class="btn">マスク</span></td><td>直近の AI 計測の結果（<code>data/mask_result/</code>）を開きます</td></tr>
+</table>
+
+<h4>装置で計測する</h4>
+<ol class="steps">
+  <li><span class="btn">アルゴリズム</span> が「硬貨」になっていることを確かめます（押すと選択画面が出ます。いまは「硬貨」だけ選べます）。</li>
+  <li><span class="btn">CPU</span> / <span class="btn">GPU</span> を選びます。<b>Mac では CPU</b> を使います。</li>
+  <li><span class="btn">▶ 計測開始</span> を押し、確認で <span class="btn">はい</span> を押します。</li>
+  <li>プロットに進み具合（工程・経過時間）が出ます。終わると自動で点群が表示されます。</li>
+</ol>
+<div class="flow" style="align-items:flex-start">
+  <figure class="native" style="flex:1 1 0; margin:0">
+    <img src="images/fig04_algorithm.jpg" alt="アルゴリズムの選択">
+    <figcaption>図 3　アルゴリズムの選択</figcaption>
+  </figure>
+  <figure class="native" style="flex:1 1 0; margin:0">
+    <img src="images/fig05_confirm.jpg" alt="計測開始の確認">
+    <figcaption>図 4　計測開始の確認</figcaption>
+  </figure>
+</div>
+<figure class="mid">
+  <img src="images/fig06_progress.jpg" alt="計測中の表示">
+  <figcaption>図 5　計測中。<b>中止</b> で途中で止められる</figcaption>
+</figure>
+<div class="note">
+  <p><span class="btn">中止</span> を押すと、区切りのよいところ（画像処理は工程ごと、AI は 1 枚ごと）で止まります。AI を中止したときは途中までの結果は残りません。</p>
+</div>
+
+<h4>CSV を読み込む</h4>
+<ol class="steps">
+  <li><span class="btn">CSV読込</span> を押してファイルを選びます。</li>
+  <li>読み込むと面（Surface）で表示されます。<b>ピッチ（1画素あたりの長さ）を確認</b>してください。左下のチップに出ています。</li>
+  <li>ピッチが違うときは、設定タブの「CSV（高さマップ）」で直します（5章）。目安は自社デバイス 10 µm、WI5000 約 37.4 µm、Keyence 約 32.9 µm です。</li>
+</ol>
+<div class="note">
+  <p>このアプリで書き出した CSV は、ファイル名にピッチと高さの単位が入っている（例: <code>…_pitch10x10um_zum.csv</code>）ので、読み込むと自動で設定に反映されます。</p>
+</div>
+
+<h3><span class="n">3.2</span>STEP 3：見る</h3>
+
+<h4>マウスでの操作</h4>
+<table>
+  <tr><th style="width:190px">操作</th><th>動き</th></tr>
+  <tr><td>左ドラッグ</td><td>回転（ツールバーでパンを選んでいるときは平行移動）</td></tr>
+  <tr><td>右ドラッグ（three.js 表示）</td><td>平行移動</td></tr>
+  <tr><td>ホイール</td><td>ズーム</td></tr>
+  <tr><td>カーソルを載せる</td><td>その点の座標と高さを表示</td></tr>
+</table>
+
+<h4>ツールバー</h4>
+<figure class="native">
+  <div class="pinned below" style="display:inline-block; max-width:100%">
+    <img src="images/fig03_toolbar.jpg" alt="ツールバー" style="border-radius:6px">
+    <span class="pin" style="left:8%">1</span>
+    <span class="pin" style="left:19%">2</span>
+    <span class="pin" style="left:29.6%">3</span>
+    <span class="pin" style="left:35.7%">4</span>
+    <span class="pin" style="left:41.8%">5</span>
+    <span class="pin" style="left:48%">6</span>
+    <span class="pin" style="left:53.9%">7</span>
+    <span class="pin" style="left:60%">8</span>
+    <span class="pin" style="left:66%">9</span>
+    <span class="pin" style="left:83.9%">10</span>
+  </div>
+  <figcaption>図 6　プロット左上のツールバー（番号は 4.1 の表と対応）</figcaption>
+</figure>
+<p>よく使うのは次の 3 つです。</p>
+<ul>
+  <li><b>2D</b>（<span class="num">2</span>）… 真上から見た表示。高さは色で読みます。寸法・断層（3.3）は 2D で使います。</li>
+  <li><b>パン</b>（<span class="num">6</span>）… 押すと左ドラッグが平行移動になります。<b>もう一度押すと回転に戻ります</b>。</li>
+  <li><b>視点リセット</b>（<span class="num">9</span>）… 向き・ズーム・位置を最初に戻します。<b>迷ったらこれ</b>。</li>
+</ul>
+<div class="warn">
+  <p>Plotly 表示のパンは、マウスの動きより大きく動きます。面が画面の外へ出て「消えた」ように見えたら、視点リセット（<span class="num">9</span>）を押してください。</p>
+</div>
+
+<h4>描画モードとエンジン（操作タブ「表示」）</h4>
+<table>
+  <tr><th style="width:150px">項目</th><th>選べるもの</th></tr>
+  <tr><td>描画モード</td><td><b>Surface</b>（面でつないで表示）／<b>Point Cloud</b>（点の集まりで表示）</td></tr>
+  <tr><td>エンジン</td><td><b>Plotly</b>（既定。軸と目盛り付き、ホバーで値が読める）／<b>three.js</b>（なめらかで速い。点群は高密度、面は CAD 風の陰影付きメッシュ）</td></tr>
+  <tr><td>軸</td><td>軸と目盛りの表示・非表示</td></tr>
+  <tr><td>左右反転</td><td>CSV では左右の鏡映。装置の計測データでは <b>深さの反転</b>（意味が違うので注意）</td></tr>
+  <tr><td>自動回転</td><td>3D をターンテーブルのように回し続けます（展示向け）</td></tr>
+  <tr><td>奥行きの強調</td><td>点群のとき。奥行き方向の見た目だけを ×0.5〜×20 に伸ばします（値は変わりません）。ダブルクリックで ×1</td></tr>
+</table>
+<div class="flow" style="align-items:flex-start">
+  <figure style="flex:1 1 0; margin:0; min-width:240px">
+    <img src="images/fig15_mesh.jpg" alt="three.js のメッシュ表示">
+    <figcaption>図 7　Surface × three.js（左上のパネルで高さの強調・色・前処理を変えられる）</figcaption>
+  </figure>
+  <figure style="flex:1 1 0; margin:0; min-width:240px">
+    <img src="images/fig16_points.jpg" alt="three.js の点群表示">
+    <figcaption>図 8　Point Cloud × three.js（高密度の点群）</figcaption>
+  </figure>
+</div>
+
+<h3><span class="n">3.3</span>STEP 4：測る</h3>
+<p>操作タブの一番下「計測ツール」に 3 つの道具があります。押すとオン、もう一度押すとオフです。</p>
+
+<h4>距離（3D・2D）</h4>
+<ol class="steps">
+  <li><span class="btn">距離</span> を押します。</li>
+  <li>プロット上で 2 点をクリックすると、2 点を結ぶ線と距離が出ます。両端の座標はサイドパネルに出ます。</li>
+</ol>
+<figure class="mid">
+  <img src="images/fig17_distance.jpg" alt="距離の計測">
+  <figcaption>図 9　距離の計測（3D でクリックした 2 点の間）</figcaption>
+</figure>
+<div class="note"><p>値の無いところ（黒く抜けた欠損）をクリックしても点は打てません。</p></div>
+
+<h4>寸法（2D）</h4>
+<ol class="steps">
+  <li>ツールバーで <span class="btn">2D</span> にしてから <span class="btn">寸法</span> を押します。両矢印が 1 本出ます。</li>
+  <li>矢印の端をドラッグして、測りたい 2 点に合わせます。<span class="btn">Shift</span> を押しながらドラッグすると水平・垂直に固定できます。</li>
+  <li>距離と ΔX・ΔY がサイドパネルに出ます。<span class="btn">＋ 寸法線を追加</span> で何本でも引けます（× で削除）。</li>
+</ol>
+<figure>
+  <img src="images/fig12_dimension.jpg" alt="寸法の計測">
+  <figcaption>図 10　寸法の計測（2D）。数値の箱はドラッグで動かせる</figcaption>
+</figure>
+
+<h4>断層（2D）— 断面を見る</h4>
+<ol class="steps">
+  <li><span class="btn">2D</span> にしてから <span class="btn">断層</span> を押すと、下に断面のパネルが出ます。</li>
+  <li>プロット上で 2 点をクリックすると、その線に沿った断面が出ます。3 点目をクリックすると引き直しです。値の無いところにも点を打てます。</li>
+  <li><b>帯の幅</b> を選びます。<span class="btn">線</span> は線の上の値だけ、<span class="btn">200 µm</span>〜<span class="btn">1000 µm</span> は線の両側の幅の中を全部集めて横から見ます（線＝中央値、薄い帯＝ばらつき P10〜P90）。</li>
+</ol>
+<figure>
+  <img src="images/fig10_slice.jpg" alt="断層の表示">
+  <figcaption>図 11　断層（帯の幅 500 µm）。上の 2D で引いた線の断面が下に出る</figcaption>
+</figure>
+<p><b>断面の上で長さと段差を測る：</b> 断面パネル右上の <span class="btn">距離計測</span> を押し、グラフ上で 2 点をクリックすると、距離と Δ深さ（高さの差）が出ます。端の点はドラッグで動かせます。</p>
+<figure>
+  <img src="images/fig11_slice_measure.jpg" alt="断面上の距離計測">
+  <figcaption>図 12　断面上の距離計測（距離 854.68 µm、Δ深さ 8.91 µm）</figcaption>
+</figure>
+
+<h4>統計（測定結果タブ）</h4>
+<p><b>測定結果</b> タブに、表示中のデータの統計が出ます。</p>
+<div class="flow" style="align-items:flex-start">
+  <figure class="native" style="flex:0 0 auto; margin:0">
+    <img src="images/fig14_result.jpg" alt="測定結果タブ">
+    <figcaption>図 13　測定結果タブ（左＝統計、右＝測定履歴）</figcaption>
+  </figure>
+  <div style="flex:1 1 260px; font-size:13.5px">
+    <table style="margin-top:0">
+      <tr><th>項目</th><th>意味</th></tr>
+      <tr><td>有効率</td><td>値のある画素の割合。全体・中央50%×50%・中央面積50% の 3 通り</td></tr>
+      <tr><td>平均 ± 標準偏差</td><td>高さの平均とばらつき</td></tr>
+      <tr><td>最小〜最大、P1〜P99</td><td>高さの範囲（P1〜P99 は極端な 1% ずつを除いた範囲）</td></tr>
+      <tr><td>平面除去後 Sq / Sa</td><td>傾きを引いたあとの凹凸の大きさ（二乗平均平方根 / 平均絶対値）</td></tr>
+    </table>
+  </div>
+</div>
+
+<h3><span class="n">3.4</span>STEP 4：整える（後処理）</h3>
+<p>操作タブの「後処理」で、飛び出た値（外れ値）を取り除いたり、抜けた行を埋めたりできます。元のデータは変わらないので、<span class="btn">なし</span> に戻せばいつでも元どおりです。</p>
+<table>
+  <tr><th style="width:150px">項目</th><th>内容</th></tr>
+  <tr><td>外れ値の除去</td><td><span class="btn">なし</span> / <span class="btn">3σ</span> / <span class="btn">4σ</span>。数字が小さいほど多く取り除きます。迷ったら 3σ</td></tr>
+  <tr><td>外れ値の基準</td><td><b>近傍</b>（既定）… 周りと比べて突き出た点だけを取る。凹凸や段差は残る／<b>全体</b> … 面全体と比べる。起伏の大きい面では本物の凹凸まで消えることがある</td></tr>
+  <tr><td>走査方向の補間</td><td>走査の行の抜け（8 行以下）を周りの値で埋めます</td></tr>
+  <tr><td>補った画素の印</td><td>埋めた画素をマゼンタ色で区別します（<span class="btn">隠す</span> で非表示）</td></tr>
+</table>
+<figure>
+  <img src="images/fig13_postprocess.jpg" alt="後処理">
+  <figcaption>図 14　外れ値の除去（3σ・近傍）と走査方向の補間。マゼンタが補った画素</figcaption>
+</figure>
+<div class="key">
+  <p><b>補った値は実測ではありません。</b> 精度を評価する（正解データと比べる）ときは、後処理を「なし」にした元のデータを使ってください。</p>
+</div>
+
+<h3><span class="n">3.5</span>STEP 5：保存する</h3>
+<table>
+  <tr><th style="width:150px">保存するもの</th><th style="width:150px">操作</th><th>中身</th></tr>
+  <tr><td>高さマップ（CSV）</td><td>操作タブ <span class="btn">CSV出力</span></td><td>表示中の高さマップを µm で書き出します（左右反転・後処理も反映）。ファイル名にピッチと単位が入るので、読み込み直すと設定が戻ります</td></tr>
+  <tr><td>画像（PNG）</td><td>ツールバー <span class="num">3</span></td><td>今の見た目を 1920×1080 の PNG（黒背景）で保存します</td></tr>
+  <tr><td>測定履歴</td><td>自動</td><td>計測・読み込みのたびに、最新 20 件をこのブラウザに自動で保存します</td></tr>
+</table>
+
+<h4>CSV のファイル名</h4>
+<p>書き出したファイル名の末尾で、条件がわかるようになっています。</p>
+<table>
+  <tr><th style="width:220px">付く文字</th><th>意味</th></tr>
+  <tr><td><code>_pitch10x10um</code></td><td>ピッチ（列 10 µm × 行 10 µm）</td></tr>
+  <tr><td><code>_zum</code> / <code>_zpx</code></td><td>高さの単位（µm／画素）</td></tr>
+  <tr><td><code>_hampel3</code> / <code>_mad3</code></td><td>外れ値の除去（近傍 3σ／全体 3σ）</td></tr>
+  <tr><td><code>_interp</code></td><td>走査方向の補間あり</td></tr>
+</table>
+
+<h4>測定履歴を使う</h4>
+<ul>
+  <li><b>測定結果</b> タブの下のほうに履歴が並びます（図 13 右）。<span class="btn">復元</span> で、そのときの表示に戻せます。</li>
+  <li>名前をクリックすると名前を変えられます。<span class="btn">削除</span> で 1 件、<span class="btn">すべて削除</span> で全部消します。</li>
+  <li>履歴は <b>このブラウザの中だけ</b> に保存されます。別の PC やブラウザには引き継がれないので、残したい結果は CSV で書き出してください。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s4"><span class="n">4</span>ボタンの早見表</h2>
+
+<h3><span class="n">4.1</span>ツールバー（図 6）</h3>
+<table>
+  <tr><th style="width:56px">番号</th><th style="width:150px">ボタン</th><th>働き</th></tr>
+  <tr><td class="c"><span class="num">1</span></td><td>3D</td><td>立体で表示</td></tr>
+  <tr><td class="c"><span class="num">2</span></td><td>2D</td><td>真上から表示（寸法・断層はここで使う）</td></tr>
+  <tr><td class="c"><span class="num">3</span></td><td>画像保存</td><td>PNG（1920×1080、黒背景）で保存</td></tr>
+  <tr><td class="c"><span class="num">4</span></td><td>ズームイン</td><td>寄る</td></tr>
+  <tr><td class="c"><span class="num">5</span></td><td>ズームアウト</td><td>引く</td></tr>
+  <tr><td class="c"><span class="num">6</span></td><td>パン</td><td>左ドラッグで平行移動。もう一度押すと回転に戻る</td></tr>
+  <tr><td class="c"><span class="num">7</span></td><td>回転（ターンテーブル）</td><td>上下を保ったまま回す（既定）</td></tr>
+  <tr><td class="c"><span class="num">8</span></td><td>回転（自由回転）</td><td>どの向きにも回せる（three.js では 7 と同じ動き）</td></tr>
+  <tr><td class="c"><span class="num">9</span></td><td>視点リセット</td><td>向き・ズーム・位置を最初に戻す</td></tr>
+  <tr><td class="c"><span class="num">10</span></td><td>正面・側面・上面</td><td>決まった向きから見る（3D のときだけ）</td></tr>
+</table>
+
+<h3><span class="n">4.2</span>操作タブ</h3>
+<figure class="native">
+  <img src="images/fig07_operate.jpg" alt="操作タブ">
+  <figcaption>図 15　操作タブ（左＝上半分、右＝下半分）</figcaption>
+</figure>
+<table>
+  <tr><th style="width:110px">区画</th><th style="width:170px">ボタン</th><th>働き</th></tr>
+  <tr><td rowspan="4">計測</td><td>アルゴリズム</td><td>解析のやり方を選ぶ（いまは「硬貨」のみ）</td></tr>
+  <tr><td>CPU / GPU</td><td>計算に使う部品。Mac は CPU</td></tr>
+  <tr><td>▶ 計測開始</td><td>画像処理で計測（3.1）</td></tr>
+  <tr><td>AI計測</td><td>AI で計測（3.1）</td></tr>
+  <tr><td rowspan="3">ファイル</td><td>CSV読込</td><td>CSV を開く</td></tr>
+  <tr><td>マスク</td><td>直近の AI 計測の結果を開く</td></tr>
+  <tr><td>CSV出力</td><td>表示中の高さマップを CSV で保存（3.5）</td></tr>
+  <tr><td>後処理</td><td>外れ値の除去・補間</td><td>3.4 を参照（高さマップがあるときだけ出る）</td></tr>
+  <tr><td rowspan="3">表示</td><td>軸・左右反転・自動回転</td><td>3.2 を参照</td></tr>
+  <tr><td>描画モード・エンジン</td><td>Surface / Point Cloud、Plotly / three.js</td></tr>
+  <tr><td>しきい値（AI）・色分け</td><td>AI の結果のときだけ出る。しきい値を動かすと計測し直さずに縞を抜き出し直す。点群のとき色分けを「信頼度」にすると、AI が自信のない所が青くなる</td></tr>
+  <tr><td>計測ツール</td><td>距離・寸法・断層</td><td>3.3 を参照</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="s5"><span class="n">5</span>設定タブ</h2>
+<p>長さの換算と色の範囲を決めます。設定はブラウザに保存され、次に開いたときも残ります。いま効いている区画には <b>表示中</b> の印が付きます。</p>
+<figure class="native">
+  <img src="images/fig08_settings.jpg" alt="設定タブ">
+  <figcaption>図 16　設定タブ（左＝上半分、右＝下半分）</figcaption>
+</figure>
+<table>
+  <tr><th style="width:140px">区画</th><th style="width:160px">項目</th><th style="width:80px">既定</th><th>説明</th></tr>
+  <tr><td rowspan="3">デバイス<br>（装置で計測したデータ）</td><td>掃引間隔</td><td>100 µm</td><td>撮影 1 枚ごとの移動量（行の間隔）</td></tr>
+  <tr><td>X軸 µm/pix</td><td>1.8</td><td>画像の横 1 画素あたりの深さ</td></tr>
+  <tr><td>Y軸 µm/pix</td><td>20</td><td>画像の縦 1 画素あたりの長さ（列の間隔）</td></tr>
+  <tr><td rowspan="2">CSV<br>（読み込んだデータ）</td><td>ピッチ X / Y</td><td>10 / 10</td><td>1 画素あたりの長さ。自社デバイス 10、WI5000 約 37.4、Keyence 約 32.9</td></tr>
+  <tr><td>高さの単位</td><td>µm</td><td>CSV の高さが画素のときは「画素 (px)」にする（µm/px を入れれば換算）</td></tr>
+  <tr><td>カラーレンジ</td><td>最小〜最大</td><td>空欄（自動）</td><td>色を付ける高さの範囲。範囲の外はグレー。空欄なら外れ値を除いた範囲で自動</td></tr>
+</table>
+<div class="warn">
+  <p>ピッチや µm/pix が違うと、距離・寸法・断面の長さがすべてずれます。測る前に左下のチップでピッチを確かめてください。</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s6"><span class="n">6</span>結果を読むときの注意</h2>
+<div class="key">
+  <p><b>有効率は「どの範囲で」を必ず添えてください。</b> 全体・中央50%×50%・中央面積50% で大きく違います（例: 1円玉の裏で 34% / 73% / 57%）。</p>
+</div>
+<ul>
+  <li><b>細かい粗さ（Ra・Sa が数 µm 以下）は測れません。</b> 深さの分解能に対して抽出のノイズが約 0.26 µm あるためです。面の形・うねり（数十 µm 以上）を見る用途です。</li>
+  <li><b>補った値・正解データで埋めた値は実測ではありません。</b> 精度の評価には後処理前のデータを使います。</li>
+  <li><b>欠損の多いデータほど誤差が小さく見えます。</b> 手法どうしを比べるときは、両方に値がある所だけで比べます。</li>
+  <li><b>表示は間引いています。</b> 大きなデータは見た目だけ粗くしています。断面・統計・CSV 出力は元の細かさで計算しています。</li>
+  <li>装置で計測したデータでは、<b>左右反転は深さの反転</b> です（CSV の左右反転とは意味が違います）。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s7"><span class="n">7</span>困ったとき</h2>
+<table>
+  <tr><th style="width:270px">症状</th><th>確認すること・対処</th></tr>
+  <tr><td>表示が消えた・どこかへ行った</td><td>パンや回転で画面の外へ出ただけです。ツールバーの <b>視点リセット</b>（<span class="num">9</span>）を押してください。パンを使い終わったら、パンのボタンをもう一度押して回転に戻しておきます</td></tr>
+  <tr><td>「バックエンドに接続できませんでした」と出る</td><td>バックエンド（計測を受け持つ部分）が動いていません。ターミナルで <code>start_mac.sh</code> が動いているか確かめ、止まっていれば起動し直してください（2.2）</td></tr>
+  <tr><td>ブラウザが開かない</td><td>自分で <code>http://localhost:5173</code> を開いてください</td></tr>
+  <tr><td>ターミナルに <code>404 Not Found</code> が出る</td><td>問題ありません（2.2 のメモ）</td></tr>
+  <tr><td>計測がなかなか終わらない</td><td>画像の枚数が多いと数分かかります。進み具合の工程と経過時間を見てください。やめるときは <span class="btn">中止</span></td></tr>
+  <tr><td>長さ・寸法がおかしい</td><td>ピッチ（CSV）や µm/pix（デバイス）の設定を確かめてください（5章）。左下のチップに今の値が出ています</td></tr>
+  <tr><td>寸法・断層のボタンが押せない</td><td>2D 表示で、高さマップがあるデータのときに使えます。点群形式 CSV では使えません</td></tr>
+  <tr><td>後処理の区画が出ない</td><td>高さマップが無いデータ（点群形式 CSV）では出ません</td></tr>
+  <tr><td>three.js で回転が 2 種類とも同じ</td><td>three.js では「ターンテーブル」と「自由回転」は同じ動きです</td></tr>
+  <tr><td>測定履歴が消えた</td><td>履歴はブラウザごとの保存です。別のブラウザ・別の PC、またはブラウザのデータを消すと見えなくなります。残したい結果は CSV で書き出してください</td></tr>
+  <tr><td>「未保存（この回だけ）」と出る</td><td>ブラウザの保存容量が足りません。測定結果タブで古い履歴を削除してください</td></tr>
+  <tr><td>画面が重い</td><td>エンジンを three.js にすると軽くなります。後処理や断層の帯は計算に少し時間がかかります</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="s8"><span class="n">8</span>付録</h2>
+
+<h3><span class="n">8.1</span>用語</h3>
+<table>
+  <tr><th style="width:150px">用語</th><th>意味</th></tr>
+  <tr><td>掃引</td><td>光学系を少しずつ動かしながら連続で撮影すること。撮影 1 枚が高さマップの 1 行になる</td></tr>
+  <tr><td>干渉縞（縞）</td><td>光の干渉で明るくなる線。縞の横位置がその点の深さを表す</td></tr>
+  <tr><td>高さマップ</td><td>行 × 列 のマス目に高さを入れたもの。値の無いマス（欠損）を含む</td></tr>
+  <tr><td>点群</td><td>高さマップの各点を 3 次元の点として並べたもの</td></tr>
+  <tr><td>有効率</td><td>値のある画素の割合</td></tr>
+  <tr><td>ピッチ</td><td>1 画素あたりの長さ（µm）</td></tr>
+  <tr><td>外れ値</td><td>周りから大きく飛び出た値（計測の失敗であることが多い）</td></tr>
+  <tr><td>σ（シグマ）</td><td>ばらつきの大きさの単位。3σ は「ばらつきの 3 倍より外れたら外れ値」という意味</td></tr>
+  <tr><td>マスク</td><td>画像の中で縞の画素だけを白にした画像（AI の出力）</td></tr>
+  <tr><td>Sq / Sa</td><td>面の凹凸の大きさ（二乗平均平方根 / 平均絶対値）</td></tr>
+  <tr><td>P10 / P90</td><td>小さいほうから 10% / 90% の位置の値</td></tr>
+</table>
+
+<h3><span class="n">8.2</span>データの置き場所</h3>
+<table>
+  <tr><th style="width:220px">フォルダ</th><th>中身</th></tr>
+  <tr><td><code>data/row_data/</code></td><td>計測する撮影画像（<code>img_001.png</code> など）</td></tr>
+  <tr><td><code>data/result/</code></td><td>計測開始（画像処理）の結果</td></tr>
+  <tr><td><code>data/mask_result/</code></td><td>AI 計測の結果（<span class="btn">マスク</span> で開く）</td></tr>
+</table>
+
+<h3><span class="n">8.3</span>改版履歴</h3>
+<table>
+  <tr><th style="width:80px">版</th><th style="width:110px">日付</th><th>内容</th></tr>
+  <tr><td>第1版</td><td>2026-10-24</td><td>初版</td></tr>
+</table>
+
+<footer>
+  Tori-Ton UI ユーザーマニュアル ／ 第1版 2026-10-24<br>
+  画面写真は 10円玉の高さマップ CSV で撮影。画面の仕様の正本は <code>docs/UI仕様書.md</code>。画面を変えたら、このマニュアルも同じ PR で直してください
+</footer>
+
+</div>
+</body>
+</html>
