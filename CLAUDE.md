@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 光学デバイスから取得した3次元面形状をブラウザで可視化するWebアプリケーション。React + TypeScript のフロントエンドと、FastAPI の WebSocket バックエンドで構成。
 
-画面の仕様・データの単位・読み方の注意・既知の制約は `docs/UI仕様書.md`（新しく入った人向けの入口）。画面や仕様を変えたら同じ PR で更新する。
+画面の仕様・データの単位・読み方の注意・既知の制約は `docs/UI仕様書.md`（新しく入った人向けの入口）。使う人向けの操作ガイドは `docs/manual/user_manual.html`（画面写真は `docs/manual/images/`）。画面や仕様を変えたら、どちらも同じ PR で更新する。
 
 ## 開発コマンド
 
